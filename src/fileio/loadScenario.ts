@@ -7,7 +7,9 @@
 
 import { Scenario } from '../data/scenario';
 import { SpecType } from '../data/special';
+import { readItemsFromXml } from './itemsXml';
 import { loadMap } from './mapParse';
+import { readMonstersFromXml } from './monstersXml';
 import { loadOutMapData, readOutdoorsFromXml } from './outdoorsXml';
 import { buildOpcodeTable, parseSpecials } from './specialParse';
 import { emptyScenario, readScenarioFromXml } from './scenarioXml';
@@ -26,6 +28,12 @@ export async function loadScenario(
 
   scen.terTypes = readTerrainFromXml(
     await parseXmlDoc(await src.getText('terrain.xml'), 'terrain.xml'),
+  );
+  scen.scenItems = readItemsFromXml(
+    await parseXmlDoc(await src.getText('items.xml'), 'items.xml'),
+  );
+  scen.scenMonsters = readMonstersFromXml(
+    await parseXmlDoc(await src.getText('monsters.xml'), 'monsters.xml'),
   );
   scen.scenSpecials = parseSpecials(await src.getText('scenario.spec'), opcodes, 'scenario.spec');
 

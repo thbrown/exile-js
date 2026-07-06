@@ -4,6 +4,8 @@
  * quests/shops with M3+.
  */
 
+import { Item } from './item';
+import { Monster } from './monster';
 import { Sector } from './outdoors';
 import { SpecialNode } from './special';
 import { Terrain } from './terrain';
@@ -20,6 +22,8 @@ export interface Scenario {
   outdoorStart: { x: number; y: number };
   sectorStart: { x: number; y: number };
   terTypes: Terrain[];
+  scenItems: Item[];
+  scenMonsters: Monster[];
   /** outdoors[x][y] — sector grid, x < outWidth, y < outHeight. */
   outdoors: Sector[][];
   scenSpecials: Map<number, SpecialNode>;

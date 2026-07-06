@@ -75,6 +75,8 @@ export function emptyScenario(hdr: ScenarioHeader): Scenario {
   return {
     ...hdr,
     terTypes: [],
+    scenItems: [],
+    scenMonsters: [],
     outdoors: [],
     scenSpecials: new Map(),
   };

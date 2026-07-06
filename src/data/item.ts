@@ -1,0 +1,201 @@
+/**
+ * Item data — cItem from ../exile-wasm/src/scenario/item.hpp with enums
+ * from item_variety.hpp / item_abilities.hpp. Defaults match cItem()
+ * (item.cpp:206).
+ */
+
+export enum ItemType {
+  NO_ITEM = 0,
+  ONE_HANDED = 1,
+  TWO_HANDED = 2,
+  GOLD = 3,
+  BOW = 4,
+  ARROW = 5,
+  THROWN_MISSILE = 6,
+  POTION = 7,
+  SCROLL = 8,
+  WAND = 9,
+  TOOL = 10,
+  FOOD = 11,
+  SHIELD = 12,
+  ARMOR = 13,
+  HELM = 14,
+  GLOVES = 15,
+  SHIELD_2 = 16,
+  BOOTS = 17,
+  RING = 18,
+  NECKLACE = 19,
+  WEAPON_POISON = 20,
+  NON_USE_OBJECT = 21,
+  PANTS = 22,
+  CROSSBOW = 23,
+  BOLTS = 24,
+  MISSILE_NO_AMMO = 25,
+  SPECIAL = 26,
+  QUEST = 27,
+}
+
+export enum ItemUse {
+  HELP_ONE = 0,
+  HARM_ONE = 1,
+  HELP_ALL = 2,
+  HARM_ALL = 3,
+}
+
+// eItemAbil — only the values; names match the C++ enum (item_abilities.hpp)
+export enum ItemAbil {
+  NONE = 0,
+  DAMAGING_WEAPON = 1,
+  SLAYER_WEAPON = 2,
+  HEALING_WEAPON = 3,
+  EXPLODING_WEAPON = 4,
+  RETURNING_MISSILE = 5,
+  DISTANCE_MISSILE = 6,
+  SEEKING_MISSILE = 7,
+  ANTIMAGIC_WEAPON = 8,
+  STATUS_WEAPON = 9,
+  SOULSUCKER = 10,
+  WEAK_WEAPON = 12,
+  CAUSES_FEAR = 13,
+  WEAPON_CALL_SPECIAL = 14,
+  HP_DAMAGE = 15,
+  HP_DAMAGE_REVERSE = 16,
+  SP_DAMAGE = 17,
+  SP_DAMAGE_REVERSE = 18,
+  DAMAGE_PROTECTION = 30,
+  FULL_PROTECTION = 31,
+  MAGERY = 32,
+  EVASION = 33,
+  MARTYRS_SHIELD = 34,
+  ENCUMBERING = 35,
+  STATUS_PROTECTION = 36,
+  SKILL = 37,
+  BOOST_STAT = 38,
+  BOOST_WAR = 39,
+  BOOST_MAGIC = 40,
+  ACCURACY = 41,
+  THIEVING = 42,
+  GIANT_STRENGTH = 43,
+  LIGHTER_OBJECT = 44,
+  HEAVIER_OBJECT = 45,
+  OCCASIONAL_STATUS = 46,
+  HIT_CALL_SPECIAL = 47,
+  LIFE_SAVING = 48,
+  PROTECT_FROM_PETRIFY = 49,
+  REGENERATE = 50,
+  POISON_AUGMENT = 51,
+  RADIANT = 52,
+  WILL = 53,
+  FREE_ACTION = 54,
+  SPEED = 55,
+  SLOW_WEARER = 56,
+  PROTECT_FROM_SPECIES = 57,
+  LOCKPICKS = 58,
+  DRAIN_MISSILES = 59,
+  DROP_CALL_SPECIAL = 60,
+  POISON_WEAPON = 70,
+  AFFECT_STATUS = 71,
+  CAST_SPELL = 72,
+  BLISS_DOOM = 73,
+  AFFECT_EXPERIENCE = 74,
+  AFFECT_SKILL_POINTS = 75,
+  AFFECT_HEALTH = 76,
+  AFFECT_SPELL_POINTS = 77,
+  LIGHT = 78,
+  AFFECT_PARTY_STATUS = 79,
+  HEALTH_POISON = 80,
+  CALL_SPECIAL = 81,
+  SUMMONING = 82,
+  MASS_SUMMONING = 83,
+  QUICKFIRE = 84,
+  MESSAGE = 85,
+  HOLLY = 150,
+  COMFREY = 151,
+  NETTLE = 152,
+  WORMGRASS = 153,
+  ASPTONGUE = 154,
+  EMBERF = 155,
+  GRAYMOLD = 156,
+  MANDRAKE = 157,
+  SAPPHIRE = 158,
+  SMOKY_CRYSTAL = 159,
+  RESURRECTION_BALM = 160,
+}
+
+export const SKILL_INVALID = -1;
+
+export interface Item {
+  variety: ItemType;
+  itemLevel: number;
+  awkward: number;
+  bonus: number;
+  protection: number;
+  charges: number;
+  maxCharges: number;
+  weapType: number; // eSkill value; SKILL_INVALID when unset
+  magicUseType: ItemUse;
+  graphicNum: number;
+  ability: ItemAbil;
+  abilStrength: number;
+  abilData: number;
+  typeFlag: number;
+  isSpecial: number;
+  value: number;
+  weight: number;
+  specialClass: number;
+  missile: number;
+  itemLoc: { x: number; y: number };
+  fullName: string;
+  name: string;
+  treasClass: number;
+  ident: boolean;
+  property: boolean;
+  magic: boolean;
+  contained: boolean;
+  held: boolean;
+  cursed: boolean;
+  concealed: boolean;
+  enchanted: boolean;
+  unsellable: boolean;
+  rechargeable: boolean;
+  desc: string;
+}
+
+export function defaultItem(): Item {
+  return {
+    variety: ItemType.NO_ITEM,
+    itemLevel: 0,
+    awkward: 0,
+    bonus: 0,
+    protection: 0,
+    charges: 0,
+    maxCharges: 0,
+    weapType: SKILL_INVALID,
+    magicUseType: ItemUse.HELP_ONE,
+    graphicNum: 0,
+    ability: ItemAbil.NONE,
+    abilStrength: 0,
+    abilData: 0,
+    typeFlag: 0,
+    isSpecial: 0,
+    value: 0,
+    weight: 0,
+    specialClass: 0,
+    missile: -1,
+    itemLoc: { x: 0, y: 0 },
+    fullName: '',
+    name: '',
+    treasClass: 0,
+    ident: false,
+    property: false,
+    magic: false,
+    contained: false,
+    held: false,
+    cursed: false,
+    concealed: false,
+    enchanted: false,
+    unsellable: false,
+    rechargeable: false,
+    desc: '',
+  };
+}
