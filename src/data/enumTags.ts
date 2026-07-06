@@ -114,6 +114,13 @@ export const monstMissiles = [
 
 export const attitudeStrs = ['docile', 'hostile-a', 'friendly', 'hostile-b'] as const;
 
+export const talkNodes = [
+  'reg', 'if-sdf', 'set-sdf', 'inn', 'if-time', 'if-event', 'if-town', 'shop', 'train', 'jobs',
+  '', '', 'recharge', 'sell-weap', 'sell-prot', 'sell-any', 'id', 'ench', 'buy-info', 'buy-sdf',
+  'buy-ship', 'buy-horse', 'buy-spec-item', 'quest', 'buy-town', 'end-force', 'end-fight',
+  'end-alarm', 'end-die', 'call-local', 'call-global',
+] as const;
+
 /**
  * readEnum: tag string → numeric enum value. Throws on unknown tags, like
  * the C++ stream operators setting failbit.

@@ -8,7 +8,9 @@ import { Item } from './item';
 import { Monster } from './monster';
 import { Sector } from './outdoors';
 import { SpecialNode } from './special';
+import { Speech } from './talking';
 import { Terrain } from './terrain';
+import { Town } from './town';
 
 export interface Scenario {
   title: string;
@@ -24,6 +26,8 @@ export interface Scenario {
   terTypes: Terrain[];
   scenItems: Item[];
   scenMonsters: Monster[];
+  towns: Town[];
+  townTalk: Speech[];
   /** outdoors[x][y] — sector grid, x < outWidth, y < outHeight. */
   outdoors: Sector[][];
   scenSpecials: Map<number, SpecialNode>;

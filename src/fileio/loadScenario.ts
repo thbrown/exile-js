@@ -15,6 +15,7 @@ import { buildOpcodeTable, parseSpecials } from './specialParse';
 import { emptyScenario, readScenarioFromXml } from './scenarioXml';
 import { ScenarioSource } from './source';
 import { readTerrainFromXml } from './terrainXml';
+import { loadTownMapData, readDialogueFromXml, readTownFromXml } from './townXml';
 import { parseXmlDoc } from './xml';
 
 export async function loadScenario(
@@ -36,6 +37,24 @@ export async function loadScenario(
     await parseXmlDoc(await src.getText('monsters.xml'), 'monsters.xml'),
   );
   scen.scenSpecials = parseSpecials(await src.getText('scenario.spec'), opcodes, 'scenario.spec');
+
+  for (let t = 0; t < scen.numTowns; t++) {
+    const base = `towns/town${t}`;
+    const town = readTownFromXml(
+      await parseXmlDoc(await src.getText(`${base}.xml`), `${base}.xml`),
+      `${base}.xml`,
+    );
+    loadTownMapData(loadMap(await src.getText(`${base}.map`), true, `${base}.map`), town, base);
+    town.specials = parseSpecials(await src.getText(`${base}.spec`), opcodes, `${base}.spec`);
+    scen.towns.push(town);
+    scen.townTalk.push(
+      readDialogueFromXml(
+        await parseXmlDoc(await src.getText(`towns/talk${t}.xml`), `talk${t}.xml`),
+        t,
+        `talk${t}.xml`,
+      ),
+    );
+  }
 
   for (let x = 0; x < scen.outWidth; x++) {
     scen.outdoors.push([]);

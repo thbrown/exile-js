@@ -77,6 +77,8 @@ export function emptyScenario(hdr: ScenarioHeader): Scenario {
     terTypes: [],
     scenItems: [],
     scenMonsters: [],
+    towns: [],
+    townTalk: [],
     outdoors: [],
     scenSpecials: new Map(),
   };
