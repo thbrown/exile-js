@@ -5,18 +5,18 @@
 
 ## Current state
 
-**M0 complete (2026-07-05). Next: M1 — scenario parsers + outdoor walkabout.**
+**M1 core complete (2026-07-06): all four scenarios parse; outdoor walkabout verified in headless Chromium. Remaining M1-adjacent: items.xml/monsters.xml parsers.**
 
-- `npm test` → 12 tests green; `npm run typecheck` clean; `npm run dev` → http://localhost:5199 shows the terrain-sheet tile demo.
-- `src/core/rng.ts`: MT19937 verified against std::mt19937 vectors (incl. the C++11-mandated 10000th output 4123659995). `GameRng` has the game/unique dual streams and a verbatim `getRan`.
-- `src/core/location.ts`: Location/Direction/Rect; direction deltas verified against `set_direction` in boe.locutils.cpp (N = y−1).
-- `src/render/sheets.ts`: calc_rect/find_graphic tile math + `SheetStore` (fetch → ImageBitmap cache).
-- `public/data/` = verbatim copy of `../exile-wasm/data` (6.2 MB).
+- `npm test` → 36 tests green; `npm run dev` → walkabout demo (arrow keys, Home/End/PgUp/PgDn for diagonals).
+- `node scripts/verify-walkabout.mjs` (needs `npx vite --port 5199` running) drives the demo headless: renders 97% non-black, sector crossing works. Playwright + chromium installed as devDependency.
+- Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
+- Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
+- M0: rng (std::mt19937-verified), location, sheets tile math, assets in `public/data`, scenarios unpacked in `public/scenarios`.
 
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
-- [ ] **M1 — Scenario loads, outdoor walkabout**: gzip+tar, XML/.map/.spec parsers, terrain view, outdoor movement
+- [x] **M1 — Scenario loads, outdoor walkabout**: XML/.map/.spec parsers, terrain view, outdoor movement (gzip+tar for packed .boes deferred to file-upload work; items/monsters XML land with M2)
 - [ ] **M2 — Towns + full 800×600 shell**: town enter/exit, UI chrome, sound, pregen party via tagfile reader, replay driver
 - [ ] **M3 — Dialog toolkit + talk + shops**
 - [ ] **M4 — Specials interpreter (breadth-first)**: VM + general/oneshot/ifthen/town groups
