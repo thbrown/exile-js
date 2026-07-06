@@ -5,7 +5,12 @@
 
 ## Current state
 
-**M1 core complete (2026-07-06): all four scenarios parse; outdoor walkabout verified in headless Chromium. Remaining M1-adjacent: items.xml/monsters.xml parsers.**
+**M1 complete (2026-07-06): all four scenarios fully parse (incl. items.xml/monsters.xml); outdoor walkabout verified in headless Chromium. Next: M2 — town XML/map/talk parsing, town enter/exit, full 800×600 UI shell, sound, pregen party via tagfile reader, replay driver.**
+
+Notes for M2 implementer:
+- Monster abilities are captured as lossless `RawAbility` records (monster.ts) — port uAbility union semantics at M5, reference readMonstAbilFromXml (fileio_scen.cpp:1425).
+- Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
+- scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
 - `npm test` → 36 tests green; `npm run dev` → walkabout demo (arrow keys, Home/End/PgUp/PgDn for diagonals).
 - `node scripts/verify-walkabout.mjs` (needs `npx vite --port 5199` running) drives the demo headless: renders 97% non-black, sector crossing works. Playwright + chromium installed as devDependency.
