@@ -5,7 +5,13 @@
 
 ## Current state
 
-**M1 complete (2026-07-06): all four scenarios fully parse (incl. items.xml/monsters.xml); outdoor walkabout verified in headless Chromium. Next: M2 — town XML/map/talk parsing, town enter/exit, full 800×600 UI shell, sound, pregen party via tagfile reader, replay driver.**
+**M2 in progress (2026-07-06): town/talk parsing done; town enter/exit + NPC rendering working and verified headless. Remaining M2: full 800×600 UI shell (boe.ui.cpp layout), sound, pregen party via tagfile reader, replay driver, proper GameSession/mode architecture (demo logic currently lives in src/main.ts).**
+
+M2 landed so far:
+- Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
+- Monster graphics: `render/mPicIndex.ts` (mechanically extracted m_pic_index table) + `render/monsterPics.ts` (get_monster_template_rect port: sheet monst{1+(i+part)/20}, col 2*(idx/10)+adj, adj=1 for default pose).
+- Demo (`src/main.ts`): outdoors↔town transitions — walk onto a city loc to enter (start_locs by travel direction: N→south entrance etc.), step past inTownRect to leave. NPCs drawn (ALWAYS-time only).
+- Headless verification: `scripts/verify-town.mjs` + `verify-walkabout.mjs` (start vite on :5199 first). `window.__demo`/`__scen` exposed for driving.
 
 Notes for M2 implementer:
 - Monster abilities are captured as lossless `RawAbility` records (monster.ts) — port uAbility union semantics at M5, reference readMonstAbilFromXml (fileio_scen.cpp:1425).
