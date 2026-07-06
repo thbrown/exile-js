@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+# Exile 3 game data is commercial and user-supplied — never commit it
+e3data/

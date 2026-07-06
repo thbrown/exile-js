@@ -1,0 +1,84 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<!-- NOTE: This file should be updated to use relative positioning the next time it changes. -->
+<?xml-stylesheet href="dialog.xsl" type="text/xsl"?>
+<dialog escbtn='cancel'>
+	<text size='large' top='9' left='130' width='126' height='17'>Start a Scenario:</text>
+	<stack name='list'>
+		<page>
+			<!-- Prefab scenarios -->
+			<pict type='scen' size='large' num='0' top='42' left='10'/>
+			<text framed='true' top='34' left='81' width='292' height='80'>
+				The Valley of Dying Things
+				- Easy Difficulty<br/>
+				The crops have withered, the children are dying, and even the water burns.
+				Can you find the source of the sickness before the entire valley dies?
+			</text>
+			<text name='scen1' top='33' left='11' width='367' height='81'/>
+			<pict type='scen' size='large' num='1' top='129' left='10'/>
+			<text framed='true' top='121' left='81' width='292' height='80'>
+				A Small Rebellion
+				- Medium Difficulty<br/>
+				The enemy - a secret band of deadly rebels.
+				The job - infiltrate them, win their trust, and find their leader.
+				The question - are you fighting on the right side?
+			</text>
+			<text name='scen2' top='121' left='10' width='368' height='80'/>
+			<pict type='scen' size='large' num='2' top='216' left='10'/>
+			<text framed='true' top='208' left='81' width='292' height='80'>
+				The Za-Khazi Run
+				- Hard Difficulty<br/>
+				A fortress is under siege, and only you can get them the weapons they need to survive.
+				You have 20 days to find your way through the nastiest caves in Exile, or all will be lost.
+			</text>
+			<text name='scen3' top='208' left='10' width='368' height='80'/>
+		</page>
+		<page default='true' template='scenarios'>
+			<!-- Custom scenarios -->
+			<pict type='dlog' num='16' top='10' left='10'/>
+			<pict name='pic1' type='scen' num='0' top='58' left='62'/>
+			<text name='desc1' framed='true' top='34' left='104' width='292' height='80'/>
+			<text outline='double' name='start1' top='32' left='59' width='342' height='84'/>
+			<pict name='pic2' type='scen' num='0' top='145' left='62'/>
+			<text name='desc2' framed='true' top='121' left='104' width='292' height='80'/>
+			<text outline='double' name='start2' top='118' left='59' width='342' height='84'/>
+			<pict name='pic3' type='scen' num='0' top='232' left='62'/>
+			<text name='desc3' framed='true' top='208' left='104' width='292' height='80'/>
+			<text outline='double' name='start3' top='205' left='59' width='342' height='84'/>
+		</page>
+	</stack>
+
+	<button name='core' def-key='0' type='tiny' top='294' left='5'>Core</button>
+	<text name='custom' relative='pos neg' size='large' rel-anchor='prev' left='5' top='2'>Custom:</text>
+	<button name='a' def-key='a' type='tiny' relative='pos pos-in' rel-anchor='prev' top='2' left='3'>A</button>
+	<button name='b' def-key='b' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>B</button>
+	<button name='c' def-key='c' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>C</button>
+	<button name='d' def-key='d' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>D</button>
+	<button name='e' def-key='e' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>E</button>
+	<button name='f' def-key='f' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>F</button>
+	<button name='g' def-key='g' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>G</button>
+	<button name='h' def-key='h' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>H</button>
+	<button name='i' def-key='i' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>I</button>
+	<button name='j' def-key='j' type='tiny' relative='pos-in pos' anchor='a' top='2' left='0'>J</button>
+	<button name='k' def-key='k' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>K</button>
+	<button name='l' def-key='l' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>L</button>
+	<button name='m' def-key='m' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>M</button>
+	<button name='n' def-key='n' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>N</button>
+	<button name='o' def-key='o' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>O</button>
+	<button name='p' def-key='p' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>P</button>
+	<button name='q' def-key='q' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>Q</button>
+	<button name='r' def-key='r' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>R</button>
+	<button name='s' def-key='s' type='tiny' relative='pos-in pos' anchor='j' top='2' left='0'>S</button>
+	<button name='t' def-key='t' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>T</button>
+	<button name='u' def-key='u' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>U</button>
+	<button name='v' def-key='v' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>V</button>
+	<button name='w' def-key='w' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>W</button>
+	<button name='x' def-key='x' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>X</button>
+	<button name='y' def-key='y' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>Y</button>
+	<button name='z' def-key='z' type='tiny' relative='pos pos-in' rel-anchor='prev' top='0' left='4'>Z</button>
+
+	<button name='cancel' type='regular' top='330' left='5'>Cancel</button>
+	<button name='prev' type='left' def-key='left' relative='pos pos-in' rel-anchor='prev' top='0' left='14'/>
+	<button name='next' type='right' def-key='right' relative='pos pos-in' rel-anchor='prev' top='0' left='0'/>
+	<button name='folder' type='large' relative='pos pos-in' rel-anchor='prev' top='0' left='14'>Show Folder</button>
+	<button name='refresh' type='regular' relative='pos pos-in' rel-anchor='prev' top='0' left='7'>Refresh</button>
+</dialog>

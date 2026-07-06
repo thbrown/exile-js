@@ -1,0 +1,527 @@
+Stuff Done Flag?
+Stuff Done Flag Part A
+Stuff Done Flag Part B
+Unused
+Unused
+Unused
+Unused
+Unused
+If at least this value ...
+Call this special ...
+Unused
+If less than this ...
+Call this special ...
+Unused
+Otherwise call this special
+Calls new nodes depending on the value of a given Stuff Done flag. If the Stuff Done flag is greater than the value of Extra 1a, the special in Extra 1b is called. Otherwise, if the Stuff Done flag is less than the value in Extra 2a, the special in Extra 2b is called. If neither case applies, the Jump To special is called.
+--------------------
+Town Number?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If in this town ...
+Call this special ...
+Unused
+Unused
+Unused
+Unused
+Otherwise call this special
+Result depends on the town the party is in.
+--------------------
+Random Number?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If random # (1 - 100) less than ...
+Call this special ...
+Unused
+Unused
+Unused
+Unused
+Otherwise call this special
+Result depends on a randomly generated number. The game will pick a random number from 1 to 100.
+--------------------
+Have Special Item?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If has spec. item ...
+Call this special ...
+Unused
+Unused
+Unused
+Unused
+Otherwise call this special
+Result depends on whether the party has a certain special item.
+--------------------
+Stuff Done Compare?
+Stuff Done Flag Part A
+Stuff Done Flag Part B
+Unused
+Unused
+Unused
+Unused
+Unused
+Stuff Done flag 2 Part A
+Stuff Done flag 2 Part B
+Unused
+Unused
+Call this special if 2nd flag lower ...
+Unused
+Otherwise call this special
+Calls new nodes depending on whether one Stuff Done flag is greater than another or not. If the first Stuff Done flag is greater than or equal to the second, the special in Extra 2b is called. Otherwise, the Jump To special is called.
+--------------------
+Terrain this type?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+X coordinate of space
+Y coordinate of space
+Unused
+If space is this terrain type ...
+Call this special ...
+Unused
+Otherwise call this special
+Result depends on whether a specified spot is of a given terrain type.
+--------------------
+Is Alive?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If PC has this status ... (-1 = alive)
+Call this special ...
+Unused
+Unused
+Unused
+Unused
+Otherwise call this special
+Result depends on whether the currently selected target is alive.
+--------------------
+Has gold?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If party has this much gold ...
+Call this special ...
+Unused
+Take gold?
+Unused
+Unused
+Otherwise call this special
+Result depends on whether the party has enough gold.
+--------------------
+Has food?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If party has this much food ...
+Call this special ...
+Unused
+Take food?
+Unused
+Unused
+Otherwise call this special
+Result depends on whether the party has enough food.
+--------------------
+Item Class on Space?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+X coordinate of space
+Y coordinate of space
+Unused
+If item of this class on space ...
+Call this special ...
+Take item?
+Otherwise call this special
+Result depends on whether an item of a given special item class is sitting on a specified spot in town.
+--------------------
+Have Item With Class?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If has item of this special class ...
+Call this special ...
+Unused
+Take item?
+Unused
+Unused
+Otherwise call this special
+Result depends on whether a PC owns an item with the specified Special Class.
+--------------------
+Equipped Item With Class?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If has equipped item of this special ...
+Call this special ...
+Unused
+Take item?
+Unused
+Unused
+Otherwise call this special
+Result depends on whether a PC owns an item with the specified Special Class, which is currently equipped.
+--------------------
+Has Mage Spell?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If selected PC knows this mage spell ...
+Call this special ...
+Unused
+Unused
+Unused
+Unused
+Otherwise call this special
+If the selected PC knows this mage spell, the special in Extra 1b is called.
+--------------------
+Has Priest Spell?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If selected PC knows this priest spell ...
+Call this special ...
+Unused
+Unused
+Unused
+Unused
+Otherwise call this special
+If the selected PC knows this priest spell, the special in Extra 1b is called.
+--------------------
+Has Alchemy?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If party knows this recipe ...
+Call this special...
+Unused
+Unused
+Unused
+Unused
+Otherwise call this special
+Result depends on whether the party knows a particular alchemical recipe.
+--------------------
+Has Status Effect?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If PC has enough of this status effect ...
+Call this special...
+Unused
+Value to compare to
+Cumulation mode (if whole party selected)
+Comparison mode
+Otherwise call this special
+Result depends on whether the selected target is afflicted with a particular status effect.
+--------------------
+If Looking?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If player is looking, call this special ...
+Unused
+Unused
+Unused
+Otherwise call this special
+Result depends on whether the special node was called while the party was looking at a space.
+--------------------
+Day Reached?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If this day has been reached ...
+Call this special ...
+Unused
+Unused
+Unused
+Unused
+Otherwise call this special
+Result depends on whether a certain day has been reached.
+--------------------
+If Fields?
+Minimum # of fields
+Maximum # of fields
+Field Type
+If enough fields, call this special ...
+Unused
+0 - entire rectangle, 1 - just borders
+Unused
+Top of rectangle
+Left of rectangle
+Unused
+Bottom of rectangle
+Right of rectangle
+Unused
+Otherwise call this special
+Result depends on the presence of fields, barriers, or similar transient objects existing in the current town.
+--------------------
+If Party Size?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Include dead characters?
+If party size sufficient, call this special ...
+Unused
+0 - Exact size, 1 - Minimum size
+Required size
+Unused
+Otherwise call this special
+Result depends on how many PCs are in the party.
+--------------------
+Special Thing Happened?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If this day has been reached ...
+And this event didn't happen before it ...
+Unused
+Unused
+Call this special ...
+Unused
+Otherwise call this special
+Result depends on whether a given day was reached before a given event happened.
+--------------------
+If Species Present?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Required species
+If enough of species, call this special ...
+Unused
+Required number of species
+Comparison method
+Unused
+Otherwise call this special
+Result depends on whether there is a living PC of a particular species.
+--------------------
+If Have Trait?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Required trait
+If enough of trait present, call this special ...
+Unused
+Required number of trait
+Comparison method
+Unused
+Otherwise call this special
+Result depends on whether a living PC has a particular trait.
+--------------------
+Has Enough of Statistic?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+If the party has this much of the stat ...
+Call this special ...
+Unused
+Which statistic
+Check mode
+Unused
+Otherwise call this special
+Result depends on whether a particular skill in the party is high enough.
+--------------------
+Text Response?
+Unused
+Unused
+Scenario string containing prompt text
+Unused
+Unused
+Number of letters to match
+Unused
+Number of a scenario string
+If answer matches, call this special ...
+Unused
+Number of a scenario string
+If answer matches, call this special ...
+Unused
+Otherwise call this special
+This is one of the most complicated and powerful special nodes. It brings up a dialog box asking the party to type in some text (such as the answer to a riddle, or a password). If the response matches one of two given text messages, a specified special node is called.
+--------------------
+Stuff Done Equal?
+Stuff Done Flag Part A
+Stuff Done Flag Part B
+Unused
+Unused
+Unused
+Unused
+Unused
+If flag has this value ...
+Call this special ...
+Unused
+Unused
+Unused
+Unused
+Otherwise call this special
+If the specified Stuff Done flag is equal to the value given in Extra 1a, the special in Extra 1b is called. Otherwise, the Jump To special is called.
+--------------------
+If Context?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Which context
+Unused|Prevent entry?|Spell being cast (-1 = any spell)
+If context matches, call this special ...
+Unused
+Unused
+Unused
+Otherwise call this special
+Result depends on how the special node was called.
+--------------------
+If Numeric Response?
+Unused
+Unused
+Scenario string containing prompt text
+Minimum allowed response
+Maximum allowed response
+Comparison Mode
+If tests 1 and 2 both pass, call this special ...
+Range lower bound|Value to compare to
+Range upper bound|Comparison method
+If test 1 passes but test 2 fails, call ...
+Range lower bound|Value to compare to
+Range upper bound|Comparison method
+If test 2 passes but test 1 fails, call ...
+Otherwise call this special
+Result depends on a number entered by the player.
+--------------------
+If In Boat?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Which boat? (-1 = any boat)
+If party in boat, call this special ...
+Unused
+Unused
+Unused
+Otherwise call this special
+Result depends whether the player is in a boat.
+--------------------
+If On Horse?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Which horse? (-1 = any horse)
+If party on horse, call this special ...
+Unused
+Unused
+Unused
+Otherwise call this special
+Result depends whether the player is on horseback.
+--------------------
+If Quest?
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Unused
+Which Quest?
+Required Quest Status?
+If quest has that status, call this special ...
+Unused
+Unused
+Unused
+Otherwise call this special
+Result depends on the status of a quest.
+--------------------

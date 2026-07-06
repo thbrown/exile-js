@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<?xml-stylesheet href="dialog.xsl" type="text/xsl"?>
+<dialog defbtn='okay' escbtn='cancel'>
+	<pict type='dlog' num='16' top='8' left='8'/>
+	<text size='large' relative='pos pos-in' rel-anchor='prev' top='0' left='4' width='218' height='16'>
+		BoE Character Editor Preferences
+	</text>
+	<led name='nosound' relative='pos-in pos' rel-anchor='prev' top='10' left='0'>No Sounds</led>
+	<text name='scale-head' size='large' relative='neg pos' rel-anchor='prev' top='17' left='10' width='260' height='17'>Scale UI:</text>
+	<group name='scaleui'>
+		<led name='1' relative='pos-in pos' anchor='scale-head' top='4' left='15'>1</led>
+		<led name='1_5' relative='pos-in pos' anchor='scale-head' top='4' left='55'>1.5</led>
+		<led name='2' relative='pos-in pos' anchor='scale-head' top='4' left='95'>2</led>
+		<led name='3' relative='pos-in pos' anchor='scale-head' top='4' left='135'>3</led>
+		<led name='4' relative='pos-in pos' anchor='scale-head' top='4' left='175'>4</led>
+		<led name='other' relative='pos-in pos' anchor='scale-head' top='4' left='215'/>
+	</group>
+	
+	<button name='okay' relative='abs pos' anchor='scale-head' type='regular' top='7' left='354'>OK</button>
+	<button name='cancel' relative='neg pos-in' anchor='okay' type='regular' top='0' left='73'>Cancel</button>
+</dialog>

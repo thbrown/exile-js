@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<?xml-stylesheet href="dialog.xsl" type="text/xsl"?>
+<dialog defbtn='okay' escbtn='cancel'>
+	<pict type='dlog' num='16' top='8' left='8'/>
+	<text name='title' size='large' rel-anchor='prev' relative='pos pos-in' top='-2' left='6' width='256' height='17'>Edit Vehicle</text>
+	
+	<text name='num-lbl' rel-anchor='prev' relative='pos-in pos' top='2' left='0' width='97' height='14'>Number</text>
+	<text name='num' rel-anchor='prev' relative='pos pos-in' top='0' left='5' width='46' height='16' framed='true'/>
+	
+	<text name='area-lbl' anchor='num-lbl' relative='pos-in pos' top='11' left='0' width='97' height='14'>Starting Area</text>
+	<text name='area' rel-anchor='prev' relative='pos pos-in' top='0' left='5' width='100' height='16' framed='true'/>
+	
+	<text name='loc-lbl' anchor='area-lbl' relative='pos-in pos' top='11' left='0' width='97' height='14'>Location</text>
+	<text name='loc' rel-anchor='prev' relative='pos pos-in' top='0' left='5' width='40' height='16'/>
+	<button name='pick-loc' rel-anchor='prev' relative='pos neg' type='regular' top='4' left='5'>Move</button>
+	
+	<text name='name-lbl' anchor='loc-lbl' relative='pos-in pos' top='11' left='0' width='97' height='14'>Name</text>
+	<field name='name' rel-anchor='prev' relative='pos pos-in' top='0' left='5' width='100' height='14'/>
+
+	<led name='owned' anchor='name-lbl' relative='pos-in pos' top='11' left='10'>Not Party Property</led>
+	
+	<button name='cancel' rel-anchor='prev' relative='neg pos' type='regular' top='15' left='10'>Cancel</button>
+	<button name='del' rel-anchor='prev' relative='pos pos-in' type='regular' top='0' left='0'>Delete</button>
+	<button name='okay' rel-anchor='prev' relative='pos pos-in' type='regular' top='0' left='100'>OK</button>
+</dialog>
