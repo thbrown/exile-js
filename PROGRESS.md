@@ -25,7 +25,7 @@
 
 ## Current state
 
-**M2 done bar two items, M3 nearly done, M4 breadth-first complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: fields overlay, replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently.**
+**M2 done bar two items, M3 nearly done, M4 breadth-first complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently.**
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -70,6 +70,7 @@ Notes for M2 implementer:
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
 - M0: rng (std::mt19937-verified), location, sheets tile math, assets in `public/data`, scenarios unpacked in `public/scenarios`.
 
+- **Fields**: `CurTown.fields` is a per-square set of `FieldType` (the C++ packs the same information into one bitfield), built from the town's preset fields; `render/fieldPics.ts` + `Screen.drawFields` port `draw_fields` (boe.graphutil.cpp:379) with its layering — decals, then things in the space, then transient walls and clouds, then the special-encounter marker last. Webs/barriers/crates feed `sight_obscurity`, force barriers and cages stop movement, and `RECT_PLACE_FIELD` / `IF_FIELDS` work.
 - **Specials VM (M4)**: `game/specials/` — `context.ts` (SpecCtx/SpecCtxType/SpecCat verbatim, the host interface), `vm.ts` (run_special: pointer resolution, the reserved 10/11/12 pointers, one-chain-at-a-time queueing, handle_message), then one file per opcode group mirroring the C++ sections: `general.ts`, `ifthen.ts`, `oneshot.ts`, `town.ts`, `rect.ts`, `outdoor.ts`, `affect.ts`. Every handler is `async` — the C++ blocks on a dialog and we `await` the host instead, which is PLAN.md §2.3's ASYNCIFY replacement applied to scripting.
   - **Movement is async because of this.** `session.move`/`moveTo` return promises: a square's special can put a dialog up before deciding whether the step goes through.
   - The host (`main.ts`) supplies message/choice/askText/selectPc/startShop/startTalk/sound/rest/moveParty/changeLevel/endScenario. `DialogHost.runQueued` serialises dialogs so a chain can show several in a row.
@@ -79,7 +80,7 @@ Notes for M2 implementer:
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
 - [x] **M1 — Scenario loads, outdoor walkabout**: XML/.map/.spec parsers, terrain view, outdoor movement (gzip+tar for packed .boes deferred to file-upload work; items/monsters XML land with M2)
-- [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅; inventory panel, fields overlay, replay driver still open
+- [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅, inventory panel ✅, fields overlay ✅; replay driver still open
 - [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅, shops ✅, sell/identify/recharge ✅, training ✅, inns ✅; item Use, enchanting, and full dialogxml still open
 - [x] **M4 — Specials interpreter (breadth-first)**: VM core (pointers, queueing, messages) + all seven opcode groups; triggers wired for movement, look, town entry/exit, use-space, call-special terrain and the two talk nodes. Opcodes needing combat/fields/timers/quests report themselves and wait for M5/M6.
 - [ ] **M5 — Combat** (M5a melee, M5b missiles+AI, M5c spells)
@@ -154,15 +155,16 @@ Suggested order:
 4. **Preserve the `get_ran` call order.** This is the fidelity constraint that
    makes replays possible, and combat is where it matters most. The RNG is
    already bit-compatible; the sequence is the part a port loses.
-5. **Fields come with M5c** and are also M2's last visual gap (`draw_fields`),
-   so the overlay and the field model land together.
+5. **Fields already exist** — the model, the overlay and the two field opcodes
+   landed with M4. What M5c adds is the *behaviour*: damage on entry, quickfire
+   spreading, webs slowing, and the spell patterns that place them.
 
 Once combat exists, these open up almost for free: the specials VM's DAMAGE /
 AFFECT_MONST / spell-pattern opcodes, `ONCE_TRAP` and the encounter nodes,
 item Use, and the enchanting service (which just needs `eEnchant`).
 
 Smaller things outstanding, all independent of M5:
-- **Fields overlay** (`draw_fields`) and the **replay driver** are M2 leftovers.
+- **The replay driver** is M2's last leftover (`test/replays` in exile-wasm).
 - **Training's dialog** works but is a list, not the original's stepper grid;
   replace it when dialogxml grows steppers. Rules are all in `game/training.ts`.
 - **`askForText`** still uses `window.prompt` — needs a canvas text field.
