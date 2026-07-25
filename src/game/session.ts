@@ -39,6 +39,7 @@ import { Universe } from '../universe/universe';
 import { GameMode, PreModes, isOut, isTown } from './modes';
 import { bashDoor as bashDoorAt, pickLock as pickLockAt } from './doors';
 import { TalkAction, TalkState } from './talk';
+import { SpecType } from '../data/special';
 import { SpecCtx, SpecCtxType, SpecialHost } from './specials/context';
 import { SpecialsEngine } from './specials/vm';
 
@@ -193,7 +194,9 @@ export class GameSession {
     const special = this.specialAt(destination);
     if (special >= 0) {
       const { blocked } = await this.runSpecial(
-        SpecCtx.OUT_MOVE, SpecCtxType.OUTDOOR, special, destination);
+        SpecCtx.OUT_MOVE, SpecCtxType.OUTDOOR, special,
+        // The chain sees sector coordinates, as check_special_terrain passes.
+        this.univ.party.globalToLocal(destination));
       if (blocked) return false;
     }
 
@@ -344,9 +347,14 @@ export class GameSession {
     if (special >= 0) {
       const terSpec = this.univ.terrainType(
         town.record.terrain[destination.x]![destination.y]!).special;
+      // A CANT_ENTER node with ex2a set says "run me even on a blocked
+      // square" — that's how a scenario explains a wall you can't pass.
+      const node = town.record.specials.get(special);
+      const forceAllowed = node?.type === SpecType.CANT_ENTER && node.ex2a > 0;
       const runIt = !blockedTerrain
         || terSpec === TerSpec.CHANGE_WHEN_STEP_ON
-        || terSpec === TerSpec.CALL_SPECIAL;
+        || terSpec === TerSpec.CALL_SPECIAL
+        || forceAllowed;
       if (runIt) {
         const { blocked, forced } = await this.runSpecial(
           SpecCtx.TOWN_MOVE, SpecCtxType.TOWN, special, destination);
@@ -647,9 +655,8 @@ export class GameSession {
         if (loc.x === where.x && loc.y === where.y) return loc.spec;
       return -1;
     }
-    // Outdoors the spots are indexed in sector coordinates.
+    // Outdoors the list is in sector coordinates, and there's no flag gate.
     const local = this.univ.party.globalToLocal(where);
-    if (!this.univ.out.isSpot(where.x, where.y)) return -1;
     for (const loc of this.univ.out.sectorAt(where).specialLocs)
       if (loc.x === local.x && loc.y === local.y) return loc.spec;
     return -1;

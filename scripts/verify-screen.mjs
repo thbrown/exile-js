@@ -382,21 +382,35 @@ await page.waitForTimeout(150);
 
 /**
  * Walk toward a target, sidestepping when creatures or walls block, until the
- * predicate holds or we run out of steps. Runs in-page so a step is one call.
+ * predicate holds or we run out of steps.
+ *
+ * A step can now trigger a special, which opens a dialog and leaves the move
+ * awaiting an answer — and nothing inside a page.evaluate can answer it. So each
+ * step races a short timer: if it stalls, the loop hands control back, the
+ * driver presses Enter out here, and the pending move finishes on its own.
  */
-const walkUntil = (goal, limit = 400) =>
+const walkChunk = (goal, limit) =>
   page.evaluate(
     async ({ goal, limit }) => {
       const s = window.__session;
       const done = () => (goal === 'outdoors' ? !s.inTown : s.inTown);
+      const STALLED = Symbol('stalled');
+      // A move that opens a dialog never settles until someone answers it.
+      const step = (d) => Promise.race([
+        s.move(d),
+        new Promise((r) => setTimeout(() => r(STALLED), 400)),
+      ]);
       // Direction enum: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
       const order = { south: [4, 3, 5, 2, 6], north: [0, 1, 7, 2, 6] };
       const dirs = order[goal === 'outdoors' ? 'south' : 'north'];
       let steps = 0;
       while (!done() && steps < limit) {
+        if (window.__dialogs.active) return { steps, done: done(), waiting: true };
         let moved = false;
         for (const d of dirs) {
-          if (await s.move(d)) {
+          const result = await step(d);
+          if (result === STALLED) return { steps, done: done(), waiting: true };
+          if (result) {
             moved = true;
             break;
           }
@@ -405,20 +419,52 @@ const walkUntil = (goal, limit = 400) =>
         steps++;
         if (!moved && !done()) {
           // Fully boxed in: nudge sideways and keep trying.
-          if (!await s.move(2) && !await s.move(6)) break;
+          const a = await step(2);
+          if (a === STALLED) return { steps, done: done(), waiting: true };
+          if (!a) {
+            const b = await step(6);
+            if (b === STALLED) return { steps, done: done(), waiting: true };
+            if (!b) break;
+          }
         }
       }
       window.__redraw();
-      return { steps, done: done() };
+      return { steps, done: done(), waiting: !!window.__dialogs.active };
     },
     { goal, limit },
   );
 
+const walkUntil = async (goal, limit = 400) => {
+  let steps = 0;
+  let done = false;
+  let dismissed = 0;
+  for (let round = 0; round < 40 && steps < limit; round++) {
+    const chunk = await walkChunk(goal, limit - steps);
+    steps += chunk.steps;
+    done = chunk.done;
+    if (done) break;
+    if (!chunk.waiting) break;
+    // Answer whatever the step raised, then carry on.
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(120);
+    dismissed++;
+  }
+  return { steps, done, dismissed };
+};
+
 // 3. Walking to the town edge should drop the party onto the world map. The
 //    probes above wandered the party deep into the fort, so start over from a
 //    fresh entry first.
+//
+//    Scripting is detached for this phase: this section tests the town/outdoor
+//    transition, and a blind 400-step walk through Fort Talrus otherwise spends
+//    its time answering the fort's own specials (the bedroom's "Rest?", the
+//    trapdoor, and so on) rather than walking. The VM has its own coverage
+//    above and in test/specials.test.ts.
 await page.evaluate(async () => {
   const s = window.__session;
+  s.__specialsOff = s.specials;
+  s.specials = null;
   s.startTownMode(s.univ.scenario.startTown, 9);
   window.__redraw();
 });
@@ -482,6 +528,10 @@ const reenter = await page.evaluate(async () => {
   return null;
 });
 console.log('RE-ENTERED:', JSON.stringify(reenter));
+await page.evaluate(() => {
+  const s = window.__session;
+  if (s.__specialsOff) s.specials = s.__specialsOff;
+});
 await page.waitForTimeout(300);
 await shot('03-town-again');
 

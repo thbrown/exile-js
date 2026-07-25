@@ -56,9 +56,14 @@ export class CurTown {
     if (this.isOnMap(x, y)) this.explored[x]![y] = 1;
   }
 
-  /** Whether a square carries a special-encounter marker. */
+  /**
+   * cCurTown::is_special (universe.cpp:301) — note this scans the town's
+   * special_locs list, *not* the SPECIAL_SPOT field flag. The flag only
+   * controls the white marker the map draws; the list is what actually runs.
+   */
   isSpecialSpot(x: number, y: number): boolean {
-    return this.isOnMap(x, y) && this.specialSpots[x]![y]! !== 0;
+    if (!this.isOnMap(x, y)) return false;
+    return this.record.specialLocs.some((l) => l.x === x && l.y === y && l.spec >= 0);
   }
 
   /** take_explored — put the fog back over a square. */
