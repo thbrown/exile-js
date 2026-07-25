@@ -33,6 +33,7 @@ export interface Scenario {
   outdoors: Sector[][];
   scenSpecials: Map<number, SpecialNode>;
   shops: Shop[];
+  initSpec: number;
   specStrs: string[];
   storeItemRects: Map<number, { top: number; left: number; bottom: number; right: number }>;
 }

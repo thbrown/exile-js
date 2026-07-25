@@ -42,6 +42,7 @@ import { TalkAction, TalkState } from './talk';
 import { SpecType } from '../data/special';
 import { SpecCtx, SpecCtxType, SpecialHost } from './specials/context';
 import { SpecialsEngine } from './specials/vm';
+import { alterSpace } from './specials/general';
 
 /** set_direction (boe.locutils.cpp) — direction from one point toward another. */
 function setDirection(from: Location, to: Location): Direction {
@@ -107,6 +108,9 @@ export class GameSession {
   startNewGame(): void {
     this.univ.addStringToBuf(`Welcome to ${this.univ.scenario.title}.`);
     this.startTownMode(this.univ.scenario.startTown, FORCED_ENTRY);
+    // put_party_in_scen runs the scenario's on-init node last (boe.party.cpp:238).
+    void this.runSpecial(
+      SpecCtx.STARTUP, SpecCtxType.SCEN, this.univ.scenario.initSpec, loc(0, 0));
   }
 
   private get preModes(): PreModes {
@@ -382,6 +386,47 @@ export class GameSession {
     town.makeExplored(destination.x, destination.y);
     this.updateExplored(this.univ.party.townLoc);
     return true;
+  }
+
+  // -------------------------------------------------------------------- use
+
+  /**
+   * use_space (boe.specials.cpp:1211) — the Use action on an adjacent square.
+   * A "change when used" terrain flips to its counterpart; a "call special when
+   * used" one runs a chain. Returns false when there's nothing to use.
+   */
+  async useSpace(where: Location): Promise<boolean> {
+    const from = this.inTown ? this.univ.party.townLoc : this.univ.party.outLoc;
+    if (dist(from, where) > 1) {
+      this.univ.addStringToBuf('  That is too far away.');
+      return false;
+    }
+    const ter = this.inTown
+      ? this.univ.town?.record.terrain[where.x]?.[where.y]
+      : this.univ.out.at(where.x, where.y);
+    if (ter === undefined) return false;
+    const info = this.univ.terrainType(ter);
+
+    if (info.special === TerSpec.CHANGE_WHEN_USED) {
+      if (where.x === from.x && where.y === from.y) {
+        this.univ.addStringToBuf('  Not while on space.');
+        return false;
+      }
+      this.univ.addStringToBuf('  OK.');
+      alterSpace(this.univ, where.x, where.y, info.flag1);
+      if (info.flag2 >= 0) this.sound?.play(info.flag2);
+      return true;
+    }
+    if (info.special === TerSpec.CALL_SPECIAL_WHEN_USED) {
+      // flag2 picks which node list flag1 indexes: 1 means the local one.
+      const type = info.flag2 === 1
+        ? (this.inTown ? SpecCtxType.TOWN : SpecCtxType.OUTDOOR)
+        : SpecCtxType.SCEN;
+      await this.runSpecial(SpecCtx.USE_SPACE, type, info.flag1, where);
+      return true;
+    }
+    this.univ.addStringToBuf('  Nothing to use.');
+    return false;
   }
 
   // ------------------------------------------------------------------- look

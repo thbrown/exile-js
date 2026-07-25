@@ -372,7 +372,7 @@ async function main(): Promise<void> {
   canvas.addEventListener('mousedown', wakeSound, { once: true });
 
   /** What the next direction or view click should do instead of moving. */
-  let pending: 'talk' | 'look' | null = null;
+  let pending: 'talk' | 'look' | 'use' | null = null;
 
   const setStatus = (): void => {
     if (session.shop)
@@ -380,10 +380,13 @@ async function main(): Promise<void> {
     else if (session.talk) status.textContent = 'Click a highlighted word, or Done to stop talking.';
     else if (pending === 'talk') status.textContent = 'Talk to whom? (pick a direction)';
     else if (pending === 'look') status.textContent = 'Look where? (pick a direction)';
+    else if (pending === 'use') status.textContent = 'Use what? (pick a direction)';
     else
       status.textContent =
         `${scen.title} — arrows to move, L look` +
-        (session.inTown ? ', T talk, G get items, 1-6 whose pack to show.' : ', 1-6 whose pack to show.');
+        (session.inTown
+          ? ', T talk, U use, G get items, 1-6 whose pack to show.'
+          : ', U use, 1-6 whose pack to show.');
   };
 
   /** Follow a conversation choice, prompting for a topic when it's "Ask About". */
@@ -444,6 +447,7 @@ async function main(): Promise<void> {
     pending = null;
     if (what === 'talk') session.talkTo(target);
     else if (what === 'look') lookAt(target);
+    else if (what === 'use') void session.useSpace(target).then(() => { setStatus(); redraw(); });
     else void session.moveTo(target).then(() => { setStatus(); redraw(); });
   };
 
@@ -538,6 +542,9 @@ async function main(): Promise<void> {
         redraw();
       } else if (key === 'l' || key === 'L') {
         pending = 'look';
+        setStatus();
+      } else if (key === 'u' || key === 'U') {
+        pending = 'use';
         setStatus();
       } else if (key === 'g' || key === 'G') {
         if (session.inTown) void getItems();

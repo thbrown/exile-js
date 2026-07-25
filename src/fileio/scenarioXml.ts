@@ -121,6 +121,8 @@ export interface ScenarioHeader {
   outdoorStart: { x: number; y: number };
   sectorStart: { x: number; y: number };
   shops: Shop[];
+  /** The special node run once when a new game starts (scenario.init_spec). */
+  initSpec: number;
   /** spec_strs — the scenario-level message strings specials print. */
   specStrs: string[];
   /** store_item_rects — where each town's shops keep sold-back goods. */
@@ -141,6 +143,7 @@ export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): Scen
     outdoorStart: { x: 0, y: 0 },
     sectorStart: { x: 0, y: 0 },
     shops: [],
+    initSpec: -1,
     specStrs: [],
     storeItemRects: new Map(),
   };
@@ -159,6 +162,7 @@ export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): Scen
         else if (gt === 'out-width') hdr.outWidth = intText(g);
         else if (gt === 'out-height') hdr.outHeight = intText(g);
         else if (gt === 'start-town') hdr.startTown = intText(g);
+        else if (gt === 'on-init') hdr.initSpec = intText(g);
         else if (gt === 'town-start') hdr.townStart = locFromXml(g);
         else if (gt === 'outdoor-start') hdr.outdoorStart = locFromXml(g);
         else if (gt === 'sector-start') hdr.sectorStart = locFromXml(g);
