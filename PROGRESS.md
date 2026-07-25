@@ -3,6 +3,23 @@
 > Live status of the project. See `PLAN.md` for the full approved plan.
 > **Convention:** whoever works on this (any model/session) reads this file first, updates it as work lands, and commits it with the work.
 
+## Quick orientation (read this first)
+
+- `npm run dev` → the game at http://localhost:5199. `?scenario=stealth` loads another.
+- Keys: arrows/keypad move, **L** look, **T** talk, **G** get items, **1-6** whose pack shows.
+  In conversations: l/n/j/b/s/r/d/g/a. In prompts: 1-6, Escape, Enter.
+- `npm test` runs everything headless (no browser needed).
+- `node scripts/verify-screen.mjs` drives the real UI in Chromium and screenshots
+  it — needs `npx vite --port 5199` running first. `SHOTS_DIR=...` sets where the
+  screenshots go. It exits non-zero if anything regressed, so it's the fastest
+  way to check a change end to end.
+- Code layout: `core/` (rng, geometry, line of sight), `data/` (parsed scenario
+  content), `fileio/` (parsers), `universe/` (mutable game state), `game/`
+  (rules: session, talk, doors), `render/` (the screen), `dialogs/`, `platform/`.
+- **Convention that matters:** where a port stops short of the C++, there's an
+  inline `TODO(Mn)` naming the milestone that fills it in. Grep `TODO(M` for the
+  full list of known gaps — that's the honest inventory of what's missing.
+
 ## Current state
 
 **M2 done bar two items, M3 in progress (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, and **pick up, equip, give and drop items** with a working inventory panel. Remaining M2: fields overlay, replay driver. Next in M3: shops (`start_shop_mode`), training and inns.**
@@ -85,6 +102,40 @@ Notes for M2 implementer:
 - (2026-07-25) `play_sound(n)` treats a **negative** n as "play asynchronously"; the sound is `abs(n)`. Terrain stores door sounds in flag2 and the game calls `play_sound(-flag2)`. Also: a sound that isn't cached must be fetched *and then played*, or the first door you open is silent.
 - (2026-07-25) `item_buttons_from` (boe.text.cpp:47) is indexed by `eItemButton - 2`, so USE/GIVE/DROP/INFO map to entries 0-3.
 - (2026-07-25) `find_direction_from` maps travel direction → entrance index as N→2, S→0, other-easterly→3, other-westerly→1. An earlier demo had this inverted.
+
+## Handoff: how to build shops (the next chunk)
+
+Shops are the last big piece of M3, and everything they need is already parsed
+or stubbed. Do them in this order:
+
+1. **Parse the scenario's shops.** `scenarioXml.ts`'s `DEFERRED_GAME` set skips
+   `<shop>` and `<store-items>` today — remove them from that set and write
+   `readShopsFromXml`. Reference: `cShop` (`../exile-wasm/src/scenario/shop.hpp:60`),
+   its reader in `fileio_scen.cpp`, and `eShopType`/`eShopPrompt`/`eShopItemType`.
+   `Scenario` needs `shops: Shop[]` and `storeItems`.
+2. **Cost formulas.** `../exile-wasm/src/scenario/shop.cpp` holds `cost_mult`
+   (line 47) and the price/`cost_adj` maths, next to the `skill_bonus` table we
+   already ported in `game/doors.ts`. Keep them together in one `game/shop.ts`.
+3. **Shop mode.** `start_shop_mode` (`boe.dlgutil.cpp:160`), `end_shop_mode`
+   (`:227`) and `handle_shop_event`. It's a mode like talking: `GameMode.SHOPPING`
+   with `store_pre_shop_mode` remembered, the shop list drawn where the terrain
+   view goes (`draw_shop_graphics`, `boe.newgraph.cpp:700`), and the inventory
+   panel switching to a sell/identify/recharge mode (`eStatMode`).
+   Note `isOut`/`isTown` in `game/modes.ts` deliberately don't handle SHOPPING
+   yet — the C++ swaps in `store_pre_shop_mode` and re-asks; add that when the
+   mode exists.
+4. **Wire the talk nodes.** `TalkState.runNode`'s `default:` branch currently
+   sets `lastUnsupported` for SHOP, SELL_WEAPONS, SELL_ARMOR, SELL_ITEMS,
+   IDENTIFY, ENCHANT, RECHARGE, TRAINING, INN, JOB_BANK, BUY_SHIP, BUY_HORSE and
+   RECEIVE_QUEST. Each one becomes a real case; the transcript already tells the
+   player which ones aren't done, so progress is visible as you go.
+5. **Shortcuts.** `shop_chars` (`boe.actions.cpp:2791`) is a-h for the eight
+   visible shop rows — same pattern as the talk keys just added.
+
+Two smaller things also outstanding, both independent of shops:
+- **Item "Use"** — the row button is deliberately not drawn yet because item
+  abilities are M5 work. `variety(...).equipCount` and `ItemAbil` are ready.
+- **Fields overlay** (`draw_fields`) and the **replay driver** are M2 leftovers.
 
 ## Next steps
 
