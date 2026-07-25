@@ -7,7 +7,8 @@
 
 - `npm run dev` → the game at http://localhost:5199. `?scenario=stealth` loads another.
 - Keys: arrows/keypad move, **L** look, **T** talk, **G** get items, **1-6** whose pack shows.
-  In conversations: l/n/j/b/s/r/d/g/a. In prompts: 1-6, Escape, Enter.
+  In conversations: l/n/j/b/s/r/d/g/a. In shops: **a-h** buy, arrows scroll, Escape leaves.
+  In prompts: 1-6, Escape, Enter.
 - `npm test` runs everything headless (no browser needed).
 - `node scripts/verify-screen.mjs` drives the real UI in Chromium and screenshots
   it — needs `npx vite --port 5199` running first. `SHOTS_DIR=...` sets where the
@@ -15,14 +16,15 @@
   way to check a change end to end.
 - Code layout: `core/` (rng, geometry, line of sight), `data/` (parsed scenario
   content), `fileio/` (parsers), `universe/` (mutable game state), `game/`
-  (rules: session, talk, doors), `render/` (the screen), `dialogs/`, `platform/`.
+  (rules: session, talk, doors, shop, itemShop, training, rest), `render/` (the
+  screen), `dialogs/`, `platform/`.
 - **Convention that matters:** where a port stops short of the C++, there's an
   inline `TODO(Mn)` naming the milestone that fills it in. Grep `TODO(M` for the
   full list of known gaps — that's the honest inventory of what's missing.
 
 ## Current state
 
-**M2 done bar two items, M3 in progress (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, and **pick up, equip, give and drop items** with a working inventory panel. Remaining M2: fields overlay, replay driver. Next in M3: shops (`start_shop_mode`), training and inns.**
+**M2 done bar two items, M3 nearly done (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: fields overlay, replay driver. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit.**
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -47,7 +49,10 @@ M2 landed so far:
 - **Items (M3d)**: `data/itemVariety.ts` ports load_item_type_info (equip counts, hand counts, exclusion categories); `universe/inventory.ts` ports give_item / equip_item / unequip_item / max_weight / cur_weight / item_weight / has_abil_equip. Session gains `reachableItems` (get_item's adjacency + mass-get rules), `takeItem`, `dropItem`, `giveItemTo`, `toggleEquip`, and `selectPcOptions` (select_pc's candidate list). The inventory panel is real: eight rows with icons, equipped items italicised and coloured by kind (weapons pink, armour green, other blue), and Give/Drop/Info row buttons. Keys: **G** get, **1-6** switch whose pack shows; click a name to equip/unequip.
 - **Keyboard shortcuts**: talking has the original's letter keys (`talk_chars`, boe.actions.cpp:2790 — l/n/j/b/s/r/d/g/a, Escape = Done, Space = Go Back), and only responds to presets currently on screen. `select_pc` prompts answer number keys 1-6 (`select-pc.xml` def-keys) and show the highest skill in green.
 - **Doors and looking (M3c)**: `game/doors.ts` ports pick_lock/bash_door/stat_adj (incl. the `skill_bonus` table from shop.cpp:43); `GameSession.checkSpecialTerrain` handles CHANGE_WHEN_STEP_ON (walk into a door to open it — costs the turn if it blocked) and UNLOCKABLE (locked → host prompt → pick/bash). Unlocked doors persist via `cTown::door_unlocked`, replayed on town entry. `GameSession.lookAt` ports do_look, `signAt` gates sign reading on adjacency. Keys: **L** to look, **T** to talk.
-- **Talking (M3a)**: `game/talk.ts` (`TalkState`) ports start_talk_mode/handle_talk_node/reset_talk_words/scan_for_response; `render/talkScreen.ts` ports place_talk_str/place_talk_face. Press T (or the TALK toolbar button) then a direction. Keyword matching is first-4-chars case-insensitive, and nodes are filtered to the personality (or -2 = anyone in town). Node types implemented: REGULAR, DEP_ON_SDF, SET_SDF, DEP_ON_TIME(_AND_EVENT), DEP_ON_TOWN, BUY_INFO, BUY_SDF, BUY_SPEC_ITEM, BUY_TOWN_LOC, END_FORCE/FIGHT/ALARM/DIE. Everything else sets `lastUnsupported` and says so in the transcript rather than failing silently.
+- **Shops (M3e)**: `data/shop.ts` (cShop/cShopItem verbatim, `cost_mult` prices, the two preset shops), `data/treasure.ts` (return_treasure / pull_item_of_type, RNG call order preserved), `data/strings.ts` (get_str against `data/strings/*.txt`, loaded before the scenario because shop stock names itself synchronously), `fileio/scenarioXml.ts` (`readShopFromXml` + the store-items rects), `game/shop.ts` (`ShopState` = set_up_shop_array + handle_sale), `render/shopScreen.ts` (draw_shop_graphics with init_shopping_rects geometry). A SHOP talk node opens it; keys **a**-**h** buy, arrows scroll, Escape leaves. `Universe.refreshStoreItems` rolls random-shop stock; `party.storeLimitedStock` remembers what's been bought out.
+- **Shop services on your own goods (M3f)**: `game/itemShop.ts` ports place_item_button's eligibility/price rules and handle_item_shop_action — selling (half value), identifying, recharging (a free recharge can melt the item), enchanting (stubbed on M5's table). A SELL/IDENTIFY/RECHARGE talk node switches the inventory panel into a prompt where each eligible item grows a priced button. Note `inventory.ts`'s `takeItem` now compacts the pack the way `cPlayer::take_item` does.
+- **Training and inns (M3g)**: `game/training.ts` holds spend_xp's mode-1 rules (skill-point *and* gold costs, caps, no refunding a level the PC walked in with, the Anama curse); `game/rest.ts` ports do_rest for the INN node. The training dialog is a two-column list rather than the original's stepper grid — marked `TODO(M3)` pending stepper widgets.
+- **Talking (M3a)**: `game/talk.ts` (`TalkState`) ports start_talk_mode/handle_talk_node/reset_talk_words/scan_for_response; `render/talkScreen.ts` ports place_talk_str/place_talk_face. Press T (or the TALK toolbar button) then a direction. Keyword matching is first-4-chars case-insensitive, and nodes are filtered to the personality (or -2 = anyone in town). Node types implemented: REGULAR, DEP_ON_SDF, SET_SDF, DEP_ON_TIME(_AND_EVENT), DEP_ON_TOWN, BUY_INFO, BUY_SDF, BUY_SPEC_ITEM, BUY_TOWN_LOC, END_FORCE/FIGHT/ALARM/DIE, SHOP, INN, TRAINING, SELL_WEAPONS/ARMOR/ITEMS, IDENTIFY, ENCHANT, RECHARGE. Still unimplemented (and saying so in the transcript rather than failing silently): JOB_BANK, BUY_SHIP, BUY_HORSE, RECEIVE_QUEST, CALL_TOWN_SPEC, CALL_SCEN_SPEC.
 
 Notes for M2 implementer:
 - The window is **605×430** (`global.hpp:30`), not 800×600 — the earlier plan text was wrong. index.html scales the canvas ×2 in CSS.
@@ -58,7 +63,7 @@ Notes for M2 implementer:
 - Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
 - scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
-- `npm test` → 116 tests green; `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
+- `npm test` → 166 tests green; `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
 - `node scripts/verify-screen.mjs` (needs `npx vite --port 5199` running) drives the real UI headless and screenshots it. Playwright + chromium installed as devDependency.
 - Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
@@ -69,7 +74,7 @@ Notes for M2 implementer:
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
 - [x] **M1 — Scenario loads, outdoor walkabout**: XML/.map/.spec parsers, terrain view, outdoor movement (gzip+tar for packed .boes deferred to file-upload work; items/monsters XML land with M2)
 - [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅; inventory panel, fields overlay, replay driver still open
-- [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅; shops, training, inns, item Use, and full dialogxml still open
+- [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅, shops ✅, sell/identify/recharge ✅, training ✅, inns ✅; item Use, enchanting, and full dialogxml still open
 - [ ] **M4 — Specials interpreter (breadth-first)**: VM + general/oneshot/ifthen/town groups
 - [ ] **M5 — Combat** (M5a melee, M5b missiles+AI, M5c spells)
 - [ ] **M6 — Specials depth + party ops** (valleydy completable)
@@ -102,43 +107,55 @@ Notes for M2 implementer:
 - (2026-07-25) `play_sound(n)` treats a **negative** n as "play asynchronously"; the sound is `abs(n)`. Terrain stores door sounds in flag2 and the game calls `play_sound(-flag2)`. Also: a sound that isn't cached must be fetched *and then played*, or the first door you open is silent.
 - (2026-07-25) `item_buttons_from` (boe.text.cpp:47) is indexed by `eItemButton - 2`, so USE/GIVE/DROP/INFO map to entries 0-3.
 - (2026-07-25) `find_direction_from` maps travel direction → entrance index as N→2, S→0, other-easterly→3, other-westerly→1. An earlier demo had this inverted.
+- (2026-07-25) `eShopItemType`'s numbering is load-bearing twice over: old scenarios are ported by number, and *every value from `HEAL_WOUNDS` (10) up is treated as a healing service* by `>=` comparisons. Don't renumber.
+- (2026-07-25) A shop's `<entries>` can be empty — valleydy has four "Unused Shop" placeholders. `start_shop_mode` returning false for them is the normal path, not an error.
+- (2026-07-25) An optional shop item packs its percentage chance into the *thousands place* of `quantity` (`quantity = min(999, n) + chance * 1000`).
+- (2026-07-25) Shops name their stock (spells, skills) out of `data/strings/*.txt` **while parsing**, so the string tables must be registered before `loadScenario` runs. `main.ts` awaits `loadStringTables`; tests do it in `test/setup.ts`.
+- (2026-07-25) `cPlayer::take_item` **compacts** the pack — everything below the slot shifts up. That's why the inventory list never has holes in it.
+- (2026-07-25) `is_out`/`is_town` recurse through SHOPPING and TALKING by swapping in the mode each interrupted; a shop opened from a conversation nests two deep, so unwrapping has to loop.
 
-## Handoff: how to build shops (the next chunk)
+## Handoff: how to build the specials VM (the next chunk)
 
-Shops are the last big piece of M3, and everything they need is already parsed
-or stubbed. Do them in this order:
+M4 is the next big piece, and it's the one the plan flags as the highest
+fidelity risk. Everything it reads is already parsed: `.spec` files are in
+`scen.scenSpecials` / `town.specials` / `sector.specials` as raw 15-short
+`SpecialNode` records (`data/special.ts`), and `SpecType` is the verbatim
+`eSpecType` enum.
 
-1. **Parse the scenario's shops.** `scenarioXml.ts`'s `DEFERRED_GAME` set skips
-   `<shop>` and `<store-items>` today — remove them from that set and write
-   `readShopsFromXml`. Reference: `cShop` (`../exile-wasm/src/scenario/shop.hpp:60`),
-   its reader in `fileio_scen.cpp`, and `eShopType`/`eShopPrompt`/`eShopItemType`.
-   `Scenario` needs `shops: Shop[]` and `storeItems`.
-2. **Cost formulas.** `../exile-wasm/src/scenario/shop.cpp` holds `cost_mult`
-   (line 47) and the price/`cost_adj` maths, next to the `skill_bonus` table we
-   already ported in `game/doors.ts`. Keep them together in one `game/shop.ts`.
-3. **Shop mode.** `start_shop_mode` (`boe.dlgutil.cpp:160`), `end_shop_mode`
-   (`:227`) and `handle_shop_event`. It's a mode like talking: `GameMode.SHOPPING`
-   with `store_pre_shop_mode` remembered, the shop list drawn where the terrain
-   view goes (`draw_shop_graphics`, `boe.newgraph.cpp:700`), and the inventory
-   panel switching to a sell/identify/recharge mode (`eStatMode`).
-   Note `isOut`/`isTown` in `game/modes.ts` deliberately don't handle SHOPPING
-   yet — the C++ swaps in `store_pre_shop_mode` and re-asks; add that when the
-   mode exists.
-4. **Wire the talk nodes.** `TalkState.runNode`'s `default:` branch currently
-   sets `lastUnsupported` for SHOP, SELL_WEAPONS, SELL_ARMOR, SELL_ITEMS,
-   IDENTIFY, ENCHANT, RECHARGE, TRAINING, INN, JOB_BANK, BUY_SHIP, BUY_HORSE and
-   RECEIVE_QUEST. Each one becomes a real case; the transcript already tells the
-   player which ones aren't done, so progress is visible as you go.
-5. **Shortcuts.** `shop_chars` (`boe.actions.cpp:2791`) is a-h for the eight
-   visible shop rows — same pattern as the talk keys just added.
+Do it in this order:
 
-Two smaller things also outstanding, both independent of shops:
+1. **Port the prelude/postlude verbatim first.** `run_special`
+   (`../exile-wasm/src/game/boe.specials.cpp`) has shared machinery around every
+   opcode: message pooling, once-flags, SDF pointer indirection (`ex1a`/`ex1b`
+   sometimes name an SDF rather than hold a value), and jump semantics. Get this
+   exactly right before any individual opcode — it's where drift hides.
+2. **Make the VM async.** Message and choice opcodes block on a dialog in the
+   C++ (ASYNCIFY); here they `await dialogs.run(...)`. The `InputRouter`
+   dialogStack gate already suppresses game input, so modality is handled.
+3. **Group handlers to mirror the C++ sections** — one file per category
+   (general, one-shot, if-then, town, outdoor, rect, affect) so each diffs
+   against a slice of `boe.specials.cpp`.
+4. **Wire the triggers that already have hooks.** `GameSession.checkSpecialTerrain`
+   has `TODO(M4)` markers for CALL_SPECIAL terrain; `startTownMode` has one for
+   the on-entry special; `talkTo` has one for the HAIL special; `talk.ts` has the
+   CALL_TOWN_SPEC / CALL_SCEN_SPEC nodes; `game/shop.ts` has the CALL_SPECIAL
+   shop entry. Each is a one-line call once the VM exists.
+5. **Fixtures.** `test/specialParse.test.ts` already parses every `.spec` in all
+   four bundled scenarios, so the corpus is there — add per-opcode-group
+   execution tests against it.
+
+Smaller things outstanding, all independent of M4:
 - **Item "Use"** — the row button is deliberately not drawn yet because item
   abilities are M5 work. `variety(...).equipCount` and `ItemAbil` are ready.
+- **Enchanting** — `game/itemShop.ts` has the mode and the button; it needs
+  `eEnchant` and `enchant_weapon` (M5).
 - **Fields overlay** (`draw_fields`) and the **replay driver** are M2 leftovers.
+- **Training's dialog** works but is a list, not the original's stepper grid;
+  replace it when dialogxml grows steppers. Rules are all in `game/training.ts`.
+- **`askForText`** still uses `window.prompt` — needs a canvas text field.
 
 ## Next steps
 
-1. M3: shops (`start_shop_mode`), training and inns — the talk nodes for these already report themselves as unimplemented, so the hooks are visible.
+1. M4: the specials interpreter, following the handoff plan above.
 2. Finish M2's leftovers alongside: the fields/barriers overlay and the replay driver.
-3. M4 can start once the dialog layer grows message/choice specials support — `checkSpecialTerrain` already has the hooks marked.
+3. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in parallel at any time.

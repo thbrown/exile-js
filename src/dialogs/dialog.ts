@@ -83,10 +83,18 @@ interface PlacedDialogButton extends DialogButton {
 
 interface PlacedDialogRow extends DialogRow {
   rect: UiRect;
+  /** Dense rows are too short for the 23px key button, so the key is text. */
+  dense: boolean;
 }
 
 /** Rows are spaced 25px apart, as select-pc.xml lays its picks out. */
 const ROW_H = 25;
+/**
+ * A long list (the training skills) goes into two columns at the tighter
+ * spacing the game uses for dense grids, so it still fits the 430px window.
+ */
+const ROW_H_DENSE = 15;
+const DENSE_THRESHOLD = 12;
 /** The square button a keyed row gets, from dlogbtnsm.png (two 23x23 frames). */
 const ROW_KEY_W = 23;
 
@@ -136,11 +144,24 @@ export class Dialog {
     });
     const buttonsWidth =
       sizes.reduce((a, b) => a + b, 0) + (this.spec.buttons.length - 1) * BUTTON_GAP;
-    const innerWidth = Math.max(textWidth + picWidth, buttonsWidth);
     const rows = this.spec.rows ?? [];
+    const dense = rows.length > DENSE_THRESHOLD;
+    const rowH = dense ? ROW_H_DENSE : ROW_H;
+    const columns = dense ? 2 : 1;
+    const rowsPerColumn = Math.ceil(rows.length / columns);
+    const rowWidth = dense
+      ? Math.max(...rows.map((row) =>
+        this.ctx.measureText(row.label).width + (row.key === undefined ? 0 : ROW_KEY_W + 6) + 12))
+      : 0;
+
+    const innerWidth = Math.max(
+      textWidth + picWidth,
+      buttonsWidth,
+      columns * rowWidth + (columns - 1) * PADDING,
+    );
     const innerHeight =
       Math.max(this.lines.length * LINE_HEIGHT, this.spec.terPic === undefined ? 0 : 36) +
-      (rows.length > 0 ? PADDING + rows.length * ROW_H : 0) +
+      (rows.length > 0 ? PADDING + rowsPerColumn * rowH : 0) +
       PADDING +
       BUTTON_H;
 
@@ -150,24 +171,25 @@ export class Dialog {
     const top = Math.round((BOE_HEIGHT - h) / 2);
     this.frame = { top, left, bottom: top + h, right: left + w };
 
-    // Rows stack under the text, each one clickable across the full width.
+    // Rows stack under the text, each one clickable across its column.
     this.placedRows = [];
-    let rowY = this.frame.top + PADDING + Math.max(
+    const rowsTop = this.frame.top + PADDING + Math.max(
       this.lines.length * LINE_HEIGHT,
       this.spec.terPic === undefined ? 0 : 36,
     ) + (rows.length > 0 ? PADDING : 0);
-    for (const row of rows) {
+    const colWidth = dense
+      ? rowWidth
+      : this.frame.right - this.frame.left - 2 * PADDING;
+    rows.forEach((row, i) => {
+      const column = Math.floor(i / rowsPerColumn);
+      const left = this.frame.left + PADDING + column * (colWidth + PADDING);
+      const top = rowsTop + (i % rowsPerColumn) * rowH;
       this.placedRows.push({
         ...row,
-        rect: {
-          top: rowY,
-          left: this.frame.left + PADDING,
-          bottom: rowY + ROW_H,
-          right: this.frame.right - PADDING,
-        },
+        dense,
+        rect: { top, left, bottom: top + rowH, right: left + colWidth },
       });
-      rowY += ROW_H;
-    }
+    });
 
     // Buttons sit right-aligned along the bottom edge, as the game's do.
     this.placed = [];
@@ -230,7 +252,15 @@ export class Dialog {
     for (const row of this.placedRows) {
       const label = row.rect;
       let textLeft2 = label.left + 2;
-      if (row.key !== undefined) {
+      if (row.key !== undefined && row.dense) {
+        // No room for the button frame; the key just prefixes the label.
+        drawString(
+          ctx, { ...label, left: textLeft2, top: label.top + 3 }, `${row.key}.`,
+          { size: TEXT_SIZE, colour: row.disabled ? Colours.GREY : Colours.WHITE },
+        );
+        ctx.font = `${TEXT_SIZE}px BoEPlain, sans-serif`;
+        textLeft2 += ctx.measureText(`${row.key}. `).width;
+      } else if (row.key !== undefined) {
         // A numbered button, with the shortcut as its face.
         if (smallBtn) {
           ctx.drawImage(
@@ -271,7 +301,7 @@ export class Dialog {
           : Colours.LIGHT_BLUE;
       drawString(
         ctx,
-        { ...label, left: textLeft2, top: label.top + 5 },
+        { ...label, left: textLeft2, top: label.top + (row.dense ? 3 : 5) },
         row.label,
         { size: TEXT_SIZE, colour },
       );

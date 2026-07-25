@@ -196,6 +196,42 @@ const sold = await page.evaluate(() => {
   };
 });
 console.log('SOLD:', JSON.stringify(sold));
+// 2b-4. Training: pick who trains, raise a skill, keep it.
+await page.evaluate(() => {
+  const s = window.__session;
+  s.univ.party.gold = 5000;
+  s.univ.party.pcs.forEach((p) => { p.skillPts = 40; });
+  s.onTrain();
+});
+await page.waitForTimeout(250);
+const trainWho = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  return d ? { text: d.spec.text, rows: d.spec.rows.length } : null;
+});
+await page.keyboard.press('1');
+await page.waitForTimeout(250);
+const trainList = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  return d ? { rows: d.spec.rows.length, first: d.spec.rows[0].label } : null;
+});
+console.log('TRAIN:', JSON.stringify({ trainWho, trainList }));
+await shot('01b4-training');
+const trainBefore = await page.evaluate(() => ({
+  str: window.__univ.party.pcs[0].skills[0],
+  pts: window.__univ.party.pcs[0].skillPts,
+  gold: window.__univ.party.gold,
+}));
+await page.keyboard.press('1'); // raise Strength
+await page.waitForTimeout(200);
+await page.keyboard.press('k'); // Keep
+await page.waitForTimeout(250);
+const trained = await page.evaluate(() => ({
+  str: window.__univ.party.pcs[0].skills[0],
+  gold: window.__univ.party.gold,
+  dialogGone: !window.__dialogs.active,
+}));
+console.log('TRAINED:', JSON.stringify({ trainBefore, trained }));
+
 await page.evaluate(() => {
   window.__session.chooseTalkNode(-14);
   window.__redraw();
@@ -445,6 +481,11 @@ const ok =
   sellReady.mode === 'sell-any' &&
   sold.gained > 0 &&
   sold.lastLine === 'You sell your item.' &&
+  trainWho?.rows === 6 &&
+  trainList?.rows === 21 &&
+  trained.str === trainBefore.str + 1 &&
+  trained.gold < trainBefore.gold &&
+  trained.dialogGone === true &&
   bashDone.dialogGone === true &&
   (gotItem.skipped === true || gotItem.carried.includes(gotItem.name)) &&
   (sign.skipped === true || (sign.readable === true && signShown.dialogOpen === true)) &&

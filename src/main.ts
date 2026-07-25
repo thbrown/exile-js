@@ -6,7 +6,7 @@
 import { shiftLoc } from './core/location';
 import { GameRng } from './core/rng';
 import { DialogHost } from './dialogs/dialog';
-import { loadStringTables } from './data/strings';
+import { getStr, loadStringTables } from './data/strings';
 import { TerSpec } from './data/terrain';
 import { GameSession } from './game/session';
 import { TalkAction } from './game/talk';
@@ -20,7 +20,8 @@ import { ShopHit, shopItemInfo } from './render/shopScreen';
 import { SheetStore } from './render/sheets';
 import { itemWeight } from './universe/inventory';
 import { PartyPreset } from './universe/player';
-import { Skill } from './universe/skills';
+import { HP_PER_LEVEL, TrainingState, trainCost } from './game/training';
+import { NUM_SKILLS, Skill } from './universe/skills';
 import { Universe } from './universe/universe';
 
 /** Terrain animation ticks at 4 Hz, matching the C++ animation timer. */
@@ -96,7 +97,7 @@ async function main(): Promise<void> {
    * aren't selectable.
    */
   const selectPc = async (
-    mode: 'living' | 'lockpick',
+    mode: 'living' | 'lockpick' | 'train',
     prompt: string,
     highlight?: Skill,
   ): Promise<number> => {
@@ -156,6 +157,78 @@ async function main(): Promise<void> {
       } else if (choice === 'pick') {
         const who = await selectPc('lockpick', 'Who will pick the lock?', Skill.LOCKPICKING);
         if (who >= 0) session.pickLock(where, who);
+      }
+      redraw();
+    })();
+  };
+
+  /**
+   * Training (spend_xp in mode 1, pc.editors.cpp:644): pick who trains, then
+   * buy skill levels one at a time until they run out of points, gold, or
+   * interest.
+   *
+   * TODO(M3): the original is one dense dialog with a +/- stepper per skill.
+   * This is the same rules with a list, pending stepper widgets.
+   */
+  session.onTrain = () => {
+    if (dialogs.active) return;
+    void (async () => {
+      const who = await selectPc('train', 'Train who?');
+      if (who < 0) {
+        redraw();
+        return;
+      }
+      const pc = univ.party.pcs[who]!;
+      const state = new TrainingState(pc, univ.party.gold);
+      // Buy one level per pass; the list reflects what's still affordable.
+      for (;;) {
+        const rows: { name: string; key?: string; label: string; disabled?: boolean }[] = [];
+        const choices: (Skill | 'hp' | 'sp')[] = [];
+        const add = (which: Skill | 'hp' | 'sp', name: string) => {
+          const cost = trainCost(which);
+          const at = state.level(which);
+          rows.push({
+            name: String(choices.length),
+            key: choices.length < 9 ? String(choices.length + 1) : undefined,
+            label: `${name} ${at} → ${which === 'hp' ? at + HP_PER_LEVEL : at + 1}`
+              + `  (${cost.points} sp, ${cost.gold} gold)`,
+            disabled: !state.canChange(which, true),
+          });
+          choices.push(which);
+        };
+        for (let i = 0; i < NUM_SKILLS; i++) add(i as Skill, getStr('skills', i * 2 + 1));
+        add('hp', 'Health');
+        add('sp', 'Spell Points');
+
+        const picked = await dialogs.run({
+          text: `Training ${pc.name}.\n`
+            + `Skill points: ${state.points}    Gold: ${state.gold}\n`
+            + 'Pick a skill to raise, then Keep to pay for it.',
+          rows,
+          escapeButton: 'cancel',
+          buttons: [
+            { name: 'keep', label: 'Keep', key: 'k' },
+            { name: 'cancel', label: 'Cancel', key: 'c' },
+          ],
+        });
+        if (picked === 'keep') {
+          if (state.breaksAnamaOath)
+            await dialogs.run({
+              text: 'The oaths of an Anama member include eschewing research into '
+                + 'arcane magics. By increasing your mage spells skill, you will be in '
+                + 'violation of this oath. If you keep this change, you will be '
+                + 'afflicted with a terrible permanent curse.',
+              escapeButton: 'okay',
+              buttons: [{ name: 'okay', label: 'OK' }],
+            });
+          univ.party.gold = state.keep();
+          if (state.changed) univ.addStringToBuf(`  ${pc.name} trains.`);
+          break;
+        }
+        if (picked === 'cancel') break;
+        const which = choices[Number(picked)];
+        if (which === undefined) break;
+        if (!state.change(which, true)) sound.play(Snd.BUTTON);
       }
       redraw();
     })();

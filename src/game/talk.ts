@@ -89,6 +89,12 @@ export class TalkState {
    * service mode. Same reason as onShop: the session owns the panel.
    */
   onItemShop: ((mode: ItemShopMode, a: number, b: number, c: number) => void) | null = null;
+  /** How a TRAINING node opens the spend-skill-points dialog. */
+  onTrain: (() => void) | null = null;
+  /** How an INN node rests the party and moves it to the bed it paid for. */
+  onRest:
+    | ((length: number, hp: number, sp: number, wakeAt: { x: number; y: number }) => void)
+    | null = null;
   private history: HistoryEntry[] = [];
   /** Clickable words, rebuilt after every reply. */
   words: TalkWord[] = [];
@@ -372,6 +378,24 @@ export class TalkState {
         } else {
           // A shop with nothing to sell falls back to str2, or a default line.
           str1 = str2.length > 0 ? str2 : 'There is nothing available to buy.';
+          str2 = '';
+        }
+        break;
+      case TalkNodeType.TRAINING:
+        // The trainer's own text is replaced; the training itself happens in a
+        // dialog the host runs (boe.dlgutil.cpp:991).
+        this.canRecord = false;
+        str1 = 'You conclude your training.';
+        str2 = '';
+        this.onTrain?.();
+        break;
+      case TalkNodeType.INN:
+        // a is the price, b scales the rest, and (c,d) is the bed you wake in.
+        if (party.gold < a) useSecond();
+        else {
+          this.endForced = true;
+          party.gold -= a;
+          this.onRest?.(700, 30 * b, 25 * b, { x: c, y: d });
           str2 = '';
         }
         break;

@@ -32,6 +32,7 @@ import { MainStatus, Skill } from '../universe/skills';
 import { ShopItemType } from '../data/shop';
 import { ShopState, handleSale } from './shop';
 import { ItemShopMode, ItemShopState, handleItemShopAction } from './itemShop';
+import { doRest } from './rest';
 import { OUT_HALF_DIM, OUT_MAX_DIM } from '../universe/curOut';
 import { TOWN_NUM_OUTDOORS } from '../universe/party';
 import { Universe } from '../universe/universe';
@@ -589,12 +590,15 @@ export class GameSession {
    */
   onLockedDoor: ((where: Location, terrain: number) => void) | null = null;
 
+  /** Set by the host: called when a TRAINING node needs its dialog. */
+  onTrain: (() => void) | null = null;
+
   /**
    * select_pc's candidate list (boe.items.cpp:878). `mode` mirrors the eSelectPC
    * values this port needs so far; `highlight` names a skill to show beside each
    * PC, the way the original does for "who will bash?".
    */
-  selectPcOptions(mode: 'living' | 'lockpick', highlight?: Skill): PcChoice[] {
+  selectPcOptions(mode: 'living' | 'lockpick' | 'train', highlight?: Skill): PcChoice[] {
     return this.univ.party.pcs.map((pc, index) => {
       let canPick = pc.isAlive;
       let extra = '';
@@ -612,6 +616,15 @@ export class GameSession {
         } else {
           const picks = equipped.item;
           extra = `${picks.ident ? picks.fullName : picks.name} x${picks.charges}`;
+        }
+      }
+      if (mode === 'train' && canPick) {
+        // ONLY_CAN_TRAIN (boe.items.cpp:941): no skill points, no training.
+        if (pc.skillPts > 0) {
+          extra = `${pc.skillPts} skill point${pc.skillPts > 1 ? 's' : ''}`;
+        } else {
+          canPick = false;
+          extra = 'no skill points';
         }
       }
       let label = pc.name;
@@ -674,6 +687,13 @@ export class GameSession {
     this.talk.onShop = (shopNum, costAdj, name) =>
       this.startShopMode(shopNum, costAdj, name) || this.startShopModeAnyPc(shopNum, costAdj, name);
     this.talk.onItemShop = (mode, a, b, c) => this.startItemShop(mode, a, b, c);
+    this.talk.onTrain = () => this.onTrain?.();
+    this.talk.onRest = (length, hp, sp, wakeAt) => {
+      doRest(this.univ, length, hp, sp, this.isOutdoors);
+      this.univ.party.townLoc = { ...wakeAt };
+      this.center = { ...wakeAt };
+      this.updateExplored(this.center);
+    };
   }
 
   /** end_talk_mode (boe.dlgutil.cpp:752). */

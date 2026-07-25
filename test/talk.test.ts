@@ -291,15 +291,27 @@ describe('node effects', () => {
   });
 
   it('reports node types that need systems this port has not built', () => {
-    const found = findNode(TalkNodeType.TRAINING);
-    if (!found) return;
-    const node = scen.townTalk[found.town]!.talkNodes[found.index]!;
-    const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
-    const session = new GameSession(univ);
-    session.startTownMode(found.town, FORCED_ENTRY);
-    session.startTalkMode(-1, node.personality, 0, -1);
-    session.chooseTalkNode(found.index);
-    expect(session.talk!.lastUnsupported).toBe(TalkNodeType.TRAINING);
-    expect(univ.transcript.at(-1)).toContain('not implemented yet');
+    // Boats, horses, job banks and the call-special nodes all wait on later
+    // milestones; whichever the scenario uses should say so rather than fail
+    // silently.
+    const pending = [
+      TalkNodeType.BUY_SHIP, TalkNodeType.BUY_HORSE, TalkNodeType.JOB_BANK,
+      TalkNodeType.RECEIVE_QUEST, TalkNodeType.CALL_TOWN_SPEC, TalkNodeType.CALL_SCEN_SPEC,
+    ];
+    let checked = 0;
+    for (const type of pending) {
+      const found = findNode(type);
+      if (!found) continue;
+      checked++;
+      const node = scen.townTalk[found.town]!.talkNodes[found.index]!;
+      const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
+      const session = new GameSession(univ);
+      session.startTownMode(found.town, FORCED_ENTRY);
+      session.startTalkMode(-1, node.personality, 0, -1);
+      session.chooseTalkNode(found.index);
+      expect(session.talk!.lastUnsupported).toBe(type);
+      expect(univ.transcript.at(-1)).toContain('not implemented yet');
+    }
+    expect(checked).toBeGreaterThan(0);
   });
 });
