@@ -14,7 +14,7 @@ import { SIGHT_BLOCKED, canSee } from '../core/sight';
 import { Item, ItemType } from '../data/item';
 import { MonstTime } from '../data/monster';
 import { SECTOR_SIZE } from '../data/outdoors';
-import { StepSound, TerObstruct, TerSpec } from '../data/terrain';
+import { StepSound, TerObstruct, TerSpec, blocksMove } from '../data/terrain';
 import { TalkNodeType } from '../data/talking';
 import { Lighting } from '../data/town';
 import { Snd, SoundPlayer } from '../platform/sound';
@@ -24,6 +24,7 @@ import { OUT_HALF_DIM, OUT_MAX_DIM } from '../universe/curOut';
 import { TOWN_NUM_OUTDOORS } from '../universe/party';
 import { Universe } from '../universe/universe';
 import { GameMode, isOut, isTown } from './modes';
+import { bashDoor as bashDoorAt, pickLock as pickLockAt } from './doors';
 import { TalkAction, TalkState } from './talk';
 
 /** set_direction (boe.locutils.cpp) — direction from one point toward another. */
@@ -276,7 +277,6 @@ export class GameSession {
 
     if (!town.isOnMap(destination.x, destination.y)) return false;
 
-    // TODO(M4): check_special_terrain for TOWN_MOVE.
     // TODO(M5): bumping a hostile monster starts combat instead of moving.
     const blocker = town.monsterAt(destination);
     if (blocker) {
@@ -285,6 +285,11 @@ export class GameSession {
     }
 
     party.direction = setDirection(party.townLoc, destination);
+
+    // check_special_terrain for TOWN_MOVE (boe.specials.cpp:152). Only the
+    // parts that don't need the specials VM are here; the rest is M4.
+    if (!this.checkSpecialTerrain(destination)) return false;
+
     if (this.townIsBlocked(destination)) {
       this.univ.addStringToBuf(`Blocked: ${DIR_NAMES[party.direction] ?? ''}`);
       return false;
@@ -296,6 +301,165 @@ export class GameSession {
     town.makeExplored(destination.x, destination.y);
     this.updateExplored(this.univ.party.townLoc);
     return true;
+  }
+
+  // ------------------------------------------------------------------- look
+
+  /**
+   * do_look (boe.text.cpp:695) — describe a space into the transcript and
+   * return its terrain, or -1 when the party can't see it.
+   *
+   * TODO(M4/M5): fields, blood/ash/bones decals, boats and horses also get
+   * listed here once those exist.
+   */
+  lookAt(where: Location): number {
+    const { univ } = this;
+    const town = univ.town;
+    const from = this.inTown ? univ.party.townLoc : univ.party.outLoc;
+    const isLit = !town || this.ptInLight(from, where);
+    const onMap = town ? town.isOnMap(where.x, where.y) : univ.out.isOnMap(where.x, where.y);
+    if (!onMap) {
+      univ.addStringToBuf('  Can\'t see space.');
+      return -1;
+    }
+    if (this.canSeeLight(from, where) >= SIGHT_BLOCKED) {
+      univ.addStringToBuf('  Can\'t see space.');
+      return -1;
+    }
+
+    univ.addStringToBuf('You see...');
+    if (where.x === from.x && where.y === from.y) univ.addStringToBuf('    Your party');
+
+    if (town) {
+      for (const monst of town.monsters) {
+        if (!monst.isAlive || !isLit || monst.pictureNum === 0) continue;
+        if (
+          where.x < monst.curLoc.x || where.x >= monst.curLoc.x + monst.xWidth ||
+          where.y < monst.curLoc.y || where.y >= monst.curLoc.y + monst.yWidth
+        )
+          continue;
+        const name = univ.scenario.scenMonsters[monst.number]?.name ?? 'creature';
+        const wounded = monst.health < monst.maxHealth ? 'Wounded ' : '';
+        univ.addStringToBuf(`    ${wounded}${name}${monst.isFriendly ? ' (F)' : ' (H)'}`);
+      }
+      if (town.isRoad(where.x, where.y)) univ.addStringToBuf('    Track');
+
+      // Items: gold and food are lumped together, and a big pile is summarised.
+      let gold = false;
+      let food = false;
+      let count = 0;
+      for (const item of town.items) {
+        if (item.variety === ItemType.NO_ITEM) continue;
+        if (item.itemLoc.x !== where.x || item.itemLoc.y !== where.y || !isLit) continue;
+        if (item.variety === ItemType.GOLD) gold = true;
+        else if (item.variety === ItemType.FOOD) food = true;
+        else count++;
+      }
+      if (gold) univ.addStringToBuf('    Gold');
+      if (food) univ.addStringToBuf('    Food');
+      if (count > 8) univ.addStringToBuf('    Many items');
+      else
+        for (const item of town.items) {
+          if (item.variety === ItemType.NO_ITEM) continue;
+          if (item.variety === ItemType.GOLD || item.variety === ItemType.FOOD) continue;
+          if (item.itemLoc.x !== where.x || item.itemLoc.y !== where.y || item.contained) continue;
+          univ.addStringToBuf(`    ${item.ident ? item.fullName : item.name}`);
+        }
+      if (town.specialSpots[where.x]?.[where.y]) univ.addStringToBuf('    Special Encounter');
+    } else {
+      if (univ.out.isRoad(where.x, where.y)) univ.addStringToBuf('    Road');
+      if (univ.out.isSpot(where.x, where.y)) univ.addStringToBuf('    Special Encounter');
+    }
+
+    if (!isLit) {
+      univ.addStringToBuf('    Dark');
+      return 0;
+    }
+    const ter = town ? town.record.terrain[where.x]![where.y]! : univ.out.at(where.x, where.y);
+    univ.addStringToBuf(`    ${univ.terrainType(ter).name}`);
+    return ter;
+  }
+
+  /**
+   * The sign text at a space, or null when there is no readable sign there.
+   * Signs must be adjacent to read (boe.actions.cpp:706).
+   */
+  signAt(where: Location): string | null {
+    const ter = this.inTown
+      ? this.univ.town?.record.terrain[where.x]?.[where.y]
+      : this.univ.out.at(where.x, where.y);
+    if (ter === undefined) return null;
+    if (this.univ.terrainType(ter).special !== TerSpec.IS_A_SIGN) return null;
+
+    const from = this.inTown ? this.univ.party.townLoc : this.univ.party.locInSec;
+    const local = this.inTown ? where : this.univ.party.globalToLocal(where);
+    const signs = this.inTown
+      ? (this.univ.town?.record.signLocs ?? [])
+      : this.univ.out.sectorAt(where).signLocs;
+    for (const sign of signs) {
+      if (sign.x !== local.x || sign.y !== local.y) continue;
+      if (Math.max(Math.abs(sign.x - from.x), Math.abs(sign.y - from.y)) > 1) {
+        this.univ.addStringToBuf('  Too far away to read sign.');
+        return null;
+      }
+      return sign.text;
+    }
+    return null;
+  }
+
+  // ------------------------------------------------------- special terrain
+
+  /**
+   * The subset of check_special_terrain (boe.specials.cpp:152) that town
+   * movement needs and that doesn't require the specials VM. Returns false
+   * when the move is cancelled.
+   *
+   * TODO(M4): step-on specials, conveyors, force barriers, webs, pushable
+   * crates/barrels/blocks, and the CALL_SPECIAL terrain type.
+   */
+  private checkSpecialTerrain(where: Location): boolean {
+    const town = this.univ.town;
+    if (!town) return true;
+    const ter = town.record.terrain[where.x]![where.y]!;
+    const spec = this.univ.terrainType(ter);
+
+    switch (spec.special) {
+      case TerSpec.CHANGE_WHEN_STEP_ON: {
+        // An unlocked door: walking into it swaps the terrain for flag1, and
+        // if the old terrain blocked movement the party doesn't enter yet.
+        town.record.terrain[where.x]![where.y] = spec.flag1;
+        if (spec.flag2 >= 0) this.sound?.play(spec.flag2);
+        return !blocksMove(spec);
+      }
+      case TerSpec.UNLOCKABLE:
+        // A locked door: the caller has to ask the player what to do, which
+        // needs a dialog, so it defers to the host via onLockedDoor.
+        this.onLockedDoor?.(where, ter);
+        return false;
+      case TerSpec.DAMAGING:
+      case TerSpec.DANGEROUS:
+        // TODO(M5): terrain damage needs damage_pc and the status system.
+        this.univ.addStringToBuf('  It looks dangerous.');
+        return true;
+      default:
+        return true;
+    }
+  }
+
+  /**
+   * Set by the host: called when the party walks into a locked door, so the UI
+   * can raise the pick/bash prompt. Without a handler the door simply blocks.
+   */
+  onLockedDoor: ((where: Location, terrain: number) => void) | null = null;
+
+  /** Try to pick a locked door's lock with a given PC. */
+  pickLock(where: Location, pcNum: number): void {
+    pickLockAt(this.univ, where, pcNum);
+  }
+
+  /** Try to bash a locked door open with a given PC. */
+  bashDoor(where: Location, pcNum: number): void {
+    bashDoorAt(this.univ, where, pcNum);
   }
 
   // ------------------------------------------------------------------- talk
@@ -390,6 +554,14 @@ export class GameSession {
     );
     const town = new CurTown(record);
     this.univ.town = town;
+
+    // Doors the party unlocked on a previous visit stay unlocked.
+    for (const where of record.doorUnlocked) {
+      const ter = record.terrain[where.x]?.[where.y];
+      if (ter === undefined) continue;
+      const spec = this.univ.terrainType(ter);
+      if (spec.special === TerSpec.UNLOCKABLE) record.terrain[where.x]![where.y] = spec.flag1;
+    }
 
     // Restore whatever the party has already mapped of this town.
     for (let x = 0; x < record.maxDim; x++)

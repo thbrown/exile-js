@@ -102,6 +102,75 @@ const talkClosed = await page.evaluate(() => {
 });
 console.log('TALK CLOSED:', JSON.stringify(talkClosed));
 
+// 2c. Doors: an unlocked one opens on contact; a locked one raises the prompt,
+//     and its Bash shortcut goes through the dialog host.
+const doors = await page.evaluate(() => {
+  const s = window.__session;
+  const scen = window.__scen;
+  const t = s.univ.town.record;
+  const find = (special) => {
+    for (let x = 1; x < t.maxDim - 1; x++)
+      for (let y = 1; y < t.maxDim - 1; y++)
+        if (scen.terTypes[t.terrain[x][y]].special === special) return { x, y };
+    return null;
+  };
+  const out = {};
+  const unlocked = find(1);
+  if (unlocked) {
+    s.univ.party.townLoc = { x: unlocked.x, y: unlocked.y + 1 };
+    s.center = { ...s.univ.party.townLoc };
+    const before = scen.terTypes[t.terrain[unlocked.x][unlocked.y]].name;
+    s.move(0);
+    out.unlocked = { before, after: scen.terTypes[t.terrain[unlocked.x][unlocked.y]].name };
+  }
+  const locked = find(9);
+  if (locked) {
+    s.univ.party.townLoc = { x: locked.x, y: locked.y + 1 };
+    s.center = { ...s.univ.party.townLoc };
+    for (const row of s.univ.town.explored) row.fill(1);
+    s.move(0);
+    out.lockedAt = `${locked.x},${locked.y}`;
+  }
+  window.__redraw();
+  return out;
+});
+console.log('DOORS:', JSON.stringify(doors));
+await page.waitForTimeout(200);
+const promptUp = await page.evaluate(() => !!window.__dialogs.active);
+await shot('01c-locked-door');
+await page.keyboard.press('b');
+await page.waitForTimeout(200);
+const bashed = await page.evaluate(() => ({
+  dialogGone: !window.__dialogs.active,
+  tail: window.__session.univ.transcript.slice(-1),
+}));
+console.log('DOOR PROMPT:', JSON.stringify({ promptUp, ...bashed }));
+
+// 2d. Signs: looking at an adjacent sign opens a dialog with its text.
+const sign = await page.evaluate(() => {
+  const s = window.__session;
+  const signs = s.univ.town.record.signLocs;
+  if (signs.length === 0) return { skipped: true };
+  const at = signs[0];
+  s.univ.party.townLoc = { x: at.x, y: at.y + 1 };
+  s.center = { ...s.univ.party.townLoc };
+  window.__redraw();
+  return { text: at.text.slice(0, 40), readable: s.signAt(at) !== null };
+});
+if (!sign.skipped) {
+  await page.keyboard.press('l');
+  await page.keyboard.press('ArrowUp');
+  await page.waitForTimeout(250);
+}
+const signShown = await page.evaluate(() => ({
+  dialogOpen: !!window.__dialogs.active,
+  tail: window.__session.univ.transcript.slice(-2),
+}));
+console.log('SIGN:', JSON.stringify({ ...sign, ...signShown }));
+await shot('01d-sign');
+await page.keyboard.press('Enter');
+await page.waitForTimeout(150);
+
 /**
  * Walk toward a target, sidestepping when creatures or walls block, until the
  * predicate holds or we run out of steps. Runs in-page so a step is one call.
@@ -136,7 +205,14 @@ const walkUntil = (goal, limit = 400) =>
     { goal, limit },
   );
 
-// 3. Walking to the town edge should drop the party onto the world map.
+// 3. Walking to the town edge should drop the party onto the world map. The
+//    probes above wandered the party deep into the fort, so start over from a
+//    fresh entry first.
+await page.evaluate(() => {
+  const s = window.__session;
+  s.startTownMode(s.univ.scenario.startTown, 9);
+  window.__redraw();
+});
 const exit = await walkUntil('outdoors');
 const outdoors = await page.evaluate(() => {
   const s = window.__session;
@@ -208,6 +284,10 @@ const ok =
   start.inTown === true &&
   start.townNum === start.startTown &&
   (talk.skipped !== undefined || (talk.followed?.changed === true && talkClosed.talking === false)) &&
+  doors.unlocked?.after !== doors.unlocked?.before &&
+  promptUp === true &&
+  bashed.dialogGone === true &&
+  (sign.skipped === true || (sign.readable === true && signShown.dialogOpen === true)) &&
   outdoors.inTown === false &&
   roam.moves > 0 &&
   reenter?.inTown === true &&

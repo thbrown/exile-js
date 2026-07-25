@@ -145,6 +145,8 @@ export class Town {
   isHidden = false;
   /** Set once the party learns where this town is (cTown::can_find). */
   canFind = false;
+  /** Doors the party has unlocked; replayed on every town entry. */
+  doorUnlocked: { x: number; y: number }[] = [];
   hasTavern = false;
   difficulty = 0;
   specialLocs: SpecLoc[] = [];

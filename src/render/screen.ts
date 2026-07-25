@@ -643,12 +643,16 @@ export class Screen {
     const maxWidth = width(area) - 4;
     const style = { size: 12, colour: Colours.BLACK } as const;
 
-    // Wrap from the newest message backwards until the pane is full.
+    // Wrap from the newest message backwards until the pane is full. Leading
+    // spaces are meaningful — the game indents sub-items of a message — so they
+    // are re-applied after wrapping, which strips them.
     const visible: string[] = [];
     const maxLines = Math.floor(height(area) / TRANSCRIPT_LINE_HEIGHT);
     for (let i = session.univ.transcript.length - 1; i >= 0 && visible.length < maxLines; i--) {
-      const lines = wrapLines(this.ctx, session.univ.transcript[i]!, maxWidth, style);
-      for (let j = lines.length - 1; j >= 0; j--) visible.unshift(lines[j]!);
+      const message = session.univ.transcript[i]!;
+      const indent = message.slice(0, message.length - message.trimStart().length);
+      const lines = wrapLines(this.ctx, message, maxWidth - indent.length * 4, style);
+      for (let j = lines.length - 1; j >= 0; j--) visible.unshift(indent + lines[j]!);
     }
     const shown = visible.slice(Math.max(0, visible.length - maxLines));
     this.ctx.save();
