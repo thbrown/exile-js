@@ -441,19 +441,40 @@ async function main(): Promise<void> {
     });
   };
 
+  /**
+   * True while a move or Use is still resolving. Both can await a dialog now
+   * (a special on the destination square), and the original is strictly serial
+   * — it blocks inside check_special_terrain — so a second action mustn't start
+   * on top of the first. Without this, holding an arrow key interleaves moves.
+   */
+  let acting = false;
+
   /** Act on a target space according to what the player asked for. */
   const actOn = (target: { x: number; y: number }): void => {
     const what = pending;
     pending = null;
-    if (what === 'talk') session.talkTo(target);
-    else if (what === 'look') lookAt(target);
-    else if (what === 'use') void session.useSpace(target).then(() => { setStatus(); redraw(); });
-    else void session.moveTo(target).then(() => { setStatus(); redraw(); });
+    if (what === 'talk') {
+      session.talkTo(target);
+      return;
+    }
+    if (what === 'look') {
+      lookAt(target);
+      return;
+    }
+    if (acting) return;
+    acting = true;
+    const done = (): void => {
+      acting = false;
+      setStatus();
+      redraw();
+    };
+    if (what === 'use') void session.useSpace(target).then(done, done);
+    else void session.moveTo(target).then(done, done);
   };
 
   const router = new InputRouter(canvas, {
     onMove: (dir) => {
-      if (dialogs.active || session.talk || session.shop) return;
+      if (dialogs.active || session.talk || session.shop || acting) return;
       const from = session.inTown ? univ.party.townLoc : univ.party.outLoc;
       actOn(shiftLoc(from, dir));
       setStatus();
@@ -486,6 +507,8 @@ async function main(): Promise<void> {
           pending = 'talk';
         } else if (btn.btn === ToolbarButton.LOOK) {
           pending = 'look';
+        } else if (btn.btn === ToolbarButton.USE) {
+          pending = 'use';
         } else if (btn.btn === ToolbarButton.HAND) {
           void getItems();
         } else {
