@@ -6,7 +6,7 @@
 ## Quick orientation (read this first)
 
 - `npm run dev` → the game at http://localhost:5199. `?scenario=stealth` loads another.
-- Keys: arrows/keypad move, **L** look, **T** talk, **G** get items, **1-6** whose pack shows.
+- Keys: arrows/keypad move, **L** look, **T** talk, **U** use, **G** get items, **1-6** whose pack shows.
   In conversations: l/n/j/b/s/r/d/g/a. In shops: **a-h** buy, arrows scroll, Escape leaves.
   In prompts: 1-6, Escape, Enter.
 - `npm test` runs everything headless (no browser needed).
@@ -16,15 +16,16 @@
   way to check a change end to end.
 - Code layout: `core/` (rng, geometry, line of sight), `data/` (parsed scenario
   content), `fileio/` (parsers), `universe/` (mutable game state), `game/`
-  (rules: session, talk, doors, shop, itemShop, training, rest), `render/` (the
-  screen), `dialogs/`, `platform/`.
+  (rules: session, talk, doors, shop, itemShop, training, rest, and
+  `specials/` — the scripting VM), `render/` (the screen), `dialogs/`,
+  `platform/`.
 - **Convention that matters:** where a port stops short of the C++, there's an
   inline `TODO(Mn)` naming the milestone that fills it in. Grep `TODO(M` for the
   full list of known gaps — that's the honest inventory of what's missing.
 
 ## Current state
 
-**M2 done bar two items, M3 nearly done (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: fields overlay, replay driver. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit.**
+**M2 done bar two items, M3 nearly done, M4 breadth-first complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: fields overlay, replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently.**
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -63,11 +64,16 @@ Notes for M2 implementer:
 - Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
 - scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
-- `npm test` → 166 tests green; `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
+- `npm test` → 198 tests green; `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
 - `node scripts/verify-screen.mjs` (needs `npx vite --port 5199` running) drives the real UI headless and screenshots it. Playwright + chromium installed as devDependency.
 - Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
 - M0: rng (std::mt19937-verified), location, sheets tile math, assets in `public/data`, scenarios unpacked in `public/scenarios`.
+
+- **Specials VM (M4)**: `game/specials/` — `context.ts` (SpecCtx/SpecCtxType/SpecCat verbatim, the host interface), `vm.ts` (run_special: pointer resolution, the reserved 10/11/12 pointers, one-chain-at-a-time queueing, handle_message), then one file per opcode group mirroring the C++ sections: `general.ts`, `ifthen.ts`, `oneshot.ts`, `town.ts`, `rect.ts`, `outdoor.ts`, `affect.ts`. Every handler is `async` — the C++ blocks on a dialog and we `await` the host instead, which is PLAN.md §2.3's ASYNCIFY replacement applied to scripting.
+  - **Movement is async because of this.** `session.move`/`moveTo` return promises: a square's special can put a dialog up before deciding whether the step goes through.
+  - The host (`main.ts`) supplies message/choice/askText/selectPc/startShop/startTalk/sound/rest/moveParty/changeLevel/endScenario. `DialogHost.runQueued` serialises dialogs so a chain can show several in a row.
+  - Triggers: town + outdoor movement, `adj_town_look`, town entry (`spec_on_entry`) and exit (each exit's node), `CALL_SPECIAL` terrain, `use_space` (**U**), the scenario's `on-init`, and talk's CALL_TOWN_SPEC / CALL_SCEN_SPEC.
 
 ## Milestones (Part 1: BoE player)
 
@@ -75,7 +81,7 @@ Notes for M2 implementer:
 - [x] **M1 — Scenario loads, outdoor walkabout**: XML/.map/.spec parsers, terrain view, outdoor movement (gzip+tar for packed .boes deferred to file-upload work; items/monsters XML land with M2)
 - [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅; inventory panel, fields overlay, replay driver still open
 - [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅, shops ✅, sell/identify/recharge ✅, training ✅, inns ✅; item Use, enchanting, and full dialogxml still open
-- [ ] **M4 — Specials interpreter (breadth-first)**: VM + general/oneshot/ifthen/town groups
+- [x] **M4 — Specials interpreter (breadth-first)**: VM core (pointers, queueing, messages) + all seven opcode groups; triggers wired for movement, look, town entry/exit, use-space, call-special terrain and the two talk nodes. Opcodes needing combat/fields/timers/quests report themselves and wait for M5/M6.
 - [ ] **M5 — Combat** (M5a melee, M5b missiles+AI, M5c spells)
 - [ ] **M6 — Specials depth + party ops** (valleydy completable)
 - [ ] **M7 — Save/load (.exg) + startup flow**
@@ -113,49 +119,60 @@ Notes for M2 implementer:
 - (2026-07-25) Shops name their stock (spells, skills) out of `data/strings/*.txt` **while parsing**, so the string tables must be registered before `loadScenario` runs. `main.ts` awaits `loadStringTables`; tests do it in `test/setup.ts`.
 - (2026-07-25) `cPlayer::take_item` **compacts** the pack — everything below the slot shifts up. That's why the inventory list never has holes in it.
 - (2026-07-25) `is_out`/`is_town` recurse through SHOPPING and TALKING by swapping in the mode each interrupted; a shop opened from a conversation nests two deep, so unwrapping has to loop.
+- (2026-07-25) **`cCurTown::is_special` (universe.cpp:301) scans the town's `special_locs` list — it does *not* read the SPECIAL_SPOT field flag.** The flag only controls the white marker the map draws. Fort Talrus has ten scripted squares and one flag; gating on the flag silently disables nine tenths of a scenario's scripting. Outdoors there's no flag check at all, and the chain is passed *sector-local* coordinates.
+- (2026-07-25) A special node field `<= -10` is a **pointer**, not a value: `-N` reads party pointer N. Pointers 10/11/12 are forced to the trigger location and its terrain before every chain. This applies to every field of every node, so it has to happen in one place (`resolvePointers`).
+- (2026-07-25) One-shot nodes use no flag of their own: they read an SDF, refuse to run if it's already **250**, and write 250 on the way out. A node that *couldn't* complete (no room for the item, player pressed Leave) deliberately skips that write so it can be retried.
+- (2026-07-25) `handle_message` returns early when both `m1` and `m2` are negative — which means a node whose only string is `BUFFER_STR` (-8) prints nothing. That's the C++ behaviour, not a port bug.
+- (2026-07-25) A `CANT_ENTER` node with `ex2a > 0` runs even on a square whose terrain blocks movement, and its `b` return forces the party through. That's how a scenario walks you through a wall.
+- (2026-07-25) Special-node fields default to **-1**, which is truthy in both C++ and JS. Nodes that test a field as a boolean (`if(spec.pic)`) therefore behave as "set" unless the scenario writes 0.
 
-## Handoff: how to build the specials VM (the next chunk)
+## Handoff: how to build combat (the next chunk)
 
-M4 is the next big piece, and it's the one the plan flags as the highest
-fidelity risk. Everything it reads is already parsed: `.spec` files are in
-`scen.scenSpecials` / `town.specials` / `sector.specials` as raw 15-short
-`SpecialNode` records (`data/special.ts`), and `SpecType` is the verbatim
-`eSpecType` enum.
+M5 is the biggest single piece in the plan (~30% of the effort) and the one
+that unlocks most of what's still stubbed. It's explicitly split three ways:
+**M5a melee → M5b missiles + monster AI → M5c spells, patterns and fields.**
 
-Do it in this order:
+Before starting, `grep -rn "TODO(M5" src/` — that's the list of places already
+waiting for it, and it's the honest scope. As of now it includes: terrain
+damage, item Use and abilities, traps, encounters, spell patterns, fields,
+enchanting, disease, and the specials VM's damage/monster opcodes.
 
-1. **Port the prelude/postlude verbatim first.** `run_special`
-   (`../exile-wasm/src/game/boe.specials.cpp`) has shared machinery around every
-   opcode: message pooling, once-flags, SDF pointer indirection (`ex1a`/`ex1b`
-   sometimes name an SDF rather than hold a value), and jump semantics. Get this
-   exactly right before any individual opcode — it's where drift hides.
-2. **Make the VM async.** Message and choice opcodes block on a dialog in the
-   C++ (ASYNCIFY); here they `await dialogs.run(...)`. The `InputRouter`
-   dialogStack gate already suppresses game input, so modality is handled.
-3. **Group handlers to mirror the C++ sections** — one file per category
-   (general, one-shot, if-then, town, outdoor, rect, affect) so each diffs
-   against a slice of `boe.specials.cpp`.
-4. **Wire the triggers that already have hooks.** `GameSession.checkSpecialTerrain`
-   has `TODO(M4)` markers for CALL_SPECIAL terrain; `startTownMode` has one for
-   the on-entry special; `talkTo` has one for the HAIL special; `talk.ts` has the
-   CALL_TOWN_SPEC / CALL_SCEN_SPEC nodes; `game/shop.ts` has the CALL_SPECIAL
-   shop entry. Each is a one-line call once the VM exists.
-5. **Fixtures.** `test/specialParse.test.ts` already parses every `.spec` in all
-   four bundled scenarios, so the corpus is there — add per-opcode-group
-   execution tests against it.
+Suggested order:
 
-Smaller things outstanding, all independent of M4:
-- **Item "Use"** — the row button is deliberately not drawn yet because item
-  abilities are M5 work. `variety(...).equipCount` and `ItemAbil` are ready.
-- **Enchanting** — `game/itemShop.ts` has the mode and the button; it needs
-  `eEnchant` and `enchant_weapon` (M5).
+1. **The `iLiving` seam first.** PLAN.md §2.4: the C++ has an abstract base
+   over Player and Creature, and all damage/status code targets it. This port
+   has `universe/player.ts` and `universe/creature.ts` with no shared base yet.
+   Introduce it before combat, not after — `boe.combat.cpp` ports nearly
+   line-by-line against it, and retrofitting is much worse.
+2. **Damage and status.** `damage_pc` / `damage_monst` (boe.specials.cpp:1442
+   is the monster half) plus `eStatus` handling. `Status` is already ported in
+   `universe/skills.ts` and PCs already carry the array.
+3. **Combat mode.** The `GameMode` enum already has COMBAT, SPELL_TARGET,
+   FIRING, THROWING, FANCY_TARGET, DROP_COMBAT in the right order, and
+   `isCombat()` works. `start_town_combat` / `end_town_combat` are the entry
+   and exit points the town nodes already call for.
+4. **Preserve the `get_ran` call order.** This is the fidelity constraint that
+   makes replays possible, and combat is where it matters most. The RNG is
+   already bit-compatible; the sequence is the part a port loses.
+5. **Fields come with M5c** and are also M2's last visual gap (`draw_fields`),
+   so the overlay and the field model land together.
+
+Once combat exists, these open up almost for free: the specials VM's DAMAGE /
+AFFECT_MONST / spell-pattern opcodes, `ONCE_TRAP` and the encounter nodes,
+item Use, and the enchanting service (which just needs `eEnchant`).
+
+Smaller things outstanding, all independent of M5:
 - **Fields overlay** (`draw_fields`) and the **replay driver** are M2 leftovers.
 - **Training's dialog** works but is a list, not the original's stepper grid;
   replace it when dialogxml grows steppers. Rules are all in `game/training.ts`.
 - **`askForText`** still uses `window.prompt` — needs a canvas text field.
+- **Timers** (M6): `SCEN_TIMER_START` / `TOWN_TIMER_START` parse and report
+  themselves but need `special_increase_age`'s tick loop.
+- **Quests and job banks** (M6): `UPDATE_QUEST`, `IF_QUEST`, `JOB_BANK`.
+- **Boats and horses** (M6): the two talk nodes and `CHANGE_*_OWNER`.
 
 ## Next steps
 
-1. M4: the specials interpreter, following the handoff plan above.
-2. Finish M2's leftovers alongside: the fields/barriers overlay and the replay driver.
+1. M5: combat, following the handoff plan above — starting with the `iLiving` seam.
+2. Finish M2's leftovers alongside: the fields/barriers overlay (which M5c needs anyway) and the replay driver.
 3. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in parallel at any time.
