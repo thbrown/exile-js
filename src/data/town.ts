@@ -131,6 +131,8 @@ export class Town {
   ];
   inTownRect = { top: 0, left: 0, bottom: 0, right: 0 };
   presetItems: PresetItem[] = [];
+  /** Which preset items the party has already picked up (cTown::item_taken). */
+  itemTaken: boolean[] = [];
   presetFields: PresetField[] = [];
   creatures: Townperson[] = [];
   specOnEntry = -1;

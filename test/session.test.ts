@@ -136,6 +136,35 @@ describe('start and end town mode', () => {
   });
 });
 
+describe('town items', () => {
+  it('places the town preset items on the floor', () => {
+    const session = newSession();
+    session.startNewGame();
+    const town = session.univ.town!;
+    const presets = town.record.presetItems.filter((p) => p.code >= 0);
+    expect(presets.length).toBeGreaterThan(0);
+    expect(town.items.length).toBe(presets.length);
+    for (const item of town.items) {
+      expect(item.name.length).toBeGreaterThan(0);
+      expect(town.isOnMap(item.itemLoc.x, item.itemLoc.y)).toBe(true);
+      // is_special is the 1-based preset index, used to mark items as taken.
+      expect(item.isSpecial).toBeGreaterThan(0);
+    }
+  });
+
+  it('leaves out items the party already took, unless always there', () => {
+    const session = newSession();
+    session.startNewGame();
+    const record = session.univ.town!.record;
+    const before = session.univ.town!.items.length;
+    const takenIdx = record.presetItems.findIndex((p) => p.code >= 0 && !p.alwaysThere);
+    if (takenIdx < 0) return;
+    record.itemTaken[takenIdx] = true;
+    session.startTownMode(scen.startTown, FORCED_ENTRY);
+    expect(session.univ.town!.items.length).toBe(before - 1);
+  });
+});
+
 describe('visibility', () => {
   it('reveals the 9x9 block around the party but not through walls', () => {
     const session = newSession();

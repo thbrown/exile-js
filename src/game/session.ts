@@ -11,6 +11,7 @@
 
 import { Direction, Location, dist, loc, shiftLoc } from '../core/location';
 import { SIGHT_BLOCKED, canSee } from '../core/sight';
+import { Item, ItemType } from '../data/item';
 import { MonstTime } from '../data/monster';
 import { SECTOR_SIZE } from '../data/outdoors';
 import { StepSound, TerObstruct, TerSpec } from '../data/terrain';
@@ -324,6 +325,7 @@ export class GameSession {
 
     this.setUpLights(town);
     this.populateTown(town);
+    this.placePresetItems(town);
 
     // TODO(M4): handle_town_specials queues the on-entry special here.
     const start =
@@ -463,6 +465,40 @@ export class GameSession {
     for (const m of town.monsters)
       if (m.isAlive && (m.xWidth > 1 || m.yWidth > 1) && !this.monstCanBeThere(m))
         m.active = CreatureStatus.DEAD;
+  }
+
+  /**
+   * The preset-item half of start_town_mode (boe.town.cpp:370). Items the
+   * party has already taken stay gone unless the preset says "always there".
+   *
+   * TODO(M6): special and quest items also check the party's spec_items and
+   * active_quests, and store_item_rects restores player-dropped stock.
+   */
+  private placePresetItems(town: CurTown): void {
+    town.items = [];
+    const presets = town.record.presetItems;
+    for (let i = 0; i < presets.length; i++) {
+      const preset = presets[i]!;
+      if (preset.code < 0) continue;
+      const template = this.univ.scenario.scenItems[preset.code];
+      if (!template) continue;
+      if (town.record.itemTaken[i] && !preset.alwaysThere) continue;
+
+      const item: Item = { ...template, itemLoc: { ...preset.loc } };
+      if (preset.ability >= 0) item.ability = preset.ability;
+      if (preset.charges > 0) {
+        if (item.charges > 0) item.charges = preset.charges;
+        else if (item.variety === ItemType.GOLD || item.variety === ItemType.FOOD)
+          item.itemLevel = preset.charges;
+      }
+      item.property = preset.property;
+      item.contained = preset.contained;
+      // An item marked "contained" is hidden inside a crate or barrel; without
+      // fields we can't tell, so it just stays undrawn.
+      item.held = item.contained;
+      item.isSpecial = i + 1;
+      town.items.push(item);
+    }
   }
 
   private monstCanBeThere(m: Creature): boolean {

@@ -6,6 +6,7 @@
  */
 
 import { Direction } from '../core/location';
+import { ItemType } from '../data/item';
 import { groundFromTer, terFromGround } from '../data/scenario';
 import { TerSpec, TrimType, blocksMove } from '../data/terrain';
 import { Lighting } from '../data/town';
@@ -37,6 +38,7 @@ import {
   terrainSpotPos,
   width,
 } from './layout';
+import { itemGraphic } from './itemPics';
 import { monsterDims, monsterGraphic } from './monsterPics';
 import { pcGraphic } from './pcPics';
 import { SheetStore, TILE_H, TILE_W } from './sheets';
@@ -58,6 +60,8 @@ export const CHROME_SHEETS = [
   'pcs',
   'fields',
   'trim',
+  'objects',
+  'tinyobj',
 ];
 
 export class Screen {
@@ -162,6 +166,7 @@ export class Screen {
         if (this.isRoad(session, x, y)) this.placeRoad(session, q, row, x, y);
       }
 
+    if (town) this.drawTownItems(session);
     if (town) this.drawTownMonsters(session);
     this.drawPartySymbol(session);
   }
@@ -408,6 +413,30 @@ export class Screen {
     if (x === maxX || this.extendRoad(session, x + 1, y)) blit(ROAD_SRC.horizontal, ROAD_DEST.right);
     if (y === maxY || this.extendRoad(session, x, y + 1)) blit(ROAD_SRC.vertical, ROAD_DEST.bottom);
     if (x === 0 || this.extendRoad(session, x - 1, y)) blit(ROAD_SRC.horizontal, ROAD_DEST.left);
+  }
+
+  /** draw_items (boe.graphutil.cpp:293) — items lying on the town floor. */
+  private drawTownItems(session: GameSession): void {
+    const town = session.univ.town!;
+    const center = session.center;
+    for (const item of town.items) {
+      if (item.variety === ItemType.NO_ITEM || item.contained) continue;
+      const q = item.itemLoc.x - center.x + TER_VIEW_CENTER;
+      const row = item.itemLoc.y - center.y + TER_VIEW_CENTER;
+      if (q < 0 || row < 0 || q >= TER_VIEW_TILES || row >= TER_VIEW_TILES) continue;
+      if (!town.isExplored(item.itemLoc.x, item.itemLoc.y)) continue;
+      if (!session.ptInLight(session.univ.party.townLoc, item.itemLoc)) continue;
+      const g = itemGraphic(item.graphicNum);
+      if (!g) continue;
+      const img = this.store.get(g.sheetName);
+      if (!img) continue;
+      const pos = terrainSpotPos(q, row);
+      this.ctx.drawImage(
+        img, g.rect.left, g.rect.top, g.rect.width, g.rect.height,
+        pos.x + g.inset.x, pos.y + g.inset.y,
+        TILE_W - 2 * g.inset.x, TILE_H - 2 * g.inset.y,
+      );
+    }
   }
 
   private drawTownMonsters(session: GameSession): void {

@@ -5,7 +5,7 @@
 
 ## Current state
 
-**M2 in progress (2026-07-25): real Universe/GameSession architecture + the full game screen are in. A new game now starts in the scenario's start town with the pregen party, and you can walk out to the world map and back into towns, all on the classic 605×430 UI. Remaining M2: sound, inventory panel contents, terrain trim/frills + light/unexplored masking, replay driver.**
+**M2 in progress (2026-07-25): real Universe/GameSession architecture + the full game screen are in. A new game starts in the scenario's start town with the pregen party; you can walk out to the world map and back into towns on the classic 605×430 UI, with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds. Remaining M2: inventory panel contents (needs the item/equip model), fields overlay, replay driver.**
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -20,15 +20,23 @@ M2 landed so far:
 - Headless verification: `scripts/verify-screen.mjs` (start vite on :5199 first, `SHOTS_DIR=… node scripts/verify-screen.mjs`) — checks all six panels paint, start-in-town, walk out, roam, re-enter, zero console errors. `window.__session`/`__univ`/`__screen`/`__scen`/`__redraw` exposed for driving.
 - `test/session.test.ts` — 11 tests over party presets, town enter/exit, map memory, entrance direction, window sliding, world edge.
 
+- **Visual fidelity** (all ported, all visible in `scripts/verify-screen.mjs` screenshots):
+  - `core/sight.ts` — `canSee` (utility.cpp:19) verbatim, including the integer DDA stepping.
+  - Session: `sightObscurity`/`getBlockage`/`canSeeLight`/`ptInLight`/`lightRadius`/`setUpLights`; `updateExplored` gates reveals on line of sight, so fog behaves like the original.
+  - Screen: unexplored/unlit tiles draw black (`can_draw`), roads draw stubs from fields.png (`place_road`/`extend_road_terrain`), and `render/trim.ts` stencils shoreline frills, rounded wall corners and walkway corners.
+  - Floor items: preset items placed on town entry, drawn via `calc_item_rect` (objects.png / tinyobj.png).
+- **Sound**: `platform/sound.ts` (Web Audio, SND*.wav), wired to `move_sound`'s step sounds and the town-entry sound. Starts on the first user gesture, as browsers require.
+
 Notes for M2 implementer:
 - The window is **605×430** (`global.hpp:30`), not 800×600 — the earlier plan text was wrong. index.html scales the canvas ×2 in CSS.
-- Terrain rendering is still flat: no trim/frills (`draw_trim`, `place_trim`), no roads overlay, no light mask or unexplored mask. Those are the next visible-fidelity gap.
 - The inventory panel is a placeholder until the item/equip model lands (M3).
+- Trim stencilling: trim.png is a 1-bit **black-on-white** bitmap; black = "let the neighbouring ground show through". The C++ uses a fragment shader; we use an offscreen tile + `destination-in` against an alpha mask. Masks sit at the same offset inside a 28×36 cell as inside the sheet.
+- Still missing from the terrain view: fields/barriers/webs overlay (`draw_fields`), boats and horses, special-spot markers, and the `sightObscurity` contributions those add.
 - Monster abilities are captured as lossless `RawAbility` records (monster.ts) — port uAbility union semantics at M5, reference readMonstAbilFromXml (fileio_scen.cpp:1425).
 - Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
 - scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
-- `npm test` → 55 tests green; `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
+- `npm test` → 69 tests green; `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
 - `node scripts/verify-screen.mjs` (needs `npx vite --port 5199` running) drives the real UI headless and screenshots it. Playwright + chromium installed as devDependency.
 - Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
@@ -38,7 +46,7 @@ Notes for M2 implementer:
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
 - [x] **M1 — Scenario loads, outdoor walkabout**: XML/.map/.spec parsers, terrain view, outdoor movement (gzip+tar for packed .boes deferred to file-upload work; items/monsters XML land with M2)
-- [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅; sound, inventory panel, terrain trim + masks, replay driver still open
+- [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅; inventory panel, fields overlay, replay driver still open
 - [ ] **M3 — Dialog toolkit + talk + shops**
 - [ ] **M4 — Specials interpreter (breadth-first)**: VM + general/oneshot/ifthen/town groups
 - [ ] **M5 — Combat** (M5a melee, M5b missiles+AI, M5c spells)
@@ -73,5 +81,5 @@ Notes for M2 implementer:
 
 ## Next steps
 
-1. Finish M2: sound (Web Audio over SND*.wav), terrain trim/frills + light and unexplored masks, inventory panel once the item model exists, replay driver.
+1. Finish M2: the fields/barriers overlay, the inventory panel once the item/equip model exists, and the replay driver.
 2. M3: dialogxml parser + async dialog runner, then talking and shopping modes.
