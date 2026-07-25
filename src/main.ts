@@ -21,6 +21,7 @@ import { SheetStore } from './render/sheets';
 import { itemWeight } from './universe/inventory';
 import { PartyPreset } from './universe/player';
 import { HP_PER_LEVEL, TrainingState, trainCost } from './game/training';
+import { doRest } from './game/rest';
 import { NUM_SKILLS, Skill } from './universe/skills';
 import { Universe } from './universe/universe';
 
@@ -161,6 +162,55 @@ async function main(): Promise<void> {
       redraw();
     })();
   };
+
+  /**
+   * The specials VM's window on the outside world. Everything the C++ does by
+   * blocking on a dialog is a promise here.
+   */
+  session.onRedraw = () => redraw();
+  session.attachSpecials({
+    message: async (str1, str2, title, pic, picType) => {
+      const text = [str1, str2].filter((s) => s.length > 0).join('\n\n');
+      await dialogs.run({
+        text: title ? `${title}\n\n${text}` : text,
+        escapeButton: 'okay',
+        buttons: [{ name: 'okay', label: 'OK' }],
+      });
+    },
+    choice: async (strs, buttons, title, pic, picType) => {
+      const text = strs.filter((s) => s.length > 0).join('\n\n');
+      const picked = await dialogs.run({
+        text: title ? `${title}\n\n${text}` : text,
+        escapeButton: buttons[0] ?? 'okay',
+        buttons: buttons.map((label) => ({ name: label, label })),
+      });
+      return Math.max(0, buttons.indexOf(picked));
+    },
+    askText: (prompt) => askForText(prompt),
+    selectPc: (prompt) => selectPc('living', prompt),
+    startShop: (which, costAdj, shopName) =>
+      session.startShopMode(which, costAdj, shopName)
+      || session.startShopModeAnyPc(which, costAdj, shopName),
+    startTalk: (monsterIndex, personality, monsterType, pic) =>
+      session.startTalkMode(monsterIndex, personality, monsterType, pic),
+    sound: (which) => sound.play(which),
+    rest: (length, hp, sp) => doRest(univ, length, hp, sp, session.isOutdoors),
+    moveParty: (where) => {
+      if (session.inTown) univ.party.townLoc = { ...where };
+      else univ.party.outLoc = { ...where };
+      session.center = { ...where };
+      session.updateExplored(where);
+    },
+    changeLevel: (town, where) => {
+      // change_level (boe.specials.cpp:1395): leave, then re-enter elsewhere.
+      if (where.x >= 0 && where.y >= 0) session.forceTownEntry(town, where);
+      session.startTownMode(town, 9);
+      session.center = { ...univ.party.townLoc };
+    },
+    endScenario: () => {
+      univ.addStringToBuf('*** The scenario is over. ***');
+    },
+  });
 
   /**
    * Training (spend_xp in mode 1, pc.editors.cpp:644): pick who trains, then
@@ -394,7 +444,7 @@ async function main(): Promise<void> {
     pending = null;
     if (what === 'talk') session.talkTo(target);
     else if (what === 'look') lookAt(target);
-    else session.moveTo(target);
+    else void session.moveTo(target).then(() => { setStatus(); redraw(); });
   };
 
   const router = new InputRouter(canvas, {

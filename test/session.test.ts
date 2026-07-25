@@ -35,7 +35,7 @@ function newSession(): GameSession {
 }
 
 describe('party setup', () => {
-  it('starts with the six pregen adventurers', () => {
+  it('starts with the six pregen adventurers', async () => {
     const { univ } = newSession();
     expect(univ.party.pcs.map((p) => p.name)).toEqual([
       'Jenneke',
@@ -53,7 +53,7 @@ describe('party setup', () => {
     expect(univ.party.calcDay()).toBe(1);
   });
 
-  it('places the outdoor window on the scenario start sector', () => {
+  it('places the outdoor window on the scenario start sector', async () => {
     const { univ } = newSession();
     expect(univ.party.outdoorCorner).toEqual(scen.outdoorStart);
     expect(univ.party.locInSec).toEqual(scen.sectorStart);
@@ -67,7 +67,7 @@ describe('party setup', () => {
 });
 
 describe('start and end town mode', () => {
-  it('starts a new game inside the scenario start town', () => {
+  it('starts a new game inside the scenario start town', async () => {
     const session = newSession();
     session.startNewGame();
     expect(session.mode).toBe(GameMode.TOWN);
@@ -84,7 +84,7 @@ describe('start and end town mode', () => {
     expect(session.locationName().length).toBeGreaterThan(0);
   });
 
-  it('populates the town with its always-present creatures', () => {
+  it('populates the town with its always-present creatures', async () => {
     const session = newSession();
     session.startNewGame();
     const alive = session.univ.town!.monsters.filter((m) => m.isAlive);
@@ -96,12 +96,12 @@ describe('start and end town mode', () => {
     }
   });
 
-  it('leaves town when the party steps past the in-town boundary', () => {
+  it('leaves town when the party steps past the in-town boundary', async () => {
     const session = newSession();
     session.startNewGame();
     const rect = session.univ.town!.record.inTownRect;
     // Step straight onto the southern boundary.
-    session.moveTo({ x: session.univ.party.townLoc.x, y: rect.bottom });
+    await session.moveTo({ x: session.univ.party.townLoc.x, y: rect.bottom });
     expect(session.mode).toBe(GameMode.OUTDOORS);
     expect(session.univ.party.townNum).toBe(TOWN_NUM_OUTDOORS);
     expect(session.univ.town).toBeNull();
@@ -110,19 +110,19 @@ describe('start and end town mode', () => {
     );
   });
 
-  it('remembers the town map between visits', () => {
+  it('remembers the town map between visits', async () => {
     const session = newSession();
     session.startNewGame();
     const record = session.univ.town!.record;
     const seen = session.univ.party.townLoc;
-    session.moveTo({ x: seen.x, y: record.inTownRect.bottom });
+    await session.moveTo({ x: seen.x, y: record.inTownRect.bottom });
     expect(record.maps[seen.x]![seen.y]).toBe(1);
 
     session.startTownMode(scen.startTown, FORCED_ENTRY);
     expect(session.univ.town!.isExplored(seen.x, seen.y)).toBe(true);
   });
 
-  it('picks the entrance opposite the direction of travel', () => {
+  it('picks the entrance opposite the direction of travel', async () => {
     // find_direction_from: heading north arrives at start_locs[2], south at [0].
     const session = newSession();
     const town = scen.towns.find((t) => t.startLocs.every((l) => l.x >= 0));
@@ -137,7 +137,7 @@ describe('start and end town mode', () => {
 });
 
 describe('town items', () => {
-  it('places the town preset items on the floor', () => {
+  it('places the town preset items on the floor', async () => {
     const session = newSession();
     session.startNewGame();
     const town = session.univ.town!;
@@ -152,7 +152,7 @@ describe('town items', () => {
     }
   });
 
-  it('leaves out items the party already took, unless always there', () => {
+  it('leaves out items the party already took, unless always there', async () => {
     const session = newSession();
     session.startNewGame();
     const record = session.univ.town!.record;
@@ -166,7 +166,7 @@ describe('town items', () => {
 });
 
 describe('visibility', () => {
-  it('reveals the 9x9 block around the party but not through walls', () => {
+  it('reveals the 9x9 block around the party but not through walls', async () => {
     const session = newSession();
     session.startNewGame();
     const town = session.univ.town!;
@@ -185,7 +185,7 @@ describe('visibility', () => {
           expect(town.isExplored(x, y)).toBe(false);
   });
 
-  it('treats normally lit towns as fully lit and dark ones by radius', () => {
+  it('treats normally lit towns as fully lit and dark ones by radius', async () => {
     const session = newSession();
     session.startNewGame();
     const town = session.univ.town!;
@@ -207,7 +207,7 @@ describe('visibility', () => {
 });
 
 describe('outdoor movement', () => {
-  it('records movement in the transcript and advances the clock', () => {
+  it('records movement in the transcript and advances the clock', async () => {
     const session = newSession();
     const { univ } = session;
     // Find an unblocked neighbour of the start position and step onto it.
@@ -216,7 +216,7 @@ describe('outdoor movement', () => {
     const before = univ.party.age;
     let moved = false;
     for (const d of dirs) {
-      if (session.move(d)) {
+      if (await session.move(d)) {
         moved = true;
         break;
       }
@@ -227,7 +227,7 @@ describe('outdoor movement', () => {
     expect(univ.transcript.at(-1)).toMatch(/^Moved: /);
   });
 
-  it('slides the 96x96 window when the party nears its edge', () => {
+  it('slides the 96x96 window when the party nears its edge', async () => {
     const session = newSession();
     const { univ, } = session;
     // Put the window somewhere with a sector to the east, then walk off it.
@@ -238,7 +238,7 @@ describe('outdoor movement', () => {
     const cornerBefore = { ...univ.party.outdoorCorner };
 
     // moveTo does the shift regardless of whether the destination is walkable.
-    session.moveTo({ x: 92, y: 20 });
+    await session.moveTo({ x: 92, y: 20 });
     expect(univ.party.outdoorCorner.x).toBe(cornerBefore.x + 1);
     // Shifting keeps the party on the same world tile: it moves back half a
     // window in local coordinates as the corner advances one sector.
@@ -246,18 +246,18 @@ describe('outdoor movement', () => {
     expect(univ.party.iwc.x).toBe(0);
   });
 
-  it('stops the party at the world edge', () => {
+  it('stops the party at the world edge', async () => {
     const session = newSession();
     const { univ } = session;
     univ.party.outdoorCorner = { x: 0, y: 0 };
     univ.party.iwc = { x: 0, y: 0 };
     univ.out.build();
     univ.party.outLoc = { x: 0, y: 10 };
-    expect(session.moveTo({ x: -1, y: 10 })).toBe(false);
+    expect(await session.moveTo({ x: -1, y: 10 })).toBe(false);
     expect(univ.party.outLoc).toEqual({ x: 0, y: 10 });
   });
 
-  it('enters a town by stepping onto a town-entrance tile', () => {
+  it('enters a town by stepping onto a town-entrance tile', async () => {
     const session = newSession();
     const { univ } = session;
     // Find a city loc whose terrain really is a town entrance.
@@ -280,7 +280,7 @@ describe('outdoor movement', () => {
     univ.party.outLoc = { x: at.x, y: at.y + 1 };
     univ.party.locInSec = { x: at.x, y: at.y + 1 };
 
-    session.moveTo({ x: at.x, y: at.y });
+    await session.moveTo({ x: at.x, y: at.y });
     expect(session.inTown).toBe(true);
     expect(univ.party.townNum).toBe(at.town);
   });

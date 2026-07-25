@@ -56,6 +56,16 @@ export class CurTown {
     if (this.isOnMap(x, y)) this.explored[x]![y] = 1;
   }
 
+  /** Whether a square carries a special-encounter marker. */
+  isSpecialSpot(x: number, y: number): boolean {
+    return this.isOnMap(x, y) && this.specialSpots[x]![y]! !== 0;
+  }
+
+  /** take_explored — put the fog back over a square. */
+  takeExplored(x: number, y: number): void {
+    if (this.isOnMap(x, y)) this.explored[x]![y] = 0;
+  }
+
   /** A live, alive monster occupying a space (accounting for multi-tile size). */
   monsterAt(where: Location): Creature | null {
     for (const m of this.monsters) {

@@ -23,7 +23,7 @@ await page.waitForTimeout(600);
 const shot = (n) => page.screenshot({ path: `${SHOTS}/${n}.png`, clip: { x: 12, y: 12, width: 1210, height: 860 } });
 
 // 1. Every panel should be painted, not left as bare background.
-const panels = await page.evaluate(() => {
+const panels = await page.evaluate(async () => {
   const ctx = document.getElementById('canvas').getContext('2d');
   const rects = {
     terView: [19, 7, 279, 351],
@@ -46,7 +46,7 @@ console.log('PANEL COLOUR COUNTS:', JSON.stringify(panels));
 await shot('01-start-town');
 
 // 2. A new game starts inside the start town with the pregen party.
-const start = await page.evaluate(() => {
+const start = await page.evaluate(async () => {
   const s = window.__session;
   return {
     mode: s.mode,
@@ -64,7 +64,7 @@ console.log('START:', JSON.stringify(start));
 
 // 2b. Talk to a townsperson: the talk screen replaces the left column, the
 //     reply's keywords are clickable, and Done returns to town mode.
-const talk = await page.evaluate(() => {
+const talk = await page.evaluate(async () => {
   const s = window.__session;
   const sc = window.__screen;
   const who = s.univ.town.monsters.find((m) => m.isAlive && m.personality >= 0 && m.isFriendly);
@@ -96,13 +96,13 @@ console.log('TALK:', JSON.stringify(talk));
 // Letter shortcuts (talk_chars): 'j' asks about the speaker's job.
 await page.keyboard.press('j');
 await page.waitForTimeout(150);
-const talkKeys = await page.evaluate(() => {
+const talkKeys = await page.evaluate(async () => {
   const s = window.__session;
   return { job: s.talk?.str1 === s.talk?.person.job, str1: s.talk?.str1.slice(0, 40) };
 });
 console.log('TALK KEY j:', JSON.stringify(talkKeys));
 await shot('01b-talking');
-const talkClosed = await page.evaluate(() => {
+const talkClosed = await page.evaluate(async () => {
   const s = window.__session;
   s.chooseTalkNode(-14); // Done
   window.__redraw();
@@ -112,7 +112,7 @@ console.log('TALK CLOSED:', JSON.stringify(talkClosed));
 
 // 2b-2. Shopping: open the first shop with stock, buy with its letter key, and
 //       leave with Escape.
-const shopOpened = await page.evaluate(() => {
+const shopOpened = await page.evaluate(async () => {
   const s = window.__session;
   const which = window.__scen.shops.findIndex((sh) => sh.numItems() > 0);
   const ok = s.startShopMode(which, 2, 'Verify Shop');
@@ -134,7 +134,7 @@ console.log('SHOP:', JSON.stringify(shopOpened));
 await shot('01b2-shopping');
 
 // The shop panel must actually paint over the terrain view.
-const shopPainted = await page.evaluate(() => {
+const shopPainted = await page.evaluate(async () => {
   const ctx = document.getElementById('canvas').getContext('2d');
   const d = ctx.getImageData(19, 7, 279, 351).data;
   const seen = new Set();
@@ -147,7 +147,7 @@ console.log('SHOP PANEL COLOURS:', shopPainted);
 const goldBefore = await page.evaluate(() => window.__univ.party.gold);
 await page.keyboard.press('a');
 await page.waitForTimeout(200);
-const bought = await page.evaluate(() => {
+const bought = await page.evaluate(async () => {
   const s = window.__session;
   return {
     gold: s.univ.party.gold,
@@ -159,7 +159,7 @@ console.log('SHOP BUY a:', JSON.stringify({ goldBefore, ...bought }));
 
 await page.keyboard.press('Escape');
 await page.waitForTimeout(200);
-const shopClosed = await page.evaluate(() => {
+const shopClosed = await page.evaluate(async () => {
   const s = window.__session;
   return { shopping: !!s.shop, mode: s.mode, inTown: s.inTown };
 });
@@ -167,7 +167,7 @@ console.log('SHOP CLOSED:', JSON.stringify(shopClosed));
 
 // 2b-3. Selling: the inventory panel turns into a sell prompt, and clicking an
 //       item's sell button pays out.
-const sellReady = await page.evaluate(() => {
+const sellReady = await page.evaluate(async () => {
   const s = window.__session;
   s.startTalkMode(-1, 0, 0, -1);
   s.startItemShop('sell-any', 0, 0, 0);
@@ -184,7 +184,7 @@ const sellReady = await page.evaluate(() => {
 console.log('SELL READY:', JSON.stringify(sellReady));
 await shot('01b3-selling');
 
-const sold = await page.evaluate(() => {
+const sold = await page.evaluate(async () => {
   const s = window.__session;
   const gold = s.univ.party.gold;
   s.useItemShop(0, 0);
@@ -197,20 +197,20 @@ const sold = await page.evaluate(() => {
 });
 console.log('SOLD:', JSON.stringify(sold));
 // 2b-4. Training: pick who trains, raise a skill, keep it.
-await page.evaluate(() => {
+await page.evaluate(async () => {
   const s = window.__session;
   s.univ.party.gold = 5000;
   s.univ.party.pcs.forEach((p) => { p.skillPts = 40; });
   s.onTrain();
 });
 await page.waitForTimeout(250);
-const trainWho = await page.evaluate(() => {
+const trainWho = await page.evaluate(async () => {
   const d = window.__dialogs.active;
   return d ? { text: d.spec.text, rows: d.spec.rows.length } : null;
 });
 await page.keyboard.press('1');
 await page.waitForTimeout(250);
-const trainList = await page.evaluate(() => {
+const trainList = await page.evaluate(async () => {
   const d = window.__dialogs.active;
   return d ? { rows: d.spec.rows.length, first: d.spec.rows[0].label } : null;
 });
@@ -232,14 +232,42 @@ const trained = await page.evaluate(() => ({
 }));
 console.log('TRAINED:', JSON.stringify({ trainBefore, trained }));
 
-await page.evaluate(() => {
+await page.evaluate(async () => {
   window.__session.chooseTalkNode(-14);
   window.__redraw();
 });
 
+// 2b-5. Specials: drive the VM through a synthetic chain. Running the town's
+//       real nodes here would block on the first message dialog, since a
+//       page.evaluate can't answer its own prompt.
+const specials = await page.evaluate(async () => {
+  const s = window.__session;
+  const saved = s.univ.town.record.specials;
+  const node = (over) => ({
+    type: 0, sd1: -1, sd2: -1, m1: -1, m2: -1, m3: -1, pic: -1, pictype: 4,
+    ex1a: -1, ex1b: -1, ex1c: -1, ex2a: -1, ex2b: -1, ex2c: -1, jumpto: -1, ...over,
+  });
+  // 1 = SET_SDF, 130 = IF_SDF, 2 = INC_SDF.
+  s.univ.town.record.specials = new Map([
+    [0, node({ type: 1, sd1: 40, sd2: 0, ex1a: 3, jumpto: 1 })],
+    [1, node({ type: 130, sd1: 40, sd2: 0, ex1a: 3, ex1b: 2, jumpto: -1 })],
+    [2, node({ type: 2, sd1: 40, sd2: 1, ex1a: 7, ex1b: 0 })],
+  ]);
+  await s.runSpecialRaw(1, 2, 0, { x: 5, y: 5 });
+  const out = {
+    flag: s.univ.party.getSdf(40, 0),
+    branched: s.univ.party.getSdf(40, 1),
+    ptrX: s.univ.party.getPtr(10),
+    realNodes: saved.size,
+  };
+  s.univ.town.record.specials = saved;
+  return out;
+});
+console.log('SPECIALS:', JSON.stringify(specials));
+
 // 2c. Doors: an unlocked one opens on contact; a locked one raises the prompt,
 //     and its Bash shortcut goes through the dialog host.
-const doors = await page.evaluate(() => {
+const doors = await page.evaluate(async () => {
   const s = window.__session;
   const scen = window.__scen;
   const t = s.univ.town.record;
@@ -255,7 +283,7 @@ const doors = await page.evaluate(() => {
     s.univ.party.townLoc = { x: unlocked.x, y: unlocked.y + 1 };
     s.center = { ...s.univ.party.townLoc };
     const before = scen.terTypes[t.terrain[unlocked.x][unlocked.y]].name;
-    s.move(0);
+    await s.move(0);
     out.unlocked = { before, after: scen.terTypes[t.terrain[unlocked.x][unlocked.y]].name };
   }
   const locked = find(9);
@@ -263,7 +291,7 @@ const doors = await page.evaluate(() => {
     s.univ.party.townLoc = { x: locked.x, y: locked.y + 1 };
     s.center = { ...s.univ.party.townLoc };
     for (const row of s.univ.town.explored) row.fill(1);
-    s.move(0);
+    await s.move(0);
     out.lockedAt = `${locked.x},${locked.y}`;
   }
   window.__redraw();
@@ -282,14 +310,14 @@ const bashed = await page.evaluate(() => ({
 console.log('DOOR PROMPT:', JSON.stringify({ promptUp, ...bashed }));
 
 // 2c-2. Bashing must ask who does it, and play its sound.
-const bashPrompt = await page.evaluate(() => {
+const bashPrompt = await page.evaluate(async () => {
   const d = window.__dialogs.active;
   return d ? { text: d.spec.text, rows: (d.spec.rows ?? []).length } : null;
 });
 console.log('BASH ASKS WHO:', JSON.stringify(bashPrompt));
 if (bashPrompt) {
   // Pick the first selectable PC through the dialog's own hit test.
-  const hit = await page.evaluate(() => {
+  const hit = await page.evaluate(async () => {
     const d = window.__dialogs.active;
     for (let y = 0; y < 430; y++)
       for (let x = 0; x < 605; x += 4) {
@@ -309,7 +337,7 @@ const bashDone = await page.evaluate(() => ({
 console.log('BASH RESULT:', JSON.stringify(bashDone));
 
 // 2e. Items: stand on a floor item, take it, and see it in the pack.
-const gotItem = await page.evaluate(() => {
+const gotItem = await page.evaluate(async () => {
   const s = window.__session;
   const target = s.univ.town.items.find((i) => !i.contained);
   if (!target) return { skipped: true };
@@ -328,7 +356,7 @@ console.log('GOT ITEM:', JSON.stringify(gotItem));
 await shot('01e-inventory');
 
 // 2d. Signs: looking at an adjacent sign opens a dialog with its text.
-const sign = await page.evaluate(() => {
+const sign = await page.evaluate(async () => {
   const s = window.__session;
   const signs = s.univ.town.record.signLocs;
   if (signs.length === 0) return { skipped: true };
@@ -358,7 +386,7 @@ await page.waitForTimeout(150);
  */
 const walkUntil = (goal, limit = 400) =>
   page.evaluate(
-    ({ goal, limit }) => {
+    async ({ goal, limit }) => {
       const s = window.__session;
       const done = () => (goal === 'outdoors' ? !s.inTown : s.inTown);
       // Direction enum: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
@@ -368,7 +396,7 @@ const walkUntil = (goal, limit = 400) =>
       while (!done() && steps < limit) {
         let moved = false;
         for (const d of dirs) {
-          if (s.move(d)) {
+          if (await s.move(d)) {
             moved = true;
             break;
           }
@@ -377,7 +405,7 @@ const walkUntil = (goal, limit = 400) =>
         steps++;
         if (!moved && !done()) {
           // Fully boxed in: nudge sideways and keep trying.
-          if (!s.move(2) && !s.move(6)) break;
+          if (!await s.move(2) && !await s.move(6)) break;
         }
       }
       window.__redraw();
@@ -389,13 +417,13 @@ const walkUntil = (goal, limit = 400) =>
 // 3. Walking to the town edge should drop the party onto the world map. The
 //    probes above wandered the party deep into the fort, so start over from a
 //    fresh entry first.
-await page.evaluate(() => {
+await page.evaluate(async () => {
   const s = window.__session;
   s.startTownMode(s.univ.scenario.startTown, 9);
   window.__redraw();
 });
 const exit = await walkUntil('outdoors');
-const outdoors = await page.evaluate(() => {
+const outdoors = await page.evaluate(async () => {
   const s = window.__session;
   return {
     mode: s.mode,
@@ -412,13 +440,13 @@ await shot('02-outdoors');
 
 // 4. The party can actually get somewhere on the world map. (Window sliding
 //    and world-edge clamping are covered by test/session.test.ts.)
-const roam = await page.evaluate(() => {
+const roam = await page.evaluate(async () => {
   const s = window.__session;
   const before = { ...s.univ.party.outLoc };
   let moves = 0;
   for (let i = 0; i < 40 && !s.inTown; i++) {
     // Try each direction in turn so terrain can't wedge the probe.
-    for (const d of [4, 2, 3, 5, 0, 6]) if (s.move(d)) { moves++; break; }
+    for (const d of [4, 2, 3, 5, 0, 6]) if (await s.move(d)) { moves++; break; }
   }
   window.__redraw();
   return { before, after: { ...s.univ.party.outLoc }, moves, place: s.locationName() };
@@ -426,7 +454,7 @@ const roam = await page.evaluate(() => {
 console.log('ROAMED:', JSON.stringify(roam));
 
 // 5. Walking back onto a town entrance re-enters a town.
-const reenter = await page.evaluate(() => {
+const reenter = await page.evaluate(async () => {
   const s = window.__session;
   const scen = window.__scen;
   const TOWN_ENTRANCE = 21;
@@ -441,7 +469,7 @@ const reenter = await page.evaluate(() => {
         s.univ.party.outLoc = { x: city.x, y: city.y + 1 };
         s.univ.party.locInSec = { x: city.x, y: city.y + 1 };
         s.center = { ...s.univ.party.outLoc };
-        s.move(0); // north, onto the entrance
+        await s.move(0); // north, onto the entrance
         window.__redraw();
         return {
           target: city.spec,
@@ -486,6 +514,10 @@ const ok =
   trained.str === trainBefore.str + 1 &&
   trained.gold < trainBefore.gold &&
   trained.dialogGone === true &&
+  specials.flag === 3 &&
+  specials.branched === 7 &&
+  specials.ptrX === 5 &&
+  specials.realNodes > 0 &&
   bashDone.dialogGone === true &&
   (gotItem.skipped === true || gotItem.carried.includes(gotItem.name)) &&
   (sign.skipped === true || (sign.readable === true && signShown.dialogOpen === true)) &&

@@ -44,7 +44,7 @@ function findTerrain(session: GameSession, special: TerSpec): { x: number; y: nu
 }
 
 describe('statAdj', () => {
-  it('reads the skill_bonus table', () => {
+  it('reads the skill_bonus table', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     // skill_bonus = {-3,-3,-2,-1,0,0,1,...}; Jenneke has strength 8 -> +1.
@@ -61,7 +61,7 @@ describe('statAdj', () => {
     expect(statAdj(pc, Skill.INTELLIGENCE)).toBe(2);
   });
 
-  it('clamps a skill above the end of the table', () => {
+  it('clamps a skill above the end of the table', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     pc.skills[Skill.STRENGTH] = 99;
@@ -70,7 +70,7 @@ describe('statAdj', () => {
 });
 
 describe('unlocked doors', () => {
-  it('opens on contact and costs the turn when the door blocked the way', () => {
+  it('opens on contact and costs the turn when the door blocked the way', async () => {
     const session = newSession();
     const where = findTerrain(session, TerSpec.CHANGE_WHEN_STEP_ON);
     expect(where).not.toBeNull();
@@ -80,20 +80,20 @@ describe('unlocked doors', () => {
 
     session.univ.party.townLoc = { x: where!.x, y: where!.y + 1 };
     session.center = { ...session.univ.party.townLoc };
-    const entered = session.move(Direction.N);
+    const entered = await session.move(Direction.N);
 
     expect(town.terrain[where!.x]![where!.y]).toBe(opened);
     // A closed door blocks movement, so opening it doesn't also move the party.
     expect(entered).toBe(false);
     expect(session.univ.party.townLoc).toEqual({ x: where!.x, y: where!.y + 1 });
     // Now that it's open, walking in works.
-    expect(session.move(Direction.N)).toBe(true);
+    expect(await session.move(Direction.N)).toBe(true);
     expect(session.univ.party.townLoc).toEqual(where);
   });
 });
 
 describe('locked doors', () => {
-  it('blocks the party and asks the host what to do', () => {
+  it('blocks the party and asks the host what to do', async () => {
     const session = newSession();
     const where = findTerrain(session, TerSpec.UNLOCKABLE);
     expect(where).not.toBeNull();
@@ -102,14 +102,14 @@ describe('locked doors', () => {
 
     session.univ.party.townLoc = { x: where!.x, y: where!.y + 1 };
     session.center = { ...session.univ.party.townLoc };
-    expect(session.move(Direction.N)).toBe(false);
+    expect(await session.move(Direction.N)).toBe(false);
     expect(asked).toEqual([where]);
     // The door is untouched until the player picks an action.
     expect(session.univ.terrainType(session.univ.town!.record.terrain[where!.x]![where!.y]!).special)
       .toBe(TerSpec.UNLOCKABLE);
   });
 
-  it('bashing eventually breaks the lock and remembers it', () => {
+  it('bashing eventually breaks the lock and remembers it', async () => {
     const session = newSession();
     const where = findTerrain(session, TerSpec.UNLOCKABLE)!;
     const town = session.univ.town!.record;
@@ -134,7 +134,7 @@ describe('locked doors', () => {
     expect(town.terrain[where.x]![where.y]).toBe(spec.flag1);
   });
 
-  it('a failed bash costs the basher some health', () => {
+  it('a failed bash costs the basher some health', async () => {
     const session = newSession();
     const where = findTerrain(session, TerSpec.UNLOCKABLE)!;
     const town = session.univ.town!.record;
@@ -149,7 +149,7 @@ describe('locked doors', () => {
     expect(session.univ.transcript.at(-1)).toContain("Didn't work");
   });
 
-  it('picking a lock needs lockpicks equipped', () => {
+  it('picking a lock needs lockpicks equipped', async () => {
     const session = newSession();
     const where = findTerrain(session, TerSpec.UNLOCKABLE)!;
     session.pickLock(where, 0);
@@ -160,7 +160,7 @@ describe('locked doors', () => {
 });
 
 describe('looking and signs', () => {
-  it('describes the space the party is standing on', () => {
+  it('describes the space the party is standing on', async () => {
     const session = newSession();
     const ter = session.lookAt(session.univ.party.townLoc);
     expect(ter).toBeGreaterThanOrEqual(0);
@@ -170,13 +170,13 @@ describe('looking and signs', () => {
     expect(tail.at(-1)).toContain(session.univ.terrainType(ter).name);
   });
 
-  it('refuses to describe a space it cannot see', () => {
+  it('refuses to describe a space it cannot see', async () => {
     const session = newSession();
     expect(session.lookAt({ x: -1, y: -1 })).toBe(-1);
     expect(session.univ.transcript.at(-1)).toContain("Can't see space");
   });
 
-  it('reads an adjacent sign but not a distant one', () => {
+  it('reads an adjacent sign but not a distant one', async () => {
     const session = newSession();
     const town = session.univ.town!.record;
     const sign = town.signLocs[0];
@@ -189,7 +189,7 @@ describe('looking and signs', () => {
     expect(session.univ.transcript.at(-1)).toContain('Too far away');
   });
 
-  it('lists creatures and floor items on a space', () => {
+  it('lists creatures and floor items on a space', async () => {
     const session = newSession();
     const town = session.univ.town!;
     const monst = town.monsters.find((m) => m.isAlive)!;

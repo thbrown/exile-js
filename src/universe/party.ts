@@ -54,6 +54,16 @@ export class Party {
   /** Stuff Done Flags — the scenario-visible persistent state array. */
   stuffDone: Uint8Array[] = Array.from({ length: SDF_ROWS }, () => new Uint8Array(SDF_COLUMNS));
 
+  /**
+   * Magic pointers (cParty::magic_ptrs) — 10..99 are values the engine writes
+   * for scripts to read back (10/11 are the trigger location, 12 its terrain).
+   */
+  magicPtrs: number[] = new Array<number>(90).fill(0);
+  /** Named pointers 100..199, each aliasing an SDF cell (cParty::pointers). */
+  pointers = new Map<number, [number, number]>();
+  /** Days on which each major event happened (cParty::key_times). */
+  keyTimes = new Map<number, number>();
+
   pcs: import('./player').Player[] = [];
 
   calcDay(): number {
@@ -74,6 +84,30 @@ export class Party {
 
   setSdf(row: number, col: number, value: number): void {
     if (this.sdLegit(row, col)) this.stuffDone[row]![col] = value & 0xff;
+  }
+
+  /** cParty::force_ptr — the engine writing one of the reserved 10..99 slots. */
+  forcePtr(p: number, value: number): void {
+    if (p < 10 || p >= 100) return;
+    this.magicPtrs[p - 10] = value & 0xff;
+  }
+
+  /** cParty::set_ptr — point a 100..199 pointer at an SDF cell. */
+  setPtr(p: number, row: number, col: number): void {
+    if (p < 100 || p >= 200) return;
+    this.pointers.set(p, [row, col]);
+  }
+
+  clearPtr(p: number): void {
+    this.pointers.delete(p);
+  }
+
+  /** cParty::get_ptr (party.cpp:1178) — 10..99 direct, 100..199 through an SDF. */
+  getPtr(p: number): number {
+    if (p < 10 || p >= 200) return 0;
+    if (p < 100) return this.magicPtrs[p - 10] ?? 0;
+    const cell = this.pointers.get(p);
+    return cell ? this.getSdf(cell[0], cell[1]) : 0;
   }
 
   /** The sector the party is standing in, in scenario coordinates. */

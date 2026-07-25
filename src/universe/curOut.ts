@@ -26,6 +26,11 @@ export class CurOut {
     return x >= 0 && y >= 0 && x < OUT_MAX_DIM && y < OUT_MAX_DIM;
   }
 
+  /** Write a terrain type into the assembled window (alter_space, outdoors). */
+  set(x: number, y: number, ter: number): void {
+    if (this.terrain[x]?.[y] !== undefined) this.terrain[x]![y] = ter;
+  }
+
   at(x: number, y: number): number {
     return this.terrain[x]![y]!;
   }

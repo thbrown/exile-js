@@ -39,6 +39,8 @@ import { Universe } from '../universe/universe';
 import { GameMode, PreModes, isOut, isTown } from './modes';
 import { bashDoor as bashDoorAt, pickLock as pickLockAt } from './doors';
 import { TalkAction, TalkState } from './talk';
+import { SpecCtx, SpecCtxType, SpecialHost } from './specials/context';
+import { SpecialsEngine } from './specials/vm';
 
 /** set_direction (boe.locutils.cpp) — direction from one point toward another. */
 function setDirection(from: Location, to: Location): Direction {
@@ -140,24 +142,30 @@ export class GameSession {
 
   // ---------------------------------------------------------------- movement
 
-  /** The entry point the input layer calls for a directional keypress. */
-  move(dir: Direction): boolean {
+  /**
+   * The entry point the input layer calls for a directional keypress.
+   *
+   * Movement is async because a square can carry a special that puts a dialog
+   * on screen before deciding whether the step goes through — the C++ blocks
+   * inside check_special_terrain, and we await instead.
+   */
+  async move(dir: Direction): Promise<boolean> {
     const from = this.inTown ? this.univ.party.townLoc : this.univ.party.outLoc;
     const destination = shiftLoc(from, dir);
     return this.moveTo(destination);
   }
 
   /** handle_action's movement branch (boe.actions.cpp:740-815). */
-  moveTo(destination: Location): boolean {
+  async moveTo(destination: Location): Promise<boolean> {
     let moved = false;
     if (this.inTown) {
-      moved = this.townMoveParty(destination);
+      moved = await this.townMoveParty(destination);
       if (this.inTown && moved) this.center = { ...this.univ.party.townLoc };
     }
     // A town move that leaves the map switches us to outdoors mid-action, and
     // the outdoor move then runs in the same keypress — same as the original.
     if (this.mode === GameMode.OUTDOORS) {
-      if (this.outdMoveParty(destination)) {
+      if (await this.outdMoveParty(destination)) {
         moved = true;
         this.center = { ...this.univ.party.outLoc };
         this.updateExplored(this.univ.party.outLoc);
@@ -177,12 +185,17 @@ export class GameSession {
   }
 
   /** outd_move_party (boe.actions.cpp:3942). */
-  private outdMoveParty(destination: Location): boolean {
+  private async outdMoveParty(destination: Location): Promise<boolean> {
     const { party, out, scenario } = this.univ;
     if (!out.isOnMap(destination.x, destination.y)) return false;
 
-    // TODO(M4): check_special_terrain for OUT_MOVE runs here and can block
-    // the move or teleport the party into a town.
+    // A special on the destination square can block the step outright.
+    const special = this.specialAt(destination);
+    if (special >= 0) {
+      const { blocked } = await this.runSpecial(
+        SpecCtx.OUT_MOVE, SpecCtxType.OUTDOOR, special, destination);
+      if (blocked) return false;
+    }
 
     const offset = { x: destination.x - party.outLoc.x, y: destination.y - party.outLoc.y };
     const storeCorner = { ...party.outdoorCorner };
@@ -291,7 +304,7 @@ export class GameSession {
   }
 
   /** town_move_party (boe.actions.cpp:4139). */
-  private townMoveParty(destination: Location): boolean {
+  private async townMoveParty(destination: Location): Promise<boolean> {
     const { party } = this.univ;
     const town = this.univ.town!;
     const rect = town.record.inTownRect;
@@ -318,11 +331,39 @@ export class GameSession {
 
     party.direction = setDirection(party.townLoc, destination);
 
-    // check_special_terrain for TOWN_MOVE (boe.specials.cpp:152). Only the
-    // parts that don't need the specials VM are here; the rest is M4.
+    // check_special_terrain for TOWN_MOVE (boe.specials.cpp:152).
     if (!this.checkSpecialTerrain(destination)) return false;
 
-    if (this.townIsBlocked(destination)) {
+    const blockedTerrain = this.townIsBlocked(destination);
+
+    // A special attached to the square runs before the step is committed, and
+    // can block it (its `a` return) or force it through (`b`). A blocked
+    // square still runs its special when the terrain is a door or a
+    // call-special type (boe.specials.cpp:243).
+    const special = this.specialAt(destination);
+    if (special >= 0) {
+      const terSpec = this.univ.terrainType(
+        town.record.terrain[destination.x]![destination.y]!).special;
+      const runIt = !blockedTerrain
+        || terSpec === TerSpec.CHANGE_WHEN_STEP_ON
+        || terSpec === TerSpec.CALL_SPECIAL;
+      if (runIt) {
+        const { blocked, forced } = await this.runSpecial(
+          SpecCtx.TOWN_MOVE, SpecCtxType.TOWN, special, destination);
+        if (blocked) return false;
+        // The town may have changed under us, or the party teleported.
+        if (!this.inTown || this.univ.town !== town) return true;
+        if (forced) {
+          party.townLoc = destination;
+          party.age++;
+          town.makeExplored(destination.x, destination.y);
+          this.updateExplored(party.townLoc);
+          return true;
+        }
+      }
+    }
+
+    if (blockedTerrain) {
       this.univ.addStringToBuf(`Blocked: ${DIR_NAMES[party.direction] ?? ''}`);
       return false;
     }
@@ -401,6 +442,17 @@ export class GameSession {
     } else {
       if (univ.out.isRoad(where.x, where.y)) univ.addStringToBuf('    Road');
       if (univ.out.isSpot(where.x, where.y)) univ.addStringToBuf('    Special Encounter');
+    }
+
+    // adj_town_look (boe.specials.cpp:1292): looking at an adjacent special
+    // square triggers it. The chain runs after the description is printed.
+    if (dist(from, where) <= 1) {
+      const special = this.specialAt(where);
+      if (special >= 0)
+        void this.runSpecial(
+          town ? SpecCtx.TOWN_LOOK : SpecCtx.OUT_LOOK,
+          town ? SpecCtxType.TOWN : SpecCtxType.OUTDOOR,
+          special, where);
     }
 
     if (!isLit) {
@@ -548,12 +600,67 @@ export class GameSession {
   // ------------------------------------------------------- special terrain
 
   /**
+   * The specials interpreter. The host installs it (with its dialog hooks) via
+   * `attachSpecials`; without one the game runs with scripting inert, which is
+   * what the headless tests that don't care about specials do.
+   */
+  specials: SpecialsEngine | null = null;
+
+  attachSpecials(host: SpecialHost): void {
+    this.specials = new SpecialsEngine(this.univ, host);
+  }
+
+  /**
+   * Run a special chain and apply what it decided. Returns `blocked` so
+   * movement can cancel the step, matching run_special's `a` return.
+   */
+  async runSpecial(
+    mode: SpecCtx, type: SpecCtxType, node: number, where: Location,
+  ): Promise<{ blocked: boolean; forced: boolean }> {
+    if (!this.specials || node < 0) return { blocked: false, forced: false };
+    const result = await this.specials.run(mode, type, node, where);
+    if (result.redraw) this.onRedraw?.();
+    return { blocked: result.a > 0, forced: result.b > 0 };
+  }
+
+  /** The same, but handing back the raw return slots (TALK uses them for strings). */
+  async runSpecialRaw(
+    mode: SpecCtx, type: SpecCtxType, node: number, where: Location,
+  ): Promise<{ a: number; b: number }> {
+    if (!this.specials || node < 0) return { a: -1, b: -1 };
+    const result = await this.specials.run(mode, type, node, where);
+    if (result.redraw) this.onRedraw?.();
+    return { a: result.a, b: result.b };
+  }
+
+  /** Set by the host so a special that changes the world can repaint. */
+  onRedraw: (() => void) | null = null;
+
+  /**
+   * The special node attached to a town square, if any (cTown::special_locs).
+   */
+  specialAt(where: Location): number {
+    const town = this.univ.town;
+    if (town) {
+      if (!town.isSpecialSpot(where.x, where.y)) return -1;
+      for (const loc of town.record.specialLocs)
+        if (loc.x === where.x && loc.y === where.y) return loc.spec;
+      return -1;
+    }
+    // Outdoors the spots are indexed in sector coordinates.
+    const local = this.univ.party.globalToLocal(where);
+    if (!this.univ.out.isSpot(where.x, where.y)) return -1;
+    for (const loc of this.univ.out.sectorAt(where).specialLocs)
+      if (loc.x === local.x && loc.y === local.y) return loc.spec;
+    return -1;
+  }
+
+  /**
    * The subset of check_special_terrain (boe.specials.cpp:152) that town
    * movement needs and that doesn't require the specials VM. Returns false
    * when the move is cancelled.
    *
-   * TODO(M4): step-on specials, conveyors, force barriers, webs, pushable
-   * crates/barrels/blocks, and the CALL_SPECIAL terrain type.
+   * TODO(M5): conveyors, force barriers, webs and pushable crates/barrels.
    */
   private checkSpecialTerrain(where: Location): boolean {
     const town = this.univ.town;
@@ -574,6 +681,13 @@ export class GameSession {
         // needs a dialog, so it defers to the host via onLockedDoor.
         this.onLockedDoor?.(where, ter);
         return false;
+      case TerSpec.CALL_SPECIAL:
+        // The terrain itself names a node; flag1 is which one.
+        void this.runSpecial(
+          SpecCtx.TOWN_MOVE,
+          this.univ.town ? SpecCtxType.TOWN : SpecCtxType.OUTDOOR,
+          spec.flag1, where);
+        return true;
       case TerSpec.DAMAGING:
       case TerSpec.DANGEROUS:
         // TODO(M5): terrain damage needs damage_pc and the status system.
@@ -592,6 +706,16 @@ export class GameSession {
 
   /** Set by the host: called when a TRAINING node needs its dialog. */
   onTrain: (() => void) | null = null;
+
+  /**
+   * force_town_enter — pin where the party lands before start_town_mode runs,
+   * which is how a staircase drops you at a specific square.
+   */
+  forcedTownLoc: Location | null = null;
+
+  forceTownEntry(townNum: number, where: Location): void {
+    this.forcedTownLoc = { ...where };
+  }
 
   /**
    * select_pc's candidate list (boe.items.cpp:878). `mode` mirrors the eSelectPC
@@ -688,6 +812,18 @@ export class GameSession {
       this.startShopMode(shopNum, costAdj, name) || this.startShopModeAnyPc(shopNum, costAdj, name);
     this.talk.onItemShop = (mode, a, b, c) => this.startItemShop(mode, a, b, c);
     this.talk.onTrain = () => this.onTrain?.();
+    this.talk.onCallSpecial = (node, scenario) => {
+      const type = scenario ? SpecCtxType.SCEN : SpecCtxType.TOWN;
+      void this.runSpecialRaw(SpecCtx.TALK, type, node, this.univ.party.townLoc).then((r) => {
+        // In TALK mode a message node hands back string numbers instead of
+        // showing a dialog (handle_message, boe.specials.cpp:4645).
+        const strs = scenario
+          ? this.univ.scenario.specStrs
+          : this.univ.town?.record.specStrs ?? [];
+        this.talk?.setReply(r.a, r.b, strs);
+        this.onRedraw?.();
+      });
+    };
     this.talk.onRest = (length, hp, sp, wakeAt) => {
       doRest(this.univ, length, hp, sp, this.isOutdoors);
       this.univ.party.townLoc = { ...wakeAt };
@@ -897,10 +1033,17 @@ export class GameSession {
     this.populateTown(town);
     this.placePresetItems(town);
 
-    // TODO(M4): handle_town_specials queues the on-entry special here.
+    // handle_town_specials: the town's entry node fires once we're inside.
+    if (record.specOnEntry >= 0)
+      void this.runSpecial(
+        SpecCtx.ENTER_TOWN, SpecCtxType.TOWN, record.specOnEntry, this.univ.party.townLoc);
+
+    // A staircase or an OUT_FORCE_TOWN node can pin the arrival square.
+    const forced = this.forcedTownLoc;
+    this.forcedTownLoc = null;
     const start =
       entryDir < 4 ? record.startLocs[entryDir]! : { x: -1, y: -1 };
-    let where = start;
+    let where = forced ?? start;
     if (where.x < 0)
       where =
         record.startLocs.find((l) => l.x >= 0) ??
@@ -1099,7 +1242,9 @@ export class GameSession {
       const exit = town.record.exits[idx]!;
       toReturn = exit.x > 0 ? party.localToGlobal(exit) : fallback;
       party.outLoc = { x: toReturn.x + nudge.x, y: toReturn.y + nudge.y };
-      // TODO(M4): handle_leave_town_specials fires exit.spec here.
+      // handle_leave_town_specials: the exit this side of the town uses.
+      if (exit.spec >= 0)
+        void this.runSpecial(SpecCtx.LEAVE_TOWN, SpecCtxType.TOWN, exit.spec, destination);
     };
 
     if (destination.x <= rect.left)
@@ -1133,7 +1278,7 @@ export class GameSession {
    * update_explored (boe.locutils.cpp:230) — reveal what the party can see
    * from `where`: the 9x9 block around it, minus anything sight-blocked.
    */
-  private updateExplored(where: Location): void {
+  updateExplored(where: Location): void {
     const { out } = this.univ;
     const town = this.univ.town;
     if (town) {

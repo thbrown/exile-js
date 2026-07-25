@@ -89,6 +89,12 @@ export class TalkState {
    * service mode. Same reason as onShop: the session owns the panel.
    */
   onItemShop: ((mode: ItemShopMode, a: number, b: number, c: number) => void) | null = null;
+  /**
+   * How the two call-special nodes run a chain. The VM is async, so the reply
+   * is patched in when the chain finishes rather than before this node returns;
+   * the host redraws either way, so the difference isn't visible.
+   */
+  onCallSpecial: ((node: number, scenario: boolean) => void) | null = null;
   /** How a TRAINING node opens the spend-skill-points dialog. */
   onTrain: (() => void) | null = null;
   /** How an INN node rests the party and moves it to the bed it paid for. */
@@ -426,6 +432,12 @@ export class TalkState {
         this.canRecord = false;
         this.onItemShop?.(ItemShopMode.RECHARGE, a, b, c);
         break;
+      case TalkNodeType.CALL_TOWN_SPEC:
+        this.onCallSpecial?.(a, false);
+        break;
+      case TalkNodeType.CALL_SCEN_SPEC:
+        this.onCallSpecial?.(a, true);
+        break;
       case TalkNodeType.END_FORCE:
         this.endForced = true;
         break;
@@ -506,6 +518,18 @@ export class TalkState {
   concludeBusiness(): void {
     this.canRecord = false;
     this.finish('You conclude your business.', '');
+  }
+
+  /**
+   * A special that ran during a conversation answers with two string numbers
+   * rather than a dialog; this swaps them in as the reply
+   * (handle_message's TALK branch, boe.specials.cpp:4645).
+   */
+  setReply(str1: number, str2: number, strs: string[]): void {
+    if (str1 < 0 && str2 < 0) return;
+    this.str1 = str1 >= 0 ? strs[str1] ?? '' : '';
+    this.str2 = str2 >= 0 ? strs[str2] ?? '' : '';
+    this.rebuildWords();
   }
 
   private finish(str1: string, str2: string): 'ok' | 'done' {

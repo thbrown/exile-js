@@ -17,7 +17,7 @@ const DEFERRED_TOP = new Set([
   'editor',
 ]);
 const DEFERRED_GAME = new Set([
-  'special-item', 'quest', 'timer', 'string', 'journal', 'town-flag',
+  'special-item', 'quest', 'timer', 'journal', 'town-flag',
 ]);
 
 /** The entry tags that carry a single number and map straight to a type. */
@@ -121,6 +121,8 @@ export interface ScenarioHeader {
   outdoorStart: { x: number; y: number };
   sectorStart: { x: number; y: number };
   shops: Shop[];
+  /** spec_strs — the scenario-level message strings specials print. */
+  specStrs: string[];
   /** store_item_rects — where each town's shops keep sold-back goods. */
   storeItemRects: Map<number, { top: number; left: number; bottom: number; right: number }>;
 }
@@ -139,6 +141,7 @@ export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): Scen
     outdoorStart: { x: 0, y: 0 },
     sectorStart: { x: 0, y: 0 },
     shops: [],
+    specStrs: [],
     storeItemRects: new Map(),
   };
   for (const elem of children(root)) {
@@ -160,6 +163,11 @@ export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): Scen
         else if (gt === 'outdoor-start') hdr.outdoorStart = locFromXml(g);
         else if (gt === 'sector-start') hdr.sectorStart = locFromXml(g);
         else if (gt === 'shop') hdr.shops.push(readShopFromXml(g, fname));
+        else if (gt === 'string') {
+          const id = intAttr(g, 'id');
+          while (hdr.specStrs.length <= id) hdr.specStrs.push('');
+          hdr.specStrs[id] = text(g);
+        }
         else if (gt === 'store-items') {
           const town = intAttr(g, 'town');
           if (hdr.storeItemRects.has(town))

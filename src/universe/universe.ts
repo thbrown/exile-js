@@ -10,6 +10,10 @@ import { Scenario } from '../data/scenario';
 import { ShopItemType, ShopType } from '../data/shop';
 import { Town } from '../data/town';
 import { returnTreasure } from '../data/treasure';
+import { SpecCtxType } from '../game/specials/context';
+
+/** BUFFER_STR (universe.hpp:247) — "the string buffer" as a message number. */
+export const BUFFER_STR = -8;
 import { Terrain } from '../data/terrain';
 import { CurOut } from './curOut';
 import { CurTown } from './curTown';
@@ -117,6 +121,43 @@ export class Universe {
 
   isInTown(): boolean {
     return this.party.townNum < TOWN_NUM_OUTDOORS;
+  }
+
+  /**
+   * The specials VM's text buffer (cUniverse::strbuf) plus its ten spares.
+   * Scripts build a string in it with the APPEND_* nodes and then print it by
+   * naming string number BUFFER_STR.
+   */
+  strBuf = '';
+  extraBufs: string[] = new Array<string>(10).fill('');
+
+  swapBuf(which: number): void {
+    if (which < 0 || which >= this.extraBufs.length) return;
+    const tmp = this.strBuf;
+    this.strBuf = this.extraBufs[which]!;
+    this.extraBufs[which] = tmp;
+  }
+
+  /**
+   * cUniverse::get_str (universe.cpp:1529) — resolve a message number against
+   * the list its node lives in. -1 means "no string"; BUFFER_STR is the text
+   * buffer. Returns null when the number is out of range.
+   */
+  getStr(type: SpecCtxType, which: number): string | null {
+    if (which === BUFFER_STR) return this.strBuf;
+    if (which === -1) return null;
+    const list = type === SpecCtxType.OUTDOOR
+      ? this.out.sector.specStrs
+      : type === SpecCtxType.TOWN
+        ? this.town?.record.specStrs ?? []
+        : this.scenario.specStrs;
+    if (which < 0 || which >= list.length) return null;
+    return list[which] ?? '';
+  }
+
+  /** cUniverse::get_strs — the common "a message and its continuation" pair. */
+  getStrs(type: SpecCtxType, which1: number, which2: number): [string, string] {
+    return [this.getStr(type, which1) ?? '', this.getStr(type, which2) ?? ''];
   }
 
   /** add_string_to_buf (boe.text.cpp) — one line into the transcript pane. */
