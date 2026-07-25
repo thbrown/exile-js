@@ -5,21 +5,31 @@
 
 ## Current state
 
-**M2 in progress (2026-07-06): town/talk parsing done; town enter/exit + NPC rendering working and verified headless. Remaining M2: full 800×600 UI shell (boe.ui.cpp layout), sound, pregen party via tagfile reader, replay driver, proper GameSession/mode architecture (demo logic currently lives in src/main.ts).**
+**M2 in progress (2026-07-25): real Universe/GameSession architecture + the full game screen are in. A new game now starts in the scenario's start town with the pregen party, and you can walk out to the world map and back into towns, all on the classic 605×430 UI. Remaining M2: sound, inventory panel contents, terrain trim/frills + light/unexplored masking, replay driver.**
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
 - Monster graphics: `render/mPicIndex.ts` (mechanically extracted m_pic_index table) + `render/monsterPics.ts` (get_monster_template_rect port: sheet monst{1+(i+part)/20}, col 2*(idx/10)+adj, adj=1 for default pose).
-- Demo (`src/main.ts`): outdoors↔town transitions — walk onto a city loc to enter (start_locs by travel direction: N→south entrance etc.), step past inTownRect to leave. NPCs drawn (ALWAYS-time only).
-- Headless verification: `scripts/verify-town.mjs` + `verify-walkabout.mjs` (start vite on :5199 first). `window.__demo`/`__scen` exposed for driving.
+- **Architecture** (replaces the old ad hoc `Demo` class):
+  - `game/modes.ts` — `GameMode` = eGameMode verbatim + isOut/isTown/isCombat (range comparisons depend on the order, don't reshuffle).
+  - `universe/` — `Party` (gold/food/age/SDF + the outdoorCorner/iwc/outLoc/locInSec position model), `Player` + `makePresetPlayer` (PARTY_DEFAULT/PARTY_DEBUG pregens from pc.cpp:1032), `CurOut` (96×96 window built from a 2×2 sector block, shift_universe_* port), `CurTown` + `Creature`, `Universe` (holds party/out/town/rng/transcript).
+  - `game/session.ts` — `GameSession`: outd_move_party, town_move_party, start_town_mode, end_town_mode, checkTownEntrance (find_direction_from), world-edge clamping, explored-map updates. Unported branches are marked `TODO(Mn)` inline.
+  - `render/` — `layout.ts` (win_to_rects, PC row rects, toolbar placement), `screen.ts` (the whole 605×430 composite), `tiling.ts` (pixpats bg patterns), `text.ts`, `colours.ts`, `pcPics.ts`.
+  - `platform/input.ts` — `InputRouter` with the `dialogStack` gate that will suppress game input under modal dialogs.
+- **Party start is faithful**: put_party_in_scen starts the party *inside* `scenario.startTown` (entry_dir 9), not outdoors. `GameSession.startNewGame()` does this.
+- Headless verification: `scripts/verify-screen.mjs` (start vite on :5199 first, `SHOTS_DIR=… node scripts/verify-screen.mjs`) — checks all six panels paint, start-in-town, walk out, roam, re-enter, zero console errors. `window.__session`/`__univ`/`__screen`/`__scen`/`__redraw` exposed for driving.
+- `test/session.test.ts` — 11 tests over party presets, town enter/exit, map memory, entrance direction, window sliding, world edge.
 
 Notes for M2 implementer:
+- The window is **605×430** (`global.hpp:30`), not 800×600 — the earlier plan text was wrong. index.html scales the canvas ×2 in CSS.
+- Terrain rendering is still flat: no trim/frills (`draw_trim`, `place_trim`), no roads overlay, no light mask or unexplored mask. Those are the next visible-fidelity gap.
+- The inventory panel is a placeholder until the item/equip model lands (M3).
 - Monster abilities are captured as lossless `RawAbility` records (monster.ts) — port uAbility union semantics at M5, reference readMonstAbilFromXml (fileio_scen.cpp:1425).
 - Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
 - scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
-- `npm test` → 36 tests green; `npm run dev` → walkabout demo (arrow keys, Home/End/PgUp/PgDn for diagonals).
-- `node scripts/verify-walkabout.mjs` (needs `npx vite --port 5199` running) drives the demo headless: renders 97% non-black, sector crossing works. Playwright + chromium installed as devDependency.
+- `npm test` → 55 tests green; `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
+- `node scripts/verify-screen.mjs` (needs `npx vite --port 5199` running) drives the real UI headless and screenshots it. Playwright + chromium installed as devDependency.
 - Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
 - M0: rng (std::mt19937-verified), location, sheets tile math, assets in `public/data`, scenarios unpacked in `public/scenarios`.
@@ -28,7 +38,7 @@ Notes for M2 implementer:
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
 - [x] **M1 — Scenario loads, outdoor walkabout**: XML/.map/.spec parsers, terrain view, outdoor movement (gzip+tar for packed .boes deferred to file-upload work; items/monsters XML land with M2)
-- [ ] **M2 — Towns + full 800×600 shell**: town enter/exit, UI chrome, sound, pregen party via tagfile reader, replay driver
+- [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅; sound, inventory panel, terrain trim + masks, replay driver still open
 - [ ] **M3 — Dialog toolkit + talk + shops**
 - [ ] **M4 — Specials interpreter (breadth-first)**: VM + general/oneshot/ifthen/town groups
 - [ ] **M5 — Combat** (M5a melee, M5b missiles+AI, M5c spells)
@@ -56,8 +66,12 @@ Notes for M2 implementer:
 - (2026-07-05) `../exile3-mapping/Exile3/strings.txt` is a headerless Windows EXE image, not text — game text is inside as resources.
 - (2026-07-05) BoE legacy `outdoor_record_type` ≈ 4146 B vs E3 zone 3220 B; difference is mostly the `specials[60]` node array (1320 B) BoE added — E3 encounter logic is hardcoded in EXILE3.EXE.
 - (2026-07-05) TOWN.DAT (709,200 B) divides cleanly at 4728×150, 3546×200, 5910×120 … layout not yet pinned.
+- (2026-07-25) BoE's window is 605×430, terrain view is 9×9 tiles centred on index 4, tiles at (13+28q, 13+36r) inside the terView panel. `rectangle` is `{top,left,bottom,right}`.
+- (2026-07-25) `rsrc/bases/{bladbase,cavebase}` are *scenario templates*, not party files — there is no pregen party file to read. The pregen party is hardcoded (`cPlayer(party, PARTY_DEFAULT, slot)`), so no tagfile reader is needed to start a game; .exg loading stays an M7 concern.
+- (2026-07-25) The party starts **in the start town**, via `start_town_mode(which_town_start, 9)`. `scenario.outdoorStart`/`sectorStart` is only where it lands on leaving.
+- (2026-07-25) `find_direction_from` maps travel direction → entrance index as N→2, S→0, other-easterly→3, other-westerly→1. An earlier demo had this inverted.
 
 ## Next steps
 
-1. Finish M0 (this session): scaffold, rng+location ports w/ tests, asset copy, tile demo.
-2. M1: tar/gzip reader + scenario XML parsers against `test/fixtures` (copy from `../exile-wasm/test/files`).
+1. Finish M2: sound (Web Audio over SND*.wav), terrain trim/frills + light and unexplored masks, inventory panel once the item model exists, replay driver.
+2. M3: dialogxml parser + async dialog runner, then talking and shopping modes.

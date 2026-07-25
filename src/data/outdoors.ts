@@ -100,4 +100,6 @@ export class Sector {
     { x: 0, y: 0 },
   ];
   specials = new Map<number, SpecialNode>();
+  /** Explored flags, persisted per sector in saves (cOutdoors::maps). */
+  maps: Uint8Array[] = Array.from({ length: SECTOR_SIZE }, () => new Uint8Array(SECTOR_SIZE));
 }

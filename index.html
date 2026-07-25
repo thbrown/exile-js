@@ -4,23 +4,55 @@
     <meta charset="UTF-8" />
     <title>exile-js</title>
     <style>
+      /* The game's own fonts, so panel text measures like the C++ build. */
+      @font-face {
+        font-family: 'BoEPlain';
+        src: url('/data/fonts/plain.ttf') format('truetype');
+      }
+      @font-face {
+        font-family: 'BoEBold';
+        src: url('/data/fonts/bold.ttf') format('truetype');
+        font-weight: bold;
+      }
+      @font-face {
+        font-family: 'BoEDungeon';
+        src: url('/data/fonts/dungeon.ttf') format('truetype');
+      }
+      @font-face {
+        font-family: 'BoEMaidenword';
+        src: url('/data/fonts/maidenword.ttf') format('truetype');
+      }
+
       body {
         background: #1a1a1a;
         color: #ddd;
         font-family: system-ui, sans-serif;
-        margin: 20px;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
       }
+      #status {
+        margin: 0;
+        font-size: 13px;
+        color: #aaa;
+        min-height: 1.2em;
+      }
+      /* Drawn at 605x430 and scaled up so the pixel art stays crisp. */
       canvas {
         image-rendering: pixelated;
         background: #000;
-        border: 1px solid #444;
+        width: 1210px;
+        max-width: 100%;
+        height: auto;
       }
     </style>
   </head>
   <body>
-    <h1>exile-js — M0 tile demo</h1>
-    <p id="status">Loading terrain sheets…</p>
-    <canvas id="canvas"></canvas>
+    <canvas id="canvas" width="605" height="430"></canvas>
+    <p id="status">Loading…</p>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -88,7 +88,11 @@ export interface Timer {
 export class Town {
   constructor(readonly maxDim: number) {
     this.terrain = Array.from({ length: maxDim }, () => new Array<number>(maxDim).fill(0));
+    this.maps = Array.from({ length: maxDim }, () => new Uint8Array(maxDim));
   }
+
+  /** Explored flags, persisted in saves (cTown::maps); maps[x][y]. */
+  maps: Uint8Array[];
 
   name = '';
   comment: string[] = ['', '', ''];
