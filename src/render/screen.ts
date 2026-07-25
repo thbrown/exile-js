@@ -702,7 +702,8 @@ export class Screen {
             drawString(this.ctx, { ...dest, left: dest.left + 35 }, String(price),
               { font: 'bold', size: 10, colour: Colours.BLACK });
           }
-        } else {
+        } else if (!session.shop) {
+          // MODE_SHOP has no row buttons at all (handle_item_shop_action:1218).
           icon(ITEM_BTN_ICONS.give, at(row.give));
           icon(ITEM_BTN_ICONS.drop, at(row.drop));
           icon(ITEM_BTN_ICONS.info, at(row.info));
