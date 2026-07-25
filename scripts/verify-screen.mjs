@@ -93,6 +93,14 @@ const talk = await page.evaluate(() => {
   };
 });
 console.log('TALK:', JSON.stringify(talk));
+// Letter shortcuts (talk_chars): 'j' asks about the speaker's job.
+await page.keyboard.press('j');
+await page.waitForTimeout(150);
+const talkKeys = await page.evaluate(() => {
+  const s = window.__session;
+  return { job: s.talk?.str1 === s.talk?.person.job, str1: s.talk?.str1.slice(0, 40) };
+});
+console.log('TALK KEY j:', JSON.stringify(talkKeys));
 await shot('01b-talking');
 const talkClosed = await page.evaluate(() => {
   const s = window.__session;
@@ -163,14 +171,9 @@ if (bashPrompt) {
       }
     return null;
   });
-  if (hit) {
-    const box = await (await page.$('#canvas')).boundingBox();
-    await page.mouse.click(
-      box.x + (hit.x / 605) * box.width,
-      box.y + (hit.y / 430) * box.height,
-    );
-    await page.waitForTimeout(200);
-  }
+  // Number keys pick a PC, the way select-pc.xml's def-keys do.
+  await page.keyboard.press('3');
+  await page.waitForTimeout(200);
 }
 const bashDone = await page.evaluate(() => ({
   dialogGone: !window.__dialogs.active,
@@ -338,7 +341,8 @@ const ok =
   doors.unlocked?.after !== doors.unlocked?.before &&
   promptUp === true &&
   bashed.stillAsking === true &&
-  bashPrompt?.text === 'Who will bash?' &&
+  bashPrompt?.text.startsWith('Who will bash?') &&
+  talkKeys.job === true &&
   bashPrompt?.rows === 6 &&
   bashDone.dialogGone === true &&
   (gotItem.skipped === true || gotItem.carried.includes(gotItem.name)) &&

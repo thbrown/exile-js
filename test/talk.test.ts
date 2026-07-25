@@ -145,6 +145,51 @@ describe('conversation flow', () => {
   });
 });
 
+describe('keyboard shortcuts', () => {
+  it('maps talk_chars to the preset buttons', () => {
+    const { talk } = talkingSession();
+    const pairs: [string, TalkAction][] = [
+      ['l', TalkAction.LOOK],
+      ['n', TalkAction.NAME],
+      ['j', TalkAction.JOB],
+      ['b', TalkAction.BUY],
+      ['s', TalkAction.SELL],
+      ['r', TalkAction.RECORD],
+      ['d', TalkAction.DONE],
+      ['a', TalkAction.ASK],
+    ];
+    for (const [key, node] of pairs) {
+      expect(talk.presetForKey(key)?.node).toBe(node);
+      // Case doesn't matter.
+      expect(talk.presetForKey(key.toUpperCase())?.node).toBe(node);
+    }
+    // Escape acts as Done, Space as Go Back.
+    expect(talk.presetForKey('Escape')?.node).toBe(TalkAction.DONE);
+    expect(talk.presetForKey('z')).toBeNull();
+  });
+
+  it('only answers keys whose button is on screen', () => {
+    const { session, talk } = talkingSession();
+    // "Go Back" isn't offered until there's history, so Space does nothing yet.
+    expect(talk.presetForKey(' ')).toBeNull();
+    session.chooseTalkNode(TalkAction.JOB);
+    expect(talk.presetForKey(' ')?.node).toBe(TalkAction.BACK);
+  });
+
+  it('drops every shortcut but Done and Record once the talk is forced to end', () => {
+    const { session, talk } = talkingSession();
+    const node = talk.speech!.talkNodes.findIndex(
+      (n) => n.type === TalkNodeType.END_FORCE && n.personality === talk.personality,
+    );
+    if (node < 0) return;
+    session.chooseTalkNode(node);
+    expect(talk.endForced).toBe(true);
+    expect(talk.presetForKey('d')?.node).toBe(TalkAction.DONE);
+    expect(talk.presetForKey('l')).toBeNull();
+    expect(talk.presetForKey('j')).toBeNull();
+  });
+});
+
 describe('node effects', () => {
   /** Find a node of a given type reachable from any personality in a town. */
   function findNode(type: TalkNodeType): { town: number; index: number } | null {

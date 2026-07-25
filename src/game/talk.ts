@@ -29,17 +29,21 @@ export enum TalkAction {
   ASK = -16,
 }
 
-/** The preset buttons and their positions inside the talk area (x, y). */
-export const PRESET_WORDS: { word: string; node: TalkAction; x: number; y: number }[] = [
-  { word: 'Look', node: TalkAction.LOOK, x: 4, y: 366 },
-  { word: 'Name', node: TalkAction.NAME, x: 70, y: 366 },
-  { word: 'Job', node: TalkAction.JOB, x: 136, y: 366 },
-  { word: 'Buy', node: TalkAction.BUY, x: 4, y: 389 },
-  { word: 'Sell', node: TalkAction.SELL, x: 70, y: 389 },
-  { word: 'Record', node: TalkAction.RECORD, x: 121, y: 389 },
-  { word: 'Done', node: TalkAction.DONE, x: 210, y: 389 },
-  { word: 'Go Back', node: TalkAction.BACK, x: 190, y: 366 },
-  { word: 'Ask About...', node: TalkAction.ASK, x: 4, y: 343 },
+/**
+ * The preset buttons, their positions inside the talk area (x, y), and their
+ * keyboard shortcuts — talk_chars (boe.actions.cpp:2790) pairs one letter with
+ * each preset in this order.
+ */
+export const PRESET_WORDS: { word: string; node: TalkAction; x: number; y: number; key: string }[] = [
+  { word: 'Look', node: TalkAction.LOOK, x: 4, y: 366, key: 'l' },
+  { word: 'Name', node: TalkAction.NAME, x: 70, y: 366, key: 'n' },
+  { word: 'Job', node: TalkAction.JOB, x: 136, y: 366, key: 'j' },
+  { word: 'Buy', node: TalkAction.BUY, x: 4, y: 389, key: 'b' },
+  { word: 'Sell', node: TalkAction.SELL, x: 70, y: 389, key: 's' },
+  { word: 'Record', node: TalkAction.RECORD, x: 121, y: 389, key: 'r' },
+  { word: 'Done', node: TalkAction.DONE, x: 210, y: 389, key: 'd' },
+  { word: 'Go Back', node: TalkAction.BACK, x: 190, y: 366, key: 'g' },
+  { word: 'Ask About...', node: TalkAction.ASK, x: 4, y: 343, key: 'a' },
 ];
 
 /** A clickable word: either a preset button or a keyword inside the reply. */
@@ -176,6 +180,20 @@ export class TalkState {
   /** The reply as one string; '|' separates the two halves, as in the C++. */
   fullText(): string {
     return `${this.str1} |${this.str2} `;
+  }
+
+  /**
+   * The preset a keystroke activates, or null. Escape acts as Done and Space as
+   * Go Back (boe.actions.cpp:2876). Only presets currently on screen respond,
+   * so a forced-end conversation only answers Done and Record.
+   */
+  presetForKey(key: string): TalkWord | null {
+    let letter = key.toLowerCase();
+    if (key === 'Escape') letter = 'd';
+    else if (key === ' ') letter = 'g';
+    const preset = PRESET_WORDS.find((p) => p.key === letter);
+    if (!preset) return null;
+    return this.words.find((w) => w.preset && w.word === preset.word) ?? null;
   }
 
   // ------------------------------------------------------------------ nodes

@@ -53,6 +53,15 @@ export interface DialogRow {
   label: string;
   /** Item graphic number to show beside the label, if any. */
   itemPic?: number;
+  /**
+   * Keyboard shortcut. Rows with one get a small labelled button, the way
+   * select-pc.xml's numbered picks do.
+   */
+  key?: string;
+  /** A greyed-out row is shown but can't be chosen. */
+  disabled?: boolean;
+  /** Drawn in green — select_pc uses this for the highest skill. */
+  highlight?: boolean;
 }
 
 export interface DialogSpec {
@@ -76,8 +85,10 @@ interface PlacedDialogRow extends DialogRow {
   rect: UiRect;
 }
 
-/** Selectable rows are a line tall plus a little breathing room. */
-const ROW_H = 20;
+/** Rows are spaced 25px apart, as select-pc.xml lays its picks out. */
+const ROW_H = 25;
+/** The square button a keyed row gets, from dlogbtnsm.png (two 23x23 frames). */
+const ROW_KEY_W = 23;
 
 export class Dialog {
   private frame: UiRect = { top: 0, left: 0, bottom: 0, right: 0 };
@@ -215,25 +226,54 @@ export class Dialog {
       y += LINE_HEIGHT;
     }
 
+    const smallBtn = this.store.get('dlogbtnsm');
     for (const row of this.placedRows) {
       const label = row.rect;
       let textLeft2 = label.left + 2;
+      if (row.key !== undefined) {
+        // A numbered button, with the shortcut as its face.
+        if (smallBtn) {
+          ctx.drawImage(
+            smallBtn, 0, 0, ROW_KEY_W, BUTTON_H,
+            label.left, label.top, ROW_KEY_W, BUTTON_H,
+          );
+        }
+        ctx.font = `${TEXT_SIZE}px BoEPlain, sans-serif`;
+        const kw = ctx.measureText(row.key).width;
+        drawString(
+          ctx,
+          {
+            top: label.top + 5,
+            left: label.left + (ROW_KEY_W - kw) / 2,
+            bottom: label.bottom,
+            right: label.right,
+          },
+          row.key,
+          { size: TEXT_SIZE, colour: Colours.BLACK },
+        );
+        textLeft2 += ROW_KEY_W + 6;
+      }
       if (row.itemPic !== undefined) {
         const g = itemGraphic(row.itemPic);
         const sheet = g ? this.store.get(g.sheetName) : undefined;
         if (g && sheet) {
           ctx.drawImage(
             sheet, g.rect.left, g.rect.top, g.rect.width, g.rect.height,
-            textLeft2, label.top, 18, 18,
+            textLeft2, label.top + 2, 18, 18,
           );
         }
         textLeft2 += 22;
       }
+      const colour = row.disabled
+        ? Colours.GREY
+        : row.highlight
+          ? Colours.LIGHT_GREEN
+          : Colours.LIGHT_BLUE;
       drawString(
         ctx,
-        { ...label, left: textLeft2, top: label.top + 3 },
+        { ...label, left: textLeft2, top: label.top + 5 },
         row.label,
-        { size: TEXT_SIZE, colour: Colours.LIGHT_BLUE },
+        { size: TEXT_SIZE, colour },
       );
     }
 
@@ -272,22 +312,28 @@ export class Dialog {
       if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) return btn;
     }
     for (const row of this.placedRows) {
+      if (row.disabled) continue;
       const r = row.rect;
       if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) return row;
     }
     return null;
   }
 
-  /** The button a keypress activates, if any. */
-  buttonForKey(key: string): DialogButton | null {
+  /** The button or row a keypress activates, if any. */
+  buttonForKey(key: string): { name: string } | null {
     if (key === 'Escape') {
       const name = this.spec.escapeButton;
       if (name) return this.placed.find((b) => b.name === name) ?? null;
       return null;
     }
-    if (key === 'Enter' || key === ' ') return this.placed[this.placed.length - 1] ?? null;
     const lower = key.toLowerCase();
-    return this.placed.find((b) => b.key?.toLowerCase() === lower) ?? null;
+    const row = this.placedRows.find((r) => !r.disabled && r.key?.toLowerCase() === lower);
+    if (row) return row;
+    const button = this.placed.find((b) => b.key?.toLowerCase() === lower);
+    if (button) return button;
+    // Enter falls through to the last button, which is the safe/cancel one.
+    if (key === 'Enter') return this.placed[this.placed.length - 1] ?? null;
+    return null;
   }
 }
 

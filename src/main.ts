@@ -44,7 +44,11 @@ async function main(): Promise<void> {
   const scen = await loadScenario(new FetchSource(`/scenarios/${name}/`), opcodes);
 
   const store = new SheetStore();
-  const sheets = [...CHROME_SHEETS, 'ter1', 'ter2', 'ter3', 'ter4', 'ter5', 'teranim', 'dlogbtnlg', 'dlogbtnmed'];
+  const sheets = [
+    ...CHROME_SHEETS,
+    'ter1', 'ter2', 'ter3', 'ter4', 'ter5', 'teranim',
+    'dlogbtnlg', 'dlogbtnmed', 'dlogbtnsm',
+  ];
   for (let i = 1; i <= 11; i++) sheets.push(`monst${i}`);
   await Promise.all(sheets.map((s) => store.load(s)));
   // Fonts load lazily on first use, so `fonts.ready` alone isn't enough — ask
@@ -73,6 +77,14 @@ async function main(): Promise<void> {
   const dialogs = new DialogHost(ctx, store, () => redraw());
 
   /**
+   * get_text_response: a one-line typed answer. The dialogxml text field lands
+   * with the rest of that toolkit; until then this borrows the browser prompt.
+   */
+  const askForText = async (prompt: string): Promise<string> =>
+    // TODO(M3): replace with a canvas text field once dialogxml has one.
+    Promise.resolve(window.prompt(prompt) ?? '');
+
+  /**
    * select_pc (boe.items.cpp:878): ask which party member acts. Returns the PC
    * index, or -1 if cancelled. PCs who can't act are listed with the reason and
    * aren't selectable.
@@ -83,12 +95,29 @@ async function main(): Promise<void> {
     highlight?: Skill,
   ): Promise<number> => {
     const options = session.selectPcOptions(mode, highlight);
+    // select-pc.xml marks the best value in the highlighted skill in green.
+    const best = Math.max(
+      ...options.map((o, i) =>
+        o.canPick && highlight !== undefined ? (univ.party.pcs[i]?.skills[highlight] ?? 0) : -1,
+      ),
+    );
     const rows = options.map((option) => ({
-      name: option.canPick ? String(option.index) : `no-${option.index}`,
-      label: `${option.index + 1}. ${option.label}`,
+      name: String(option.index),
+      key: String(option.index + 1),
+      label: option.label,
+      disabled: !option.canPick,
+      highlight:
+        highlight !== undefined &&
+        option.canPick &&
+        best > 0 &&
+        (univ.party.pcs[option.index]?.skills[highlight] ?? 0) === best,
     }));
+    const hint =
+      highlight !== undefined
+        ? `${prompt}\nSkill is shown in (). Highest in green. Type '1'-'6'.`
+        : `${prompt}\nType '1'-'6'.`;
     const picked = await dialogs.run({
-      text: prompt,
+      text: hint,
       rows,
       escapeButton: 'cancel',
       buttons: [{ name: 'cancel', label: 'Cancel' }],
@@ -140,8 +169,9 @@ async function main(): Promise<void> {
     }
     const picked = await dialogs.run({
       text: 'Take which item?',
-      rows: reachable.map((item, i) => ({
+      rows: reachable.slice(0, 9).map((item, i) => ({
         name: String(i),
+        key: String(i + 1),
         label: `${item.ident ? item.fullName : item.name}${item.property ? ' (not yours)' : ''}`,
         itemPic: item.graphicNum,
       })),
@@ -220,6 +250,20 @@ async function main(): Promise<void> {
         (session.inTown ? ', T talk, G get items, 1-6 whose pack to show.' : ', 1-6 whose pack to show.');
   };
 
+  /** Follow a conversation choice, prompting for a topic when it's "Ask About". */
+  const activateTalkWord = async (node: number): Promise<void> => {
+    const talk = session.talk;
+    if (!talk) return;
+    if (node === TalkAction.ASK) {
+      const asked = await askForText('Ask about what?');
+      if (asked.trim().length > 0 && talk.askAbout(asked) === 'done') session.endTalkMode();
+    } else {
+      session.chooseTalkNode(node);
+    }
+    setStatus();
+    redraw();
+  };
+
   /** Look at a space: describe it, and read an adjacent sign if there is one. */
   const lookAt = (target: { x: number; y: number }): void => {
     const ter = session.lookAt(target);
@@ -255,17 +299,7 @@ async function main(): Promise<void> {
       if (dialogs.handleClick(x, y)) return;
       if (session.talk) {
         const word = screen.talkScreen.wordAt(session.talk, x, y);
-        if (word) {
-          if (word.node === TalkAction.ASK) {
-            const asked = window.prompt('Ask about what?') ?? '';
-            if (asked.trim().length > 0 && session.talk.askAbout(asked) === 'done')
-              session.endTalkMode();
-          } else {
-            session.chooseTalkNode(word.node);
-          }
-          setStatus();
-          redraw();
-        }
+        if (word) void activateTalkWord(word.node);
         return;
       }
       const invenHit = screen.inventoryHit(x, y);
@@ -310,11 +344,10 @@ async function main(): Promise<void> {
     onKey: (key) => {
       if (dialogs.handleKey(key)) return;
       if (session.talk) {
-        if (key === 'Escape') {
-          session.endTalkMode();
-          setStatus();
-          redraw();
-        }
+        // Talking has its own letter shortcuts (talk_chars): l/n/j/b/s/r/d/g/a,
+        // with Escape acting as Done and Space as Go Back.
+        const preset = session.talk.presetForKey(key);
+        if (preset) void activateTalkWord(preset.node);
         return;
       }
       if (key === 't' || key === 'T') {
