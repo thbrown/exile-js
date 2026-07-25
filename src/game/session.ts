@@ -10,9 +10,12 @@
  */
 
 import { Direction, Location, dist, loc, shiftLoc } from '../core/location';
+import { SIGHT_BLOCKED, canSee } from '../core/sight';
 import { MonstTime } from '../data/monster';
 import { SECTOR_SIZE } from '../data/outdoors';
-import { TerObstruct, TerSpec } from '../data/terrain';
+import { StepSound, TerObstruct, TerSpec } from '../data/terrain';
+import { Lighting } from '../data/town';
+import { Snd, SoundPlayer } from '../platform/sound';
 import { Creature, CreatureStatus, assignCreature } from '../universe/creature';
 import { CurTown } from '../universe/curTown';
 import { OUT_HALF_DIM, OUT_MAX_DIM } from '../universe/curOut';
@@ -49,6 +52,9 @@ export class GameSession {
   /** The tile the view is centered on; equals the party position in town. */
   center: Location = loc(0, 0);
   private numOutMoves = 0;
+  private numTownMoves = 0;
+  /** Optional; when absent the game runs silently (as tests do). */
+  sound: SoundPlayer | null = null;
 
   constructor(readonly univ: Universe) {
     this.center = { ...univ.party.outLoc };
@@ -185,8 +191,30 @@ export class GameSession {
     party.locInSec = party.globalToLocal(realDest);
     party.age++;
     this.univ.addStringToBuf(`Moved: ${dirStr}`);
+    this.moveSound(this.univ.out.at(realDest.x, realDest.y), this.numOutMoves);
     this.numOutMoves++;
     return true;
+  }
+
+  /** move_sound (boe.main.cpp:1995), minus the boat/horse/swamp special cases. */
+  private moveSound(ter: number, step: number): void {
+    if (!this.sound) return;
+    switch (this.univ.terrainType(ter).stepSound) {
+      case StepSound.SQUISH:
+        this.sound.play(Snd.SQUISH);
+        break;
+      case StepSound.CRUNCH:
+        this.sound.play(Snd.CRUNCH);
+        break;
+      case StepSound.SPLASH:
+        this.sound.play(Snd.SPLASH);
+        break;
+      case StepSound.NONE:
+        break;
+      case StepSound.STEP:
+        this.sound.play(step % 2 === 0 ? Snd.STEP_A : Snd.STEP_B);
+        break;
+    }
   }
 
   /**
@@ -258,8 +286,9 @@ export class GameSession {
 
     party.townLoc = destination;
     party.age++;
+    this.moveSound(town.record.terrain[destination.x]![destination.y]!, this.numTownMoves++);
     town.makeExplored(destination.x, destination.y);
-    this.markTownSeen();
+    this.updateExplored(this.univ.party.townLoc);
     return true;
   }
 
@@ -282,6 +311,9 @@ export class GameSession {
     // TODO(M4): town_mods can redirect townNum via an SDF before we load.
     this.mode = GameMode.TOWN;
     this.univ.party.townNum = townNum;
+    this.sound?.play(
+      record.lightingType === Lighting.LIGHT_NORMAL ? Snd.ENTER_TOWN : Snd.ENTER_DUNGEON,
+    );
     const town = new CurTown(record);
     this.univ.town = town;
 
@@ -290,6 +322,7 @@ export class GameSession {
       for (let y = 0; y < record.maxDim; y++)
         if (record.maps[x]![y]!) town.makeExplored(x, y);
 
+    this.setUpLights(town);
     this.populateTown(town);
 
     // TODO(M4): handle_town_specials queues the on-entry special here.
@@ -303,8 +336,83 @@ export class GameSession {
     this.univ.party.townLoc = { ...where };
     this.center = { ...where };
     town.makeExplored(where.x, where.y);
-    this.markTownSeen();
+    this.updateExplored(this.univ.party.townLoc);
     this.univ.addStringToBuf(`You enter ${record.name}.`);
+  }
+
+  /**
+   * cTown::set_up_lights (town.cpp:195): terrain with a light radius lights
+   * the tiles around it permanently.
+   *
+   * TODO(M4): the original also requires line of sight (`can_see`), so light
+   * does not currently stop at walls.
+   */
+  private setUpLights(town: CurTown): void {
+    const dim = town.record.maxDim;
+    for (const row of town.lighting) row.fill(0);
+    for (let i = 0; i < dim; i++)
+      for (let j = 0; j < dim; j++) {
+        const rad = this.univ.terrainType(town.record.terrain[i]![j]!).lightRadius;
+        if (rad <= 0) continue;
+        for (let x = Math.max(0, i - rad); x < Math.min(dim, i + rad + 1); x++)
+          for (let y = Math.max(0, j - rad); y < Math.min(dim, j + rad + 1); y++)
+            if (dist(loc(i, j), loc(x, y)) <= rad) town.lighting[x]![y] = 1;
+      }
+  }
+
+  /** light_radius (boe.locutils.cpp:458). */
+  lightRadius(): number {
+    const town = this.univ.town;
+    if (!town || town.record.lightingType === Lighting.LIGHT_NORMAL) return 200;
+    const extraLevels = [10, 20, 50, 75, 110, 140];
+    let store = 1;
+    for (const level of extraLevels) if (this.univ.party.lightLevel > level) store++;
+    return store;
+  }
+
+  /** coord_to_ter (boe.locutils.cpp:209) — terrain at a point in either mode. */
+  private coordToTer(x: number, y: number): number {
+    const town = this.univ.town;
+    if (town) return town.isOnMap(x, y) ? town.record.terrain[x]![y]! : 0;
+    return this.univ.out.isOnMap(x, y) ? this.univ.out.at(x, y) : 0;
+  }
+
+  /** get_blockage (boe.locutils.cpp:441) — how much a tile obstructs sight. */
+  private getBlockage(ter: number): number {
+    const blockage = this.univ.terrainType(ter).blockage;
+    if (
+      blockage === TerObstruct.BLOCK_MOVE_AND_SIGHT ||
+      blockage === TerObstruct.BLOCK_SIGHT
+    )
+      return SIGHT_BLOCKED;
+    if (blockage === TerObstruct.BLOCK_MOVE_AND_SHOOT) return 1;
+    return 0;
+  }
+
+  /**
+   * sight_obscurity (boe.locutils.cpp:179).
+   * TODO(M4): webs, barriers and crates add obscurity once fields exist.
+   */
+  private sightObscurity = (x: number, y: number): number => {
+    let store = this.getBlockage(this.coordToTer(x, y));
+    const town = this.univ.town;
+    if (town && town.specialSpots[x]?.[y]) store++;
+    return store;
+  };
+
+  /** can_see_light (boe.locutils.cpp:173). */
+  canSeeLight(from: Location, to: Location): number {
+    if (this.inTown && !this.ptInLight(from, to)) return SIGHT_BLOCKED + 1;
+    return canSee(from, to, this.sightObscurity);
+  }
+
+  /** pt_in_light (boe.locutils.cpp:471). */
+  ptInLight(from: Location, to: Location): boolean {
+    const town = this.univ.town;
+    if (!town || town.record.lightingType === Lighting.LIGHT_NORMAL) return true;
+    if (!town.isOnMap(to.x, to.y)) return true;
+    if (town.isLit(to.x, to.y)) return true;
+    return dist(from, to) <= this.lightRadius();
   }
 
   /** The creature-loading half of start_town_mode (boe.town.cpp:250-310). */
@@ -415,29 +523,31 @@ export class GameSession {
 
   // ------------------------------------------------------------------ maps
 
-  /** update_explored: reveal the outdoor tiles around the party. */
+  /**
+   * update_explored (boe.locutils.cpp:230) — reveal what the party can see
+   * from `where`: the 9x9 block around it, minus anything sight-blocked.
+   */
   private updateExplored(where: Location): void {
     const { out } = this.univ;
-    for (let i = -4; i <= 4; i++)
-      for (let j = -4; j <= 4; j++) {
-        const x = where.x + i;
-        const y = where.y + j;
-        if (out.isOnMap(x, y)) out.explored[x]![y] = 1;
-      }
-  }
-
-  /** Reveal the town tiles the party can see from where it stands. */
-  private markTownSeen(): void {
     const town = this.univ.town;
-    if (!town) return;
-    const p = this.univ.party.townLoc;
-    // TODO(M4): real line-of-sight and lighting; for now reveal a radius.
-    for (let i = -5; i <= 5; i++)
-      for (let j = -5; j <= 5; j++) {
-        const x = p.x + i;
-        const y = p.y + j;
-        if (town.isOnMap(x, y) && dist(p, loc(x, y)) <= 5) town.makeExplored(x, y);
-      }
+    if (town) {
+      town.makeExplored(where.x, where.y);
+      for (let x = Math.max(0, where.x - 4); x < Math.min(town.record.maxDim, where.x + 5); x++)
+        for (let y = Math.max(0, where.y - 4); y < Math.min(town.record.maxDim, where.y + 5); y++)
+          if (
+            !town.isExplored(x, y) &&
+            this.canSeeLight(where, loc(x, y)) < SIGHT_BLOCKED &&
+            this.ptInLight(where, loc(x, y))
+          )
+            town.makeExplored(x, y);
+      return;
+    }
+    // Outdoors, 2 marks "stood on" and 1 "seen from a distance".
+    out.explored[where.x]![where.y] = 2;
+    for (let x = where.x - 4; x < where.x + 5; x++)
+      for (let y = where.y - 4; y < where.y + 5; y++)
+        if (out.isOnMap(x, y) && out.explored[x]![y] === 0)
+          if (this.canSeeLight(where, loc(x, y)) < SIGHT_BLOCKED) out.explored[x]![y] = 1;
   }
 }
 

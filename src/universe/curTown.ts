@@ -5,6 +5,7 @@
  */
 
 import { Location } from '../core/location';
+import { FieldType } from '../data/fields';
 import { Item } from '../data/item';
 import { Town } from '../data/town';
 import { Creature } from './creature';
@@ -14,9 +15,33 @@ export class CurTown {
   items: Item[] = [];
   /** Explored flags for the current town, [x][y]. */
   explored: Uint8Array[];
+  /** Permanently lit tiles (braziers, bonfires…), cTown::lighting. */
+  lighting: Uint8Array[];
+  /** Road and special-spot overlays, from the town's preset fields. */
+  roads: Uint8Array[];
+  specialSpots: Uint8Array[];
 
   constructor(readonly record: Town) {
-    this.explored = Array.from({ length: record.maxDim }, () => new Uint8Array(record.maxDim));
+    const grid = (): Uint8Array[] =>
+      Array.from({ length: record.maxDim }, () => new Uint8Array(record.maxDim));
+    this.explored = grid();
+    this.lighting = grid();
+    this.roads = grid();
+    this.specialSpots = grid();
+    for (const field of record.presetFields) {
+      const { x, y } = field.loc;
+      if (!this.isOnMap(x, y)) continue;
+      if (field.type === FieldType.SPECIAL_ROAD) this.roads[x]![y] = 1;
+      else if (field.type === FieldType.SPECIAL_SPOT) this.specialSpots[x]![y] = 1;
+    }
+  }
+
+  isLit(x: number, y: number): boolean {
+    return this.isOnMap(x, y) && this.lighting[x]![y]! !== 0;
+  }
+
+  isRoad(x: number, y: number): boolean {
+    return this.isOnMap(x, y) && this.roads[x]![y]! !== 0;
   }
 
   isOnMap(x: number, y: number): boolean {

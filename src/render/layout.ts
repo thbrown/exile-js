@@ -101,6 +101,24 @@ export const PC_PANEL = {
 export const TRANSCRIPT_TEXT = r(2, 2, 136, 255);
 export const TRANSCRIPT_LINE_HEIGHT = 12;
 
+// --- Road overlay (place_road, boe.graphics.cpp:1345) ----------------------
+
+/** Source rects in fields.png. */
+export const ROAD_SRC = {
+  horizontal: r(76, 28, 80, 41),
+  vertical: r(72, 60, 90, 64),
+  centre: r(80, 28, 84, 32),
+} as const;
+
+/** Destination rects, relative to a terrain cell's top-left. */
+export const ROAD_DEST = {
+  top: r(0, 12, 18, 16),
+  right: r(16, 15, 20, 28),
+  bottom: r(18, 12, 36, 16),
+  left: r(16, 0, 20, 13),
+  centre: r(16, 12, 20, 16),
+} as const;
+
 // --- Toolbar --------------------------------------------------------------
 
 export enum ToolbarButton {

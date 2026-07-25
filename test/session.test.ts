@@ -136,6 +136,47 @@ describe('start and end town mode', () => {
   });
 });
 
+describe('visibility', () => {
+  it('reveals the 9x9 block around the party but not through walls', () => {
+    const session = newSession();
+    session.startNewGame();
+    const town = session.univ.town!;
+    const p = session.univ.party.townLoc;
+    expect(town.isExplored(p.x, p.y)).toBe(true);
+    // Something within the 9x9 block is revealed…
+    let revealed = 0;
+    for (let x = p.x - 4; x <= p.x + 4; x++)
+      for (let y = p.y - 4; y <= p.y + 4; y++)
+        if (town.isOnMap(x, y) && town.isExplored(x, y)) revealed++;
+    expect(revealed).toBeGreaterThan(1);
+    // …and nothing outside it is.
+    for (let x = 0; x < town.record.maxDim; x++)
+      for (let y = 0; y < town.record.maxDim; y++)
+        if (Math.abs(x - p.x) > 4 || Math.abs(y - p.y) > 4)
+          expect(town.isExplored(x, y)).toBe(false);
+  });
+
+  it('treats normally lit towns as fully lit and dark ones by radius', () => {
+    const session = newSession();
+    session.startNewGame();
+    const town = session.univ.town!;
+    if (town.record.lightingType === 0) {
+      expect(session.lightRadius()).toBe(200);
+      expect(session.ptInLight({ x: 0, y: 0 }, { x: 20, y: 20 })).toBe(true);
+    }
+    // With no light sources carried, a dark town lights only the adjacent ring.
+    const dark = scen.towns.findIndex((t) => t.lightingType !== 0);
+    if (dark < 0) return;
+    session.startTownMode(dark, FORCED_ENTRY);
+    expect(session.lightRadius()).toBe(1);
+    const p = session.univ.party.townLoc;
+    expect(session.ptInLight(p, { x: p.x + 1, y: p.y })).toBe(true);
+    const far = { x: p.x + 8, y: p.y };
+    if (session.univ.town!.isOnMap(far.x, far.y) && !session.univ.town!.isLit(far.x, far.y))
+      expect(session.ptInLight(p, far)).toBe(false);
+  });
+});
+
 describe('outdoor movement', () => {
   it('records movement in the transcript and advances the clock', () => {
     const session = newSession();

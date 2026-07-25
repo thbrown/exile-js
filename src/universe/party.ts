@@ -36,6 +36,8 @@ export class Party {
 
   inBoat = -1;
   inHorse = -1;
+  /** Accumulated light from spells/items; drives light_radius in dark towns. */
+  lightLevel = 0;
 
   /** Stuff Done Flags — the scenario-visible persistent state array. */
   stuffDone: Uint8Array[] = Array.from({ length: SDF_ROWS }, () => new Uint8Array(SDF_COLUMNS));

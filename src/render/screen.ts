@@ -6,6 +6,7 @@
  */
 
 import { Direction } from '../core/location';
+import { TerSpec, TrimType } from '../data/terrain';
 import { Lighting } from '../data/town';
 import { GameSession } from '../game/session';
 import { GameMode } from '../game/modes';
@@ -20,6 +21,8 @@ import {
   PC_PANEL,
   PC_ROWS,
   PlacedButton,
+  ROAD_DEST,
+  ROAD_SRC,
   TER_VIEW_CENTER,
   TER_VIEW_TILES,
   TOWN_BUTTONS,
@@ -51,6 +54,7 @@ export const CHROME_SHEETS = [
   'buttons',
   'invenbtns',
   'pcs',
+  'fields',
 ];
 
 export class Screen {
@@ -133,14 +137,20 @@ export class Screen {
         const x = center.x + q - TER_VIEW_CENTER;
         const y = center.y + row - TER_VIEW_CENTER;
         const pos = terrainSpotPos(q, row);
-        if (x < 0 || y < 0 || x >= maxDim || y >= maxDimY) {
-          // Out of bounds draws darkness, same as draw_one_terrain_spot(-1).
+        // Out of bounds, unexplored, or unlit all draw darkness — the
+        // can_draw logic in draw_terrain (boe.graphics.cpp:929).
+        let canDraw = x >= 0 && y >= 0 && x < maxDim && y < maxDimY;
+        if (canDraw && town)
+          canDraw = town.isExplored(x, y) && session.ptInLight(univ.party.townLoc, { x, y });
+        else if (canDraw) canDraw = univ.out.explored[x]![y]! !== 0;
+        if (!canDraw) {
           this.ctx.fillStyle = Colours.BLACK;
           this.ctx.fillRect(pos.x, pos.y, TILE_W, TILE_H);
           continue;
         }
         const ter = town ? town.record.terrain[x]![y]! : univ.out.at(x, y);
         this.drawTerrainSpot(univ.terrainType(ter).picture, pos.x, pos.y);
+        if (this.isRoad(session, x, y)) this.placeRoad(session, q, row, x, y);
       }
 
     if (town) this.drawTownMonsters(session);
@@ -156,6 +166,54 @@ export class Screen {
       img, g.rect.left, g.rect.top, g.rect.width, g.rect.height,
       px, py, TILE_W, TILE_H,
     );
+  }
+
+  private isRoad(session: GameSession, x: number, y: number): boolean {
+    const town = session.univ.town;
+    if (town) return town.isRoad(x, y);
+    return session.univ.out.isRoad(x, y);
+  }
+
+  /**
+   * extend_road_terrain (boe.graphics.cpp:1304): a road stub reaches into the
+   * neighbouring tile when that tile is also road-like — a road flag, a city
+   * or walkway trim, or a bridge.
+   */
+  private extendRoad(session: GameSession, x: number, y: number): boolean {
+    if (this.isRoad(session, x, y)) return true;
+    const town = session.univ.town;
+    const inBounds = town
+      ? town.isOnMap(x, y)
+      : session.univ.out.isOnMap(x, y);
+    if (!inBounds) return false;
+    const ter = session.univ.terrainType(
+      town ? town.record.terrain[x]![y]! : session.univ.out.at(x, y),
+    );
+    return (
+      ter.trimType === TrimType.CITY ||
+      ter.trimType === TrimType.WALKWAY ||
+      ter.special === TerSpec.BRIDGE
+    );
+  }
+
+  /** place_road (boe.graphics.cpp:1345) — the road stubs from fields.png. */
+  private placeRoad(session: GameSession, q: number, row: number, x: number, y: number): void {
+    const img = this.store.get('fields');
+    if (!img) return;
+    const pos = terrainSpotPos(q, row);
+    const blit = (src: UiRect, dest: UiRect): void => {
+      this.ctx.drawImage(
+        img, src.left, src.top, width(src), height(src),
+        pos.x + dest.left, pos.y + dest.top, width(dest), height(dest),
+      );
+    };
+    blit(ROAD_SRC.centre, ROAD_DEST.centre);
+    const maxX = session.univ.town ? session.univ.town.record.maxDim - 1 : 96;
+    const maxY = maxX;
+    if (y === 0 || this.extendRoad(session, x, y - 1)) blit(ROAD_SRC.vertical, ROAD_DEST.top);
+    if (x === maxX || this.extendRoad(session, x + 1, y)) blit(ROAD_SRC.horizontal, ROAD_DEST.right);
+    if (y === maxY || this.extendRoad(session, x, y + 1)) blit(ROAD_SRC.vertical, ROAD_DEST.bottom);
+    if (x === 0 || this.extendRoad(session, x - 1, y)) blit(ROAD_SRC.horizontal, ROAD_DEST.left);
   }
 
   private drawTownMonsters(session: GameSession): void {

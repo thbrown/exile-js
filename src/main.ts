@@ -8,6 +8,7 @@ import { GameSession } from './game/session';
 import { loadOpcodes, loadScenario } from './fileio/loadScenario';
 import { FetchSource } from './fileio/source';
 import { InputRouter } from './platform/input';
+import { SoundPlayer } from './platform/sound';
 import { BOE_HEIGHT, BOE_WIDTH, ToolbarButton } from './render/layout';
 import { CHROME_SHEETS, Screen } from './render/screen';
 import { SheetStore } from './render/sheets';
@@ -46,10 +47,20 @@ async function main(): Promise<void> {
 
   const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
   const session = new GameSession(univ);
+  const sound = new SoundPlayer();
+  session.sound = sound;
   session.startNewGame();
   const screen = new Screen(ctx, store);
 
   const redraw = (): void => screen.draw(session);
+
+  // Browsers only allow audio after a user gesture, so the first keypress or
+  // click is what actually starts it.
+  const wakeSound = (): void => {
+    void sound.resume().then(() => sound.preloadCommon());
+  };
+  window.addEventListener('keydown', wakeSound, { once: true });
+  canvas.addEventListener('mousedown', wakeSound, { once: true });
 
   const router = new InputRouter(canvas, {
     onMove: (dir) => {
@@ -59,6 +70,7 @@ async function main(): Promise<void> {
     onClick: (x, y) => {
       const btn = screen.buttonAt(x, y);
       if (btn) {
+        sound.play(37); // the UI click
         // TODO(M3+): wire the toolbar to real actions.
         univ.addStringToBuf(`(${ToolbarButton[btn.btn]} is not implemented yet)`);
         redraw();

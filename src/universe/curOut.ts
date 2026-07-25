@@ -30,6 +30,17 @@ export class CurOut {
     return this.terrain[x]![y]!;
   }
 
+  /** Road/special-spot flags live on the sector, indexed in sector coords. */
+  isRoad(x: number, y: number): boolean {
+    if (!this.isOnMap(x, y)) return false;
+    return this.sectorAt({ x, y }).roads[x % SECTOR_SIZE]![y % SECTOR_SIZE]! === true;
+  }
+
+  isSpot(x: number, y: number): boolean {
+    if (!this.isOnMap(x, y)) return false;
+    return this.sectorAt({ x, y }).specialSpot[x % SECTOR_SIZE]![y % SECTOR_SIZE]! === true;
+  }
+
   /** The sector record the party is currently standing in. */
   get sector(): Sector {
     const s = this.party.sector;
