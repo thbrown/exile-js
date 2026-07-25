@@ -13,6 +13,7 @@ import { Direction, Location, dist, loc, shiftLoc } from '../core/location';
 import { SIGHT_BLOCKED, canSee } from '../core/sight';
 import { Item, ItemAbil, ItemType, defaultItem } from '../data/item';
 import { MonstTime } from '../data/monster';
+import { FieldType } from '../data/fields';
 import { SECTOR_SIZE } from '../data/outdoors';
 import { StepSound, TerObstruct, TerSpec, blocksMove } from '../data/terrain';
 import { TalkNodeType } from '../data/talking';
@@ -717,6 +718,17 @@ export class GameSession {
   private checkSpecialTerrain(where: Location): boolean {
     const town = this.univ.town;
     if (!town) return true;
+
+    // Barriers stop the party before terrain is even consulted.
+    if (town.hasField(where.x, where.y, FieldType.BARRIER_FORCE)) {
+      this.univ.addStringToBuf('  Magic barrier!');
+      return false;
+    }
+    if (town.hasField(where.x, where.y, FieldType.BARRIER_CAGE)) {
+      this.univ.addStringToBuf('  Force cage!');
+      return false;
+    }
+
     const ter = town.record.terrain[where.x]![where.y]!;
     const spec = this.univ.terrainType(ter);
 
@@ -1156,14 +1168,20 @@ export class GameSession {
     return 0;
   }
 
-  /**
-   * sight_obscurity (boe.locutils.cpp:179).
-   * TODO(M4): webs, barriers and crates add obscurity once fields exist.
-   */
+  /** sight_obscurity (boe.locutils.cpp:179). */
   private sightObscurity = (x: number, y: number): number => {
     let store = this.getBlockage(this.coordToTer(x, y));
     const town = this.univ.town;
-    if (town && town.specialSpots[x]?.[y]) store++;
+    if (!town) return store;
+    if (town.isSpecialSpot(x, y)) store++;
+    // A web is half-transparent; a barrier blocks sight outright; a crate,
+    // barrel or block is one step of cover.
+    if (town.hasField(x, y, FieldType.FIELD_WEB)) store += 2;
+    if (town.hasField(x, y, FieldType.BARRIER_FIRE)
+      || town.hasField(x, y, FieldType.BARRIER_FORCE)) return SIGHT_BLOCKED;
+    if (town.hasField(x, y, FieldType.OBJECT_CRATE)
+      || town.hasField(x, y, FieldType.OBJECT_BARREL)
+      || town.hasField(x, y, FieldType.OBJECT_BLOCK)) store++;
     return store;
   };
 

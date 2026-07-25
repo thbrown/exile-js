@@ -5,6 +5,7 @@
  * wall off an area without filling it in.
  */
 
+import { FieldType } from '../../data/fields';
 import { ItemType } from '../../data/item';
 import { SpecType } from '../../data/special';
 import { TerSpec } from '../../data/terrain';
@@ -91,10 +92,25 @@ export async function rectSpec(univ: Universe, ctx: SpecialCtx): Promise<void> {
           }
           break;
 
-        case SpecType.RECT_PLACE_FIELD:
-          // TODO(M5): fields need the field overlay and the field model.
-          reportUnsupported(univ, spec.type);
-          return;
+        case SpecType.RECT_PLACE_FIELD: {
+          if (!town) return;
+          const field = spec.sd2 as FieldType;
+          // sd1 is a percentage chance per square; a dispel always applies.
+          if (field !== FieldType.FIELD_DISPEL && univ.rng.getRan(1, 1, 100) > spec.sd1) break;
+          if (field === FieldType.FIELD_DISPEL) {
+            // sd1 0 clears the ordinary fields, anything else the barriers too.
+            town.dispelFields(x, y, spec.sd1 !== 0);
+          } else if (field === FieldType.SPECIAL_EXPLORED
+            || field === FieldType.SPECIAL_SPOT || field === FieldType.SPECIAL_ROAD) {
+            // Not placeable.
+          } else if (field === FieldType.FIELD_SMASH) {
+            // TODO(M5): crumble_wall turns a wall square into its rubble.
+            reportUnsupported(univ, spec.type);
+          } else {
+            town.setField(x, y, field, true);
+          }
+          break;
+        }
 
         default:
           reportUnsupported(univ, spec.type);

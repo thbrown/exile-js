@@ -5,7 +5,7 @@
  */
 
 import { Location } from '../core/location';
-import { FieldType } from '../data/fields';
+import { BARRIERS, DISPELLABLE, FieldType } from '../data/fields';
 import { Item } from '../data/item';
 import { Town } from '../data/town';
 import { Creature } from './creature';
@@ -20,6 +20,13 @@ export class CurTown {
   /** Road and special-spot overlays, from the town's preset fields. */
   roads: Uint8Array[];
   specialSpots: Uint8Array[];
+  /**
+   * What occupies each space beyond its terrain — webs, barriers, clouds,
+   * crates, bloodstains. The C++ packs these into one bitfield per square
+   * (`cCurTown::fields`); a Set of FieldType per square is the same idea
+   * without the 32-bit ceiling.
+   */
+  fields: Set<FieldType>[][];
 
   constructor(readonly record: Town) {
     const grid = (): Uint8Array[] =>
@@ -28,12 +35,34 @@ export class CurTown {
     this.lighting = grid();
     this.roads = grid();
     this.specialSpots = grid();
+    this.fields = Array.from({ length: record.maxDim }, () =>
+      Array.from({ length: record.maxDim }, () => new Set<FieldType>()));
     for (const field of record.presetFields) {
       const { x, y } = field.loc;
       if (!this.isOnMap(x, y)) continue;
       if (field.type === FieldType.SPECIAL_ROAD) this.roads[x]![y] = 1;
       else if (field.type === FieldType.SPECIAL_SPOT) this.specialSpots[x]![y] = 1;
+      else this.fields[x]![y]!.add(field.type);
     }
+  }
+
+  /** Whether a space carries a given field (cCurTown::is_web and friends). */
+  hasField(x: number, y: number, which: FieldType): boolean {
+    return this.isOnMap(x, y) && this.fields[x]![y]!.has(which);
+  }
+
+  setField(x: number, y: number, which: FieldType, on = true): void {
+    if (!this.isOnMap(x, y)) return;
+    if (on) this.fields[x]![y]!.add(which);
+    else this.fields[x]![y]!.delete(which);
+  }
+
+  /** dispel_fields — clear the transient magical fields off a square. */
+  dispelFields(x: number, y: number, includeBarriers = false): void {
+    if (!this.isOnMap(x, y)) return;
+    const set = this.fields[x]![y]!;
+    for (const f of DISPELLABLE) set.delete(f);
+    if (includeBarriers) for (const f of BARRIERS) set.delete(f);
   }
 
   isLit(x: number, y: number): boolean {

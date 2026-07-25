@@ -7,6 +7,7 @@
  * 1 is >, 2 is >=.
  */
 
+import { FieldType } from '../../data/fields';
 import { ItemType } from '../../data/item';
 import { SpecType } from '../../data/special';
 import { NUM_INVEN_SLOTS } from '../../universe/player';
@@ -395,9 +396,29 @@ export async function ifThenSpec(univ: Universe, ctx: SpecialCtx): Promise<void>
         ctx.nextSpec = spec.ex1c;
       break;
 
-    case SpecType.IF_FIELDS:
+    case SpecType.IF_FIELDS: {
+      // Count the squares in a rectangle carrying a field, and branch when the
+      // total falls between sd1 and sd2 (boe.specials.cpp:3447).
+      const town = univ.town;
+      if (!town) break;
+      const field = spec.m1 as FieldType;
+      // Note the C++ uses one variable as both the running total and the x
+      // coordinate (`i += univ.town.is_fire_wall(i,j)`). It reads like a typo,
+      // but scenarios were authored against it, so it's reproduced.
+      let count = 0;
+      for (let j = spec.ex1b; j < Math.min(spec.ex2b, town.record.maxDim); j++)
+        for (let k = spec.ex1a; k < Math.min(spec.ex2a, town.record.maxDim); k++) {
+          // A non-zero pic means the border only.
+          if (spec.pic > 0 && count > spec.ex1b && count < spec.ex2b
+            && j > spec.ex1a && j < spec.ex2a) continue;
+          if (town.hasField(count, j, field)) count++;
+        }
+      if (count >= spec.sd1 && count <= spec.sd2) ctx.nextSpec = spec.m2;
+      break;
+    }
+
     case SpecType.IF_QUEST:
-      // TODO(M5)/TODO(M6): fields and quests.
+      // TODO(M6): quests need the party's active_quests table.
       reportUnsupported(univ, spec.type);
       break;
 

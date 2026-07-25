@@ -33,3 +33,22 @@ export enum FieldType {
   FIELD_DISPEL = 32,
   FIELD_SMASH = 33,
 }
+
+/** The transient magical fields a Dispel Fields clears (dispel_fields). */
+export const DISPELLABLE: FieldType[] = [
+  FieldType.WALL_FORCE, FieldType.WALL_FIRE, FieldType.WALL_ICE, FieldType.WALL_BLADES,
+  FieldType.CLOUD_STINK, FieldType.CLOUD_SLEEP, FieldType.FIELD_ANTIMAGIC,
+  FieldType.FIELD_QUICKFIRE, FieldType.FIELD_WEB,
+];
+
+/** The permanent barriers, which only a stronger dispel removes. */
+export const BARRIERS: FieldType[] = [
+  FieldType.BARRIER_FIRE, FieldType.BARRIER_FORCE, FieldType.BARRIER_CAGE,
+];
+
+/** The decals a fight leaves behind; drawn under everything else. */
+export const SFX_FIELDS: FieldType[] = [
+  FieldType.SFX_SMALL_BLOOD, FieldType.SFX_MEDIUM_BLOOD, FieldType.SFX_LARGE_BLOOD,
+  FieldType.SFX_SMALL_SLIME, FieldType.SFX_LARGE_SLIME,
+  FieldType.SFX_ASH, FieldType.SFX_BONES, FieldType.SFX_RUBBLE,
+];

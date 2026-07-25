@@ -45,10 +45,13 @@ import {
   width,
 } from './layout';
 import { ITEM_SHOP_TITLES, specIcon, specPrice } from '../game/itemShop';
+import {
+  FieldSprite, SFX_SPRITES, SOLID_SPRITES, SPECIAL_SPOT_SPRITE, TRANSIENT_SPRITES,
+} from './fieldPics';
 import { itemGraphic } from './itemPics';
 import { monsterDims, monsterGraphic } from './monsterPics';
 import { pcGraphic } from './pcPics';
-import { SheetStore, TILE_H, TILE_W } from './sheets';
+import { SheetStore, TILE_H, TILE_W, calcRect } from './sheets';
 import { terrainGraphic } from './terrainPics';
 import { DEFAULT_BG, PANEL_BG, tilePattern } from './tiling';
 import { TalkScreen } from './talkScreen';
@@ -191,6 +194,7 @@ export class Screen {
         this.drawTerrainCell(session, ter, q, row, x, y, pos);
         this.placeTrim(session, ter, q, row, x, y);
         if (this.isRoad(session, x, y)) this.placeRoad(session, q, row, x, y);
+        this.drawFields(session, q, row, x, y);
       }
 
     if (town) this.drawTownItems(session);
@@ -420,6 +424,47 @@ export class Screen {
       ter.trimType === TrimType.WALKWAY ||
       ter.special === TerSpec.BRIDGE
     );
+  }
+
+  /**
+   * draw_fields (boe.graphutil.cpp:379) — what's in a space beyond its terrain.
+   * The layering is the original's: floor decals, then things standing in the
+   * space, then the transient magical walls and clouds, then the white
+   * special-encounter marker, which is always drawn last so nothing hides it.
+   */
+  private drawFields(
+    session: GameSession, q: number, row: number, x: number, y: number,
+  ): void {
+    const img = this.store.get('fields');
+    if (!img) return;
+    const pos = terrainSpotPos(q, row);
+    const blit = (sprite: FieldSprite): void => {
+      if (sprite.animated) {
+        // Barriers cycle through four frames on teranim.png.
+        const anim = this.store.get('teranim');
+        if (!anim) return;
+        const src = calcRect(sprite.col + (this.animFrame % 4), sprite.row);
+        this.ctx.drawImage(
+          anim, src.left, src.top, src.width, src.height, pos.x, pos.y, TILE_W, TILE_H);
+        return;
+      }
+      const src = calcRect(sprite.col, sprite.row);
+      this.ctx.drawImage(
+        img, src.left, src.top, src.width, src.height, pos.x, pos.y, TILE_W, TILE_H);
+    };
+
+    const town = session.univ.town;
+    if (!town) {
+      if (session.univ.out.isSpot(x, y)) blit(SPECIAL_SPOT_SPRITE);
+      return;
+    }
+    for (const [field, sprite] of SFX_SPRITES)
+      if (town.hasField(x, y, field)) blit(sprite);
+    for (const [field, sprite] of SOLID_SPRITES)
+      if (town.hasField(x, y, field)) blit(sprite);
+    for (const [field, sprite] of TRANSIENT_SPRITES)
+      if (town.hasField(x, y, field)) blit(sprite);
+    if (town.specialSpots[x]?.[y]) blit(SPECIAL_SPOT_SPRITE);
   }
 
   /** place_road (boe.graphics.cpp:1345) — the road stubs from fields.png. */
