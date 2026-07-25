@@ -22,6 +22,8 @@ import {
   ITEM_BTN_ICONS,
   ITEM_PANEL,
   ITEM_ROWS,
+  ITEM_ROWS_SHOP,
+  SPEC_BTN_ICONS,
   OUT_BUTTONS,
   PANEL_IMAGES,
   PC_PANEL,
@@ -42,6 +44,7 @@ import {
   terrainSpotPos,
   width,
 } from './layout';
+import { ITEM_SHOP_TITLES, specIcon, specPrice } from '../game/itemShop';
 import { itemGraphic } from './itemPics';
 import { monsterDims, monsterGraphic } from './monsterPics';
 import { pcGraphic } from './pcPics';
@@ -624,15 +627,19 @@ export class Screen {
       right: panel.left + rect.right,
     });
 
-    drawStringEllipsis(this.ctx, at(ITEM_PANEL.title), `${pc.name} inventory:`, {
+    // In a shop service mode the panel is a prompt, not a list of your things.
+    const service = session.itemShop;
+    const title = service ? ITEM_SHOP_TITLES[service.mode] : `${pc.name} inventory:`;
+    drawStringEllipsis(this.ctx, at(ITEM_PANEL.title), title, {
       font: 'bold',
       size: 10,
       colour: Colours.YELLOW,
     });
 
     const btnSheet = this.store.get('invenbtns');
-    for (let i = 0; i < ITEM_ROWS.length; i++) {
-      const row = ITEM_ROWS[i]!;
+    const rows = service ? ITEM_ROWS_SHOP : ITEM_ROWS;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]!;
       const item = pc.items[i];
       // The slot number is always shown, so empty slots read as empty.
       drawString(this.ctx, at(row.name), `${i + 1}.`, { size: 12, colour: Colours.BLACK });
@@ -681,9 +688,25 @@ export class Screen {
             dest.left, dest.top, width(src), height(src),
           );
         };
-        icon(ITEM_BTN_ICONS.give, at(row.give));
-        icon(ITEM_BTN_ICONS.drop, at(row.drop));
-        icon(ITEM_BTN_ICONS.info, at(row.info));
+        if (service) {
+          // The spec button replaces the row's usual buttons, and only appears
+          // on items the service applies to (place_item_button, :410).
+          const price = specPrice(service, pc, i);
+          if (price !== null) {
+            const src = SPEC_BTN_ICONS[specIcon(service.mode)];
+            const dest = at(row.spec);
+            this.ctx.drawImage(
+              btnSheet, src.left, src.top, width(src), height(src),
+              dest.left, dest.top, 30, height(src),
+            );
+            drawString(this.ctx, { ...dest, left: dest.left + 35 }, String(price),
+              { font: 'bold', size: 10, colour: Colours.BLACK });
+          }
+        } else {
+          icon(ITEM_BTN_ICONS.give, at(row.give));
+          icon(ITEM_BTN_ICONS.drop, at(row.drop));
+          icon(ITEM_BTN_ICONS.info, at(row.info));
+        }
       }
     }
   }
@@ -692,17 +715,24 @@ export class Screen {
   itemPage = 0;
 
   /** The inventory row and part a click landed on, if any. */
-  inventoryHit(x: number, y: number): { row: number; part: 'name' | 'give' | 'drop' | 'info' } | null {
+  inventoryHit(
+    x: number, y: number, service = false,
+  ): { row: number; part: 'name' | 'give' | 'drop' | 'info' | 'spec' } | null {
     const panel = WIN_RECTS.inven;
     const lx = x - panel.left;
     const ly = y - panel.top;
-    for (let i = 0; i < ITEM_ROWS.length; i++) {
-      const row = ITEM_ROWS[i]!;
+    const rows = service ? ITEM_ROWS_SHOP : ITEM_ROWS;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]!;
       const inside = (rect: UiRect): boolean =>
         lx >= rect.left && lx < rect.right && ly >= rect.top && ly < rect.bottom;
-      if (inside(row.give)) return { row: i, part: 'give' };
-      if (inside(row.drop)) return { row: i, part: 'drop' };
-      if (inside(row.info)) return { row: i, part: 'info' };
+      if (service) {
+        if (inside(row.spec)) return { row: i, part: 'spec' };
+      } else {
+        if (inside(row.give)) return { row: i, part: 'give' };
+        if (inside(row.drop)) return { row: i, part: 'drop' };
+        if (inside(row.info)) return { row: i, part: 'info' };
+      }
       if (inside(row.name) || inside(row.icon)) return { row: i, part: 'name' };
     }
     return null;

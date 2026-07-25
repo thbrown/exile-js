@@ -13,6 +13,7 @@ import { Speech, TalkNode, TalkNodeType } from '../data/talking';
 import { Attitude } from '../data/monster';
 import { Universe } from '../universe/universe';
 import { Creature, CreatureStatus } from '../universe/creature';
+import { ItemShopMode } from './itemShop';
 
 /** Pseudo-node ids for the fixed buttons (boe.newgraph.hpp:31). */
 export enum TalkAction {
@@ -83,6 +84,11 @@ export class TalkState {
    * this; it returns false when the shop has nothing to sell.
    */
   onShop: ((shopNum: number, costAdj: number, name: string) => boolean) | null = null;
+  /**
+   * How the SELL/IDENTIFY/ENCHANT/RECHARGE nodes put the inventory panel into a
+   * service mode. Same reason as onShop: the session owns the panel.
+   */
+  onItemShop: ((mode: ItemShopMode, a: number, b: number, c: number) => void) | null = null;
   private history: HistoryEntry[] = [];
   /** Clickable words, rebuilt after every reply. */
   words: TalkWord[] = [];
@@ -368,6 +374,33 @@ export class TalkState {
           str1 = str2.length > 0 ? str2 : 'There is nothing available to buy.';
           str2 = '';
         }
+        break;
+      // The four services that work on the party's own goods just switch the
+      // inventory panel into a mode; the reply stays on screen beside it
+      // (boe.dlgutil.cpp:1025-1059).
+      case TalkNodeType.SELL_WEAPONS:
+        this.canRecord = false;
+        this.onItemShop?.(ItemShopMode.SELL_WEAPONS, a, b, c);
+        break;
+      case TalkNodeType.SELL_ARMOR:
+        this.canRecord = false;
+        this.onItemShop?.(ItemShopMode.SELL_ARMOR, a, b, c);
+        break;
+      case TalkNodeType.SELL_ITEMS:
+        this.canRecord = false;
+        this.onItemShop?.(ItemShopMode.SELL_ANY, a, b, c);
+        break;
+      case TalkNodeType.IDENTIFY:
+        this.canRecord = false;
+        this.onItemShop?.(ItemShopMode.IDENTIFY, a, b, c);
+        break;
+      case TalkNodeType.ENCHANT:
+        this.canRecord = false;
+        this.onItemShop?.(ItemShopMode.ENCHANT, a, b, c);
+        break;
+      case TalkNodeType.RECHARGE:
+        this.canRecord = false;
+        this.onItemShop?.(ItemShopMode.RECHARGE, a, b, c);
         break;
       case TalkNodeType.END_FORCE:
         this.endForced = true;

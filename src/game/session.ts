@@ -31,6 +31,7 @@ import {
 import { MainStatus, Skill } from '../universe/skills';
 import { ShopItemType } from '../data/shop';
 import { ShopState, handleSale } from './shop';
+import { ItemShopMode, ItemShopState, handleItemShopAction } from './itemShop';
 import { OUT_HALF_DIM, OUT_MAX_DIM } from '../universe/curOut';
 import { TOWN_NUM_OUTDOORS } from '../universe/party';
 import { Universe } from '../universe/universe';
@@ -81,6 +82,11 @@ export class GameSession {
   talk: TalkState | null = null;
   /** Non-null while a shop is open. */
   shop: ShopState | null = null;
+  /**
+   * Non-null while the inventory panel is in a shop service mode (selling,
+   * identifying, enchanting, recharging) — stat_screen_mode's shop half.
+   */
+  itemShop: ItemShopState | null = null;
   private preTalkMode: GameMode = GameMode.TOWN;
   private preShopMode: GameMode = GameMode.TOWN;
 
@@ -667,12 +673,15 @@ export class GameSession {
     this.talk = new TalkState(this.univ, monsterIndex, personality, monsterType, facePic);
     this.talk.onShop = (shopNum, costAdj, name) =>
       this.startShopMode(shopNum, costAdj, name) || this.startShopModeAnyPc(shopNum, costAdj, name);
+    this.talk.onItemShop = (mode, a, b, c) => this.startItemShop(mode, a, b, c);
   }
 
   /** end_talk_mode (boe.dlgutil.cpp:752). */
   endTalkMode(): void {
     this.mode = this.preTalkMode === GameMode.TALK_TOWN ? GameMode.TOWN : this.preTalkMode;
     this.talk = null;
+    // The panel drops back to plain inventory when the shopkeeper is done.
+    this.itemShop = null;
     if (this.mode === GameMode.TOWN) {
       this.center = { ...this.univ.party.townLoc };
       this.updateExplored(this.center);
@@ -784,6 +793,30 @@ export class GameSession {
       }
       left.set(i, remaining);
     }
+  }
+
+  // ------------------------------------------------- shop services on our own
+  //                                                    goods
+
+  /**
+   * Put the inventory panel into one of the four service modes. The panel stays
+   * in that mode until the conversation ends, which is how the C++ leaves the
+   * sell buttons up while you work through a pack.
+   */
+  startItemShop(
+    mode: ItemShopMode, cost = 0, rechargeLimit = 0, rechargeAmount = 0,
+  ): void {
+    this.itemShop = { mode, cost, rechargeLimit, rechargeAmount };
+  }
+
+  endItemShop(): void {
+    this.itemShop = null;
+  }
+
+  /** Act on one item's spec button. */
+  useItemShop(pcNum: number, slot: number): void {
+    if (!this.itemShop) return;
+    handleItemShopAction(this.univ, this.itemShop, pcNum, slot, this.sound);
   }
 
   /** Route a conversation choice; closes the conversation when it's done. */

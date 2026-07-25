@@ -165,6 +165,42 @@ const shopClosed = await page.evaluate(() => {
 });
 console.log('SHOP CLOSED:', JSON.stringify(shopClosed));
 
+// 2b-3. Selling: the inventory panel turns into a sell prompt, and clicking an
+//       item's sell button pays out.
+const sellReady = await page.evaluate(() => {
+  const s = window.__session;
+  s.startTalkMode(-1, 0, 0, -1);
+  s.startItemShop('sell-any', 0, 0, 0);
+  // The first PC has the axe bought above; make sure it isn't equipped.
+  s.univ.party.pcs[0].equip.fill(false);
+  window.__screen.itemPage = 0;
+  window.__redraw();
+  return {
+    mode: s.itemShop?.mode,
+    item: s.univ.party.pcs[0].items[0].fullName,
+    gold: s.univ.party.gold,
+  };
+});
+console.log('SELL READY:', JSON.stringify(sellReady));
+await shot('01b3-selling');
+
+const sold = await page.evaluate(() => {
+  const s = window.__session;
+  const gold = s.univ.party.gold;
+  s.useItemShop(0, 0);
+  window.__redraw();
+  return {
+    gained: s.univ.party.gold - gold,
+    lastLine: s.univ.transcript.at(-1),
+    slot0: s.univ.party.pcs[0].items[0].fullName,
+  };
+});
+console.log('SOLD:', JSON.stringify(sold));
+await page.evaluate(() => {
+  window.__session.chooseTalkNode(-14);
+  window.__redraw();
+});
+
 // 2c. Doors: an unlocked one opens on contact; a locked one raises the prompt,
 //     and its Bash shortcut goes through the dialog host.
 const doors = await page.evaluate(() => {
@@ -406,6 +442,9 @@ const ok =
   bought.stillShopping === true &&
   shopClosed.shopping === false &&
   shopClosed.inTown === true &&
+  sellReady.mode === 'sell-any' &&
+  sold.gained > 0 &&
+  sold.lastLine === 'You sell your item.' &&
   bashDone.dialogGone === true &&
   (gotItem.skipped === true || gotItem.carried.includes(gotItem.name)) &&
   (sign.skipped === true || (sign.readable === true && signShown.dialogOpen === true)) &&

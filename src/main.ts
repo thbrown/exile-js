@@ -193,15 +193,20 @@ async function main(): Promise<void> {
     redraw();
   };
 
-  /** A click on an inventory row: equip/unequip, give, drop, or describe. */
+  /** A click on an inventory row: equip/unequip, give, drop, describe, or sell. */
   const handleInventoryClick = async (
     row: number,
-    part: 'name' | 'give' | 'drop' | 'info',
+    part: 'name' | 'give' | 'drop' | 'info' | 'spec',
   ): Promise<void> => {
     const pc = univ.party.pcs[screen.itemPage];
     const item = pc?.items[row];
     if (!pc || !item || item.variety === 0) return;
-    if (part === 'name') {
+    if (part === 'spec') {
+      session.useItemShop(screen.itemPage, row);
+    } else if (part === 'name' && session.itemShop) {
+      // While a shopkeeper is waiting, the name isn't an equip toggle.
+      univ.addStringToBuf('  Click the button beside the item.');
+    } else if (part === 'name') {
       session.toggleEquip(screen.itemPage, row);
     } else if (part === 'drop') {
       if (session.inTown) session.dropItem(screen.itemPage, row);
@@ -334,15 +339,17 @@ async function main(): Promise<void> {
         if (hit) handleShopHit(hit);
         return;
       }
-      if (session.talk) {
-        const word = screen.talkScreen.wordAt(session.talk, x, y);
-        if (word) void activateTalkWord(word.node);
-        return;
-      }
-      const invenHit = screen.inventoryHit(x, y);
+      // The inventory panel stays live during a conversation — that's how the
+      // sell and identify services work, so it gets first refusal.
+      const invenHit = screen.inventoryHit(x, y, session.itemShop !== null);
       if (invenHit) {
         sound.play(Snd.BUTTON);
         void handleInventoryClick(invenHit.row, invenHit.part);
+        return;
+      }
+      if (session.talk) {
+        const word = screen.talkScreen.wordAt(session.talk, x, y);
+        if (word) void activateTalkWord(word.node);
         return;
       }
       const btn = screen.buttonAt(x, y);

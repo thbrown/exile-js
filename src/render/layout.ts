@@ -109,22 +109,46 @@ export interface ItemRowRects {
   give: UiRect;
   drop: UiRect;
   info: UiRect;
+  /** The sell/identify/enchant/recharge button, only shown in a shop mode. */
+  spec: UiRect;
 }
 
-export const ITEM_ROWS: ItemRowRects[] = Array.from({ length: LINES_IN_ITEM_WIN }, (_, i) => {
-  const dy = 13 * i;
-  // The name row starts at 17 and then shifts down 3 (boe.actions.cpp:234).
-  const nameTop = 20 + dy;
-  const btnTop = 18 + dy;
-  return {
-    icon: r(15 + dy, 20, 33 + dy, 38),
-    name: r(nameTop, 3, nameTop + 12, 188),
-    use: r(btnTop, 196, btnTop + 12, 210),
-    give: r(btnTop, 210, btnTop + 12, 224),
-    drop: r(btnTop, 224, btnTop + 12, 238),
-    info: r(btnTop, 238, btnTop + 12, 252),
-  };
-});
+/**
+ * `shopMode` is stat_screen_mode >= MODE_IDENTIFY: the spec button appears and
+ * the name's hitbox shrinks so it can't steal the button's clicks
+ * (boe.actions.cpp:230).
+ */
+export function itemRows(shopMode = false): ItemRowRects[] {
+  return Array.from({ length: LINES_IN_ITEM_WIN }, (_, i) => {
+    const dy = 13 * i;
+    // The name row starts at 17 and then shifts down 3 (boe.actions.cpp:234).
+    const nameTop = 20 + dy;
+    const btnTop = 18 + dy;
+    return {
+      icon: r(15 + dy, 20, 33 + dy, 38),
+      name: r(nameTop, 3, nameTop + 12, shopMode ? 173 : 188),
+      use: r(btnTop, 196, btnTop + 12, 210),
+      give: r(btnTop, 210, btnTop + 12, 224),
+      drop: r(btnTop, 224, btnTop + 12, 238),
+      info: r(btnTop, 238, btnTop + 12, 252),
+      spec: r(17 + dy, 173, 29 + dy, 232),
+    };
+  });
+}
+
+export const ITEM_ROWS: ItemRowRects[] = itemRows();
+export const ITEM_ROWS_SHOP: ItemRowRects[] = itemRows(true);
+
+/**
+ * The spec button's four icons — button_sources (boe.text.cpp:394), one per
+ * shop mode: identify, sell, enchant, recharge.
+ */
+export const SPEC_BTN_ICONS = {
+  identify: r(24, 0, 36, 30),
+  sell: r(36, 0, 48, 30),
+  enchant: r(48, 0, 60, 30),
+  recharge: r(60, 0, 72, 30),
+} as const;
 
 /** The inventory panel's title line and the area erased before drawing. */
 export const ITEM_PANEL = {

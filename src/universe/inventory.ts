@@ -5,7 +5,7 @@
  * cItem::item_weight (item.cpp:99).
  */
 
-import { Item, ItemAbil, ItemType } from '../data/item';
+import { Item, ItemAbil, ItemType, defaultItem } from '../data/item';
 import { ItemCat, variety } from '../data/itemVariety';
 import { Party } from './party';
 import { NUM_INVEN_SLOTS, Player } from './player';
@@ -195,12 +195,29 @@ export function hasAbilEquip(pc: Player, abil: ItemAbil): { slot: number; item: 
   return null;
 }
 
-/** Remove an item from a slot, unequipping it first. */
+/**
+ * cPlayer::take_item (pc.cpp:916) — empty a slot. The pack has no holes in it:
+ * everything below the slot shifts up, which is why the inventory list always
+ * reads as a contiguous run.
+ *
+ * TODO(M5): a poisoned weapon loses its poison here, and the poisoned-slot
+ * index shifts with the rest.
+ */
+export function takeItem(pc: Player, slot: number): void {
+  for (let i = slot; i < NUM_INVEN_SLOTS - 1; i++) {
+    pc.items[i] = pc.items[i + 1]!;
+    pc.equip[i] = pc.equip[i + 1]!;
+  }
+  pc.items[NUM_INVEN_SLOTS - 1] = defaultItem();
+  pc.equip[NUM_INVEN_SLOTS - 1] = false;
+}
+
+/** Remove an item from a slot, unequipping it first; cursed gear won't go. */
 export function takeItemFrom(pc: Player, slot: number): Item | null {
   const item = pc.items[slot];
   if (!item || item.variety === ItemType.NO_ITEM) return null;
   if (item.cursed && pc.equip[slot]) return null;
   pc.equip[slot] = false;
-  pc.items[slot] = { ...item, variety: ItemType.NO_ITEM };
+  takeItem(pc, slot);
   return item;
 }
