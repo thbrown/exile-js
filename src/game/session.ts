@@ -28,11 +28,13 @@ import {
   takeItemFrom,
   unequipItem,
 } from '../universe/inventory';
-import { Skill } from '../universe/skills';
+import { MainStatus, Skill } from '../universe/skills';
+import { ShopItemType } from '../data/shop';
+import { ShopState, handleSale } from './shop';
 import { OUT_HALF_DIM, OUT_MAX_DIM } from '../universe/curOut';
 import { TOWN_NUM_OUTDOORS } from '../universe/party';
 import { Universe } from '../universe/universe';
-import { GameMode, isOut, isTown } from './modes';
+import { GameMode, PreModes, isOut, isTown } from './modes';
 import { bashDoor as bashDoorAt, pickLock as pickLockAt } from './doors';
 import { TalkAction, TalkState } from './talk';
 
@@ -77,7 +79,10 @@ export class GameSession {
   sound: SoundPlayer | null = null;
   /** Non-null while a conversation is open. */
   talk: TalkState | null = null;
+  /** Non-null while a shop is open. */
+  shop: ShopState | null = null;
   private preTalkMode: GameMode = GameMode.TOWN;
+  private preShopMode: GameMode = GameMode.TOWN;
 
   constructor(readonly univ: Universe) {
     this.center = { ...univ.party.outLoc };
@@ -94,12 +99,16 @@ export class GameSession {
     this.startTownMode(this.univ.scenario.startTown, FORCED_ENTRY);
   }
 
+  private get preModes(): PreModes {
+    return { shop: this.preShopMode, talk: this.preTalkMode };
+  }
+
   get isOutdoors(): boolean {
-    return isOut(this.mode);
+    return isOut(this.mode, this.preModes);
   }
 
   get inTown(): boolean {
-    return isTown(this.mode);
+    return isTown(this.mode, this.preModes);
   }
 
   /** get_location (boe.text.cpp:1248) — the left half of the status bar. */
@@ -656,6 +665,8 @@ export class GameSession {
     this.preTalkMode = this.mode;
     this.mode = GameMode.TALKING;
     this.talk = new TalkState(this.univ, monsterIndex, personality, monsterType, facePic);
+    this.talk.onShop = (shopNum, costAdj, name) =>
+      this.startShopMode(shopNum, costAdj, name) || this.startShopModeAnyPc(shopNum, costAdj, name);
   }
 
   /** end_talk_mode (boe.dlgutil.cpp:752). */
@@ -665,6 +676,113 @@ export class GameSession {
     if (this.mode === GameMode.TOWN) {
       this.center = { ...this.univ.party.townLoc };
       this.updateExplored(this.center);
+    }
+  }
+
+  // ------------------------------------------------------------------ shops
+
+  /**
+   * start_shop_mode (boe.dlgutil.cpp:160). Returns false when the shop has
+   * nothing the current PC can use, which is how the caller knows to try
+   * another PC or print "There is nothing available to buy."
+   */
+  startShopMode(which: number, costAdj: number, storeName: string): boolean {
+    const scenShop = this.univ.scenario.shops[which];
+    if (!scenShop) {
+      this.univ.addStringToBuf('The scenario tried to place you in a nonexistent shop!');
+      return false;
+    }
+    const shop = scenShop.clone();
+    shop.costAdj = costAdj;
+    shop.name = storeName;
+
+    // Apply whatever the party has already bought out of this shop's stock.
+    const sold = this.univ.party.storeLimitedStock.get(which);
+    if (sold) {
+      for (const [slot, left] of sold) {
+        if (slot < 0 || slot >= shop.size) continue;
+        const entry = shop.getItem(slot);
+        if (entry.quantity === 0) continue; // infinite stock; nothing to track
+        if (left === 0) entry.type = ShopItemType.EMPTY;
+        else if (entry.type === ShopItemType.OPT_ITEM)
+          entry.quantity = left + Math.trunc(entry.quantity / 1000) * 1000;
+        else entry.quantity = left;
+        shop.replaceItem(slot, entry);
+      }
+    }
+
+    const state = new ShopState(this.univ, which, shop);
+    if (state.visible.length === 0) return false;
+
+    this.preShopMode = this.mode;
+    this.mode = GameMode.SHOPPING;
+    this.shop = state;
+    return true;
+  }
+
+  /**
+   * start_shop_mode_other_pc (boe.dlgutil.cpp:132) — a healer with nothing for
+   * the active PC may still have something for someone else, so try each in
+   * turn and leave the first who can buy as the active PC.
+   */
+  startShopModeAnyPc(which: number, costAdj: number, storeName: string): boolean {
+    const wasPc = this.univ.curPc;
+    for (let i = 0; i < this.univ.party.pcs.length; i++) {
+      if (this.univ.party.pcs[i]!.mainStatus === MainStatus.ABSENT) continue;
+      this.univ.curPc = i;
+      if (this.startShopMode(which, costAdj, storeName)) return true;
+    }
+    this.univ.curPc = wasPc;
+    return false;
+  }
+
+  /** end_shop_mode (boe.dlgutil.cpp:227). */
+  endShopMode(): void {
+    this.shop = null;
+    this.mode = this.preShopMode === GameMode.TALK_TOWN ? GameMode.TOWN : this.preShopMode;
+    if (this.mode === GameMode.TALKING && this.talk) {
+      // Back to the conversation, which reports the visit is over.
+      this.talk.concludeBusiness();
+    } else if (this.mode === GameMode.TOWN) {
+      this.center = { ...this.univ.party.townLoc };
+      this.updateExplored(this.center);
+    }
+  }
+
+  /** Buy the entry on a given screen row. */
+  buyShopRow(row: number): void {
+    const state = this.shop;
+    const target = state?.rowEntry(row);
+    if (!state || !target) return;
+    handleSale(this.univ, state, target.index, this.sound);
+    this.recordShopStock(state);
+    // A healer whose list just emptied moves on to the next PC who needs help.
+    if (state.visible.length === 0) {
+      const { shopNum, costAdj, name } = state;
+      this.endShopMode();
+      if (shopNum >= 0) this.startShopModeAnyPc(shopNum, costAdj, name);
+    }
+  }
+
+  /**
+   * end_shop_mode's bookkeeping (boe.dlgutil.cpp:270) — remember how much of
+   * each limited-stock entry is left so the shop stays picked-over.
+   */
+  private recordShopStock(state: ShopState): void {
+    if (state.shopNum < 0) return;
+    const scenShop = this.univ.scenario.shops[state.shopNum];
+    if (!scenShop) return;
+    let left = this.univ.party.storeLimitedStock.get(state.shopNum);
+    for (let i = 0; i < state.shop.size; i++) {
+      const original = scenShop.getItem(i);
+      if (original.quantity === 0) continue; // infinite stock
+      const entry = state.shop.getItem(i);
+      const remaining = entry.type === ShopItemType.EMPTY ? 0 : entry.quantity % 1000;
+      if (!left) {
+        left = new Map();
+        this.univ.party.storeLimitedStock.set(state.shopNum, left);
+      }
+      left.set(i, remaining);
     }
   }
 

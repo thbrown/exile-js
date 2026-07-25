@@ -271,7 +271,7 @@ describe('node effects', () => {
     expect(session.talk!.words.every((w) => w.preset)).toBe(true);
   });
 
-  it('reports node types that need systems this port has not built', () => {
+  it('a SHOP node opens the shop', () => {
     const found = findNode(TalkNodeType.SHOP);
     if (!found) return;
     const node = scen.townTalk[found.town]!.talkNodes[found.index]!;
@@ -280,7 +280,26 @@ describe('node effects', () => {
     session.startTownMode(found.town, FORCED_ENTRY);
     session.startTalkMode(-1, node.personality, 0, -1);
     session.chooseTalkNode(found.index);
-    expect(session.talk!.lastUnsupported).toBe(TalkNodeType.SHOP);
+    expect(session.mode).toBe(GameMode.SHOPPING);
+    // The node's text names the shop, and its extras pick shop and prices.
+    expect(session.shop!.name).toBe(node.str1);
+    expect(session.shop!.costAdj).toBe(node.extras[0]);
+    // Closing the shop returns to the conversation, not to the town.
+    session.endShopMode();
+    expect(session.mode).toBe(GameMode.TALKING);
+    expect(session.talk!.str1).toBe('You conclude your business.');
+  });
+
+  it('reports node types that need systems this port has not built', () => {
+    const found = findNode(TalkNodeType.TRAINING);
+    if (!found) return;
+    const node = scen.townTalk[found.town]!.talkNodes[found.index]!;
+    const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
+    const session = new GameSession(univ);
+    session.startTownMode(found.town, FORCED_ENTRY);
+    session.startTalkMode(-1, node.personality, 0, -1);
+    session.chooseTalkNode(found.index);
+    expect(session.talk!.lastUnsupported).toBe(TalkNodeType.TRAINING);
     expect(univ.transcript.at(-1)).toContain('not implemented yet');
   });
 });

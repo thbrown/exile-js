@@ -40,6 +40,16 @@ export class Party {
   lightLevel = 0;
   /** Special items the party has acquired, by index (cParty::spec_items). */
   specItems = new Set<number>();
+  /** Alchemy recipes the party knows (cParty::alchemy). */
+  alchemy: boolean[] = new Array<boolean>(20).fill(false);
+  /**
+   * Rolled stock for random shops: magicStoreItems[shop][slot]. Random shops
+   * re-roll only when refresh_store_items runs, so the same wares are on the
+   * shelf until then (cParty::magic_store_items).
+   */
+  magicStoreItems = new Map<number, Map<number, import('../data/item').Item>>();
+  /** How much of a limited-stock entry is left: storeLimitedStock[shop][slot]. */
+  storeLimitedStock = new Map<number, Map<number, number>>();
 
   /** Stuff Done Flags — the scenario-visible persistent state array. */
   stuffDone: Uint8Array[] = Array.from({ length: SDF_ROWS }, () => new Uint8Array(SDF_COLUMNS));

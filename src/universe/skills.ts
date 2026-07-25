@@ -68,6 +68,29 @@ export enum Race {
   VAHNATAI = 3,
 }
 
+/** eStatus (damage.hpp:37) — the per-PC timed status effects. */
+export enum Status {
+  MAIN = -1,
+  POISONED_WEAPON = 0,
+  BLESS_CURSE = 1,
+  POISON = 2,
+  HASTE_SLOW = 3,
+  INVULNERABLE = 4,
+  MAGIC_RESISTANCE = 5,
+  WEBS = 6,
+  DISEASE = 7,
+  INVISIBLE = 8,
+  DUMB = 9,
+  MARTYRS_SHIELD = 10,
+  ASLEEP = 11,
+  PARALYZED = 12,
+  ACID = 13,
+  FORCECAGE = 14,
+  CHARM = 15,
+}
+
+export const NUM_STATUSES = 16;
+
 export enum MainStatus {
   ABSENT = 0,
   ALIVE = 1,

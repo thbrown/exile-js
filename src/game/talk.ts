@@ -78,6 +78,11 @@ export class TalkState {
   canRecord = true;
   /** Set when a node needs a system this port hasn't built yet. */
   lastUnsupported: TalkNodeType | null = null;
+  /**
+   * How a SHOP node opens a shop. The session owns mode changes, so it supplies
+   * this; it returns false when the shop has nothing to sell.
+   */
+  onShop: ((shopNum: number, costAdj: number, name: string) => boolean) | null = null;
   private history: HistoryEntry[] = [];
   /** Clickable words, rebuilt after every reply. */
   words: TalkWord[] = [];
@@ -351,6 +356,19 @@ export class TalkState {
         }
         break;
       }
+      case TalkNodeType.SHOP:
+        // b names the shop, a is its cost adjustment, and this node's own text
+        // becomes the shop's title (boe.dlgutil.cpp:999).
+        this.canRecord = false;
+        if (this.onShop?.(b, a, str1)) {
+          // The shop is on screen now; this reply is behind it.
+          str2 = '';
+        } else {
+          // A shop with nothing to sell falls back to str2, or a default line.
+          str1 = str2.length > 0 ? str2 : 'There is nothing available to buy.';
+          str2 = '';
+        }
+        break;
       case TalkNodeType.END_FORCE:
         this.endForced = true;
         break;
@@ -422,6 +440,15 @@ export class TalkState {
     this.str2 = last.text[1];
     this.rebuildWords();
     return 'ok';
+  }
+
+  /**
+   * end_shop_mode's return path (boe.dlgutil.cpp:243): coming back from a shop
+   * into a conversation, the shopkeeper acknowledges the visit is over.
+   */
+  concludeBusiness(): void {
+    this.canRecord = false;
+    this.finish('You conclude your business.', '');
   }
 
   private finish(str1: string, str2: string): 'ok' | 'done' {

@@ -49,6 +49,7 @@ import { SheetStore, TILE_H, TILE_W } from './sheets';
 import { terrainGraphic } from './terrainPics';
 import { DEFAULT_BG, PANEL_BG, tilePattern } from './tiling';
 import { TalkScreen } from './talkScreen';
+import { ShopScreen } from './shopScreen';
 import { Trim, TrimMasks } from './trim';
 import { drawString, drawStringEllipsis, drawStringRight, wrapLines } from './text';
 
@@ -75,6 +76,7 @@ export class Screen {
   private buttonsMode: 'out' | 'town' | 'combat' | null = null;
   private trim: TrimMasks;
   readonly talkScreen: TalkScreen;
+  readonly shopScreen: ShopScreen;
   /** The ground terrain trim falls back to when a neighbour is impassable. */
   private currentGround = 0;
   animFrame = 0;
@@ -85,16 +87,18 @@ export class Screen {
   ) {
     this.trim = new TrimMasks(store);
     this.talkScreen = new TalkScreen(ctx, store);
+    this.shopScreen = new ShopScreen(ctx, store);
   }
 
   draw(session: GameSession): void {
     const { ctx } = this;
     ctx.imageSmoothingEnabled = false;
     this.putBackground(session);
-    // Talking replaces the whole left column, so the terrain view, status bar
-    // and toolbar are skipped (redraw_screen's MODE_TALKING branch).
-    if (session.talk) {
-      this.talkScreen.draw(session.talk);
+    // Talking and shopping replace the whole left column, so the terrain view,
+    // status bar and toolbar are skipped (redraw_screen's MODE_TALKING branch).
+    if (session.shop || session.talk) {
+      if (session.shop) this.shopScreen.draw(session.shop);
+      else this.talkScreen.draw(session.talk!);
       this.drawPanel('pcStats');
       this.drawPcStats(session);
       this.drawPanel('inven');

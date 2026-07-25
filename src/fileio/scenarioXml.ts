@@ -1,20 +1,113 @@
 /**
  * scenario.xml reader — partial port of readScenarioFromXml
- * (fileio_scen.cpp:781). Parses the header text and the <game> geometry
- * block. Deferred sections (special items, quests, shops, timers, strings,
- * journals) are skipped by name and picked up in later milestones.
+ * (fileio_scen.cpp:781). Parses the header text, the <game> geometry block,
+ * and the shop list. Deferred sections (special items, quests, timers,
+ * strings, journals) are skipped by name and picked up in later milestones.
  */
 
 import { Scenario } from '../data/scenario';
-import { children, intText, locFromXml, tag, text } from './xml';
+import {
+  Shop, ShopItemType, ShopPrompt, ShopType, SHOP_PROMPT_TAGS, SHOP_TYPE_TAGS, shopBaseItem,
+} from '../data/shop';
+import { ItemType } from '../data/item';
+import { attr, children, intAttr, intText, locFromXml, rectFromXml, tag, text } from './xml';
 
 const DEFERRED_TOP = new Set([
   'icon', 'id', 'version', 'language', 'author', 'ratings', 'flags', 'feature-flags', 'creator',
   'editor',
 ]);
 const DEFERRED_GAME = new Set([
-  'store-items', 'special-item', 'quest', 'shop', 'timer', 'string', 'journal', 'town-flag',
+  'special-item', 'quest', 'timer', 'string', 'journal', 'town-flag',
 ]);
+
+/** The entry tags that carry a single number and map straight to a type. */
+const SIMPLE_ENTRIES: Record<string, ShopItemType> = {
+  'mage-spell': ShopItemType.MAGE_SPELL,
+  'priest-spell': ShopItemType.PRIEST_SPELL,
+  recipe: ShopItemType.ALCHEMY,
+  skill: ShopItemType.SKILL,
+  treasure: ShopItemType.TREASURE,
+  class: ShopItemType.CLASS,
+};
+
+/** "infinite" or a number (the shop-amount type in scenario.xsd). */
+function shopAmount(raw: string): number {
+  if (raw === 'infinite') return 0;
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n)) throw new Error(`bad shop quantity '${raw}'`);
+  return n;
+}
+
+/** readShopFromXml (fileio_scen.cpp:625). */
+export function readShopFromXml(data: Element, fname = 'scenario.xml'): Shop {
+  const shop = new Shop();
+  const reqs = new Set(['name', 'type', 'prompt', 'face', 'entries']);
+  for (const elem of children(data)) {
+    const type = tag(elem);
+    reqs.delete(type);
+    if (type === 'name') shop.name = text(elem);
+    else if (type === 'type') {
+      const i = SHOP_TYPE_TAGS.indexOf(text(elem));
+      shop.type = i < 0 ? ShopType.NORMAL : (i as ShopType);
+    } else if (type === 'prompt') {
+      const i = SHOP_PROMPT_TAGS.indexOf(text(elem));
+      shop.prompt = i < 0 ? ShopPrompt.SHOPPING : (i as ShopPrompt);
+    } else if (type === 'face') shop.face = intText(elem);
+    else if (type === 'entries') readShopEntries(elem, shop, fname);
+    else throw new Error(`${fname}: bad node <${type}> in <shop>`);
+  }
+  if (reqs.size > 0) throw new Error(`${fname}: <shop> missing <${[...reqs][0]}>`);
+  return shop;
+}
+
+function readShopEntries(elem: Element, shop: Shop, fname: string): void {
+  // The real item data isn't available yet; refreshItems fills it in later.
+  const dummy = shopBaseItem();
+  dummy.variety = ItemType.GOLD;
+  for (const entry of children(elem)) {
+    const type = tag(entry);
+    if (type === 'item') {
+      let amount = -1;
+      let chance = 100;
+      const rawQuantity = attr(entry, 'quantity');
+      if (rawQuantity !== undefined) amount = shopAmount(rawQuantity);
+      if (attr(entry, 'chance') !== undefined) {
+        chance = intAttr(entry, 'chance');
+        // A chance without an explicit quantity means one of them.
+        if (amount === -1) amount = 1;
+      }
+      if (amount === -1) amount = 0;
+      shop.addItem(intText(entry), { ...dummy }, amount, chance);
+    } else if (type === 'special') {
+      let amount = 0;
+      let node = 0;
+      let cost = 0;
+      let icon = 0;
+      let title = '';
+      let descr = '';
+      const reqs = new Set(['quantity', 'node', 'icon', 'name', 'description']);
+      for (const field of children(entry)) {
+        const name = tag(field);
+        reqs.delete(name);
+        if (name === 'quantity') amount = shopAmount(text(field));
+        else if (name === 'cost') cost = intText(field);
+        else if (name === 'node') node = intText(field);
+        else if (name === 'icon') icon = intText(field);
+        else if (name === 'name') title = text(field);
+        else if (name === 'description') descr = text(field);
+        else throw new Error(`${fname}: bad node <${name}> in <special>`);
+      }
+      if (reqs.size > 0) throw new Error(`${fname}: <special> missing <${[...reqs][0]}>`);
+      shop.addCallSpecial(title, descr, icon, node, cost, amount);
+    } else if (type === 'heal') {
+      shop.addSpecial(ShopItemType.HEAL_WOUNDS + intText(entry));
+    } else {
+      const itype = SIMPLE_ENTRIES[type];
+      if (itype === undefined) throw new Error(`${fname}: bad node <${type}> in <entries>`);
+      shop.addSpecial(itype, intText(entry));
+    }
+  }
+}
 
 export interface ScenarioHeader {
   title: string;
@@ -27,6 +120,9 @@ export interface ScenarioHeader {
   townStart: { x: number; y: number };
   outdoorStart: { x: number; y: number };
   sectorStart: { x: number; y: number };
+  shops: Shop[];
+  /** store_item_rects — where each town's shops keep sold-back goods. */
+  storeItemRects: Map<number, { top: number; left: number; bottom: number; right: number }>;
 }
 
 export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): ScenarioHeader {
@@ -42,6 +138,8 @@ export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): Scen
     townStart: { x: 0, y: 0 },
     outdoorStart: { x: 0, y: 0 },
     sectorStart: { x: 0, y: 0 },
+    shops: [],
+    storeItemRects: new Map(),
   };
   for (const elem of children(root)) {
     const type = tag(elem);
@@ -61,7 +159,13 @@ export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): Scen
         else if (gt === 'town-start') hdr.townStart = locFromXml(g);
         else if (gt === 'outdoor-start') hdr.outdoorStart = locFromXml(g);
         else if (gt === 'sector-start') hdr.sectorStart = locFromXml(g);
-        else if (!DEFERRED_GAME.has(gt))
+        else if (gt === 'shop') hdr.shops.push(readShopFromXml(g, fname));
+        else if (gt === 'store-items') {
+          const town = intAttr(g, 'town');
+          if (hdr.storeItemRects.has(town))
+            throw new Error(`${fname}: two <store-items> rects for town ${town}`);
+          hdr.storeItemRects.set(town, rectFromXml(g));
+        } else if (!DEFERRED_GAME.has(gt))
           throw new Error(`${fname}: bad node <${gt}> in <game>`);
       }
     } else if (!DEFERRED_TOP.has(type)) {

@@ -6,6 +6,7 @@
 import { shiftLoc } from './core/location';
 import { GameRng } from './core/rng';
 import { DialogHost } from './dialogs/dialog';
+import { loadStringTables } from './data/strings';
 import { TerSpec } from './data/terrain';
 import { GameSession } from './game/session';
 import { TalkAction } from './game/talk';
@@ -15,6 +16,7 @@ import { InputRouter } from './platform/input';
 import { Snd, SoundPlayer } from './platform/sound';
 import { BOE_HEIGHT, BOE_WIDTH, ToolbarButton } from './render/layout';
 import { CHROME_SHEETS, Screen } from './render/screen';
+import { ShopHit, shopItemInfo } from './render/shopScreen';
 import { SheetStore } from './render/sheets';
 import { itemWeight } from './universe/inventory';
 import { PartyPreset } from './universe/player';
@@ -40,7 +42,11 @@ async function main(): Promise<void> {
 
   const name = scenarioFromQuery();
   status.textContent = `Loading ${name}…`;
-  const opcodes = await loadOpcodes(async (url) => (await fetch(url)).text());
+  const fetchText = async (url: string): Promise<string> => (await fetch(url)).text();
+  const opcodes = await loadOpcodes(fetchText);
+  // Shops name their stock out of the string resources while parsing, so these
+  // have to be in place before the scenario loads.
+  await loadStringTables(fetchText);
   const scen = await loadScenario(new FetchSource(`/scenarios/${name}/`), opcodes);
 
   const store = new SheetStore();
@@ -241,7 +247,9 @@ async function main(): Promise<void> {
   let pending: 'talk' | 'look' | null = null;
 
   const setStatus = (): void => {
-    if (session.talk) status.textContent = 'Click a highlighted word, or Done to stop talking.';
+    if (session.shop)
+      status.textContent = "Click an item name (or type 'a'-'h') to buy; Esc to leave.";
+    else if (session.talk) status.textContent = 'Click a highlighted word, or Done to stop talking.';
     else if (pending === 'talk') status.textContent = 'Talk to whom? (pick a direction)';
     else if (pending === 'look') status.textContent = 'Look where? (pick a direction)';
     else
@@ -259,6 +267,30 @@ async function main(): Promise<void> {
       if (asked.trim().length > 0 && talk.askAbout(asked) === 'done') session.endTalkMode();
     } else {
       session.chooseTalkNode(node);
+    }
+    setStatus();
+    redraw();
+  };
+
+  /** Buy, inspect, scroll or leave — the shop screen's four actions. */
+  const handleShopHit = (hit: ShopHit): void => {
+    const shop = session.shop;
+    if (!shop) return;
+    if (hit.part === 'done') {
+      sound.play(Snd.BUTTON);
+      session.endShopMode();
+    } else if (hit.part === 'scroll') {
+      shop.scrollBy(hit.delta);
+    } else if (hit.part === 'buy') {
+      session.buyShopRow(hit.row);
+    } else {
+      const info = shopItemInfo(shop, hit.row);
+      if (info && !dialogs.active)
+        void dialogs.run({
+          text: info.text,
+          escapeButton: 'okay',
+          buttons: [{ name: 'okay', label: 'OK' }],
+        }).then(() => redraw());
     }
     setStatus();
     redraw();
@@ -289,7 +321,7 @@ async function main(): Promise<void> {
 
   const router = new InputRouter(canvas, {
     onMove: (dir) => {
-      if (dialogs.active || session.talk) return;
+      if (dialogs.active || session.talk || session.shop) return;
       const from = session.inTown ? univ.party.townLoc : univ.party.outLoc;
       actOn(shiftLoc(from, dir));
       setStatus();
@@ -297,6 +329,11 @@ async function main(): Promise<void> {
     },
     onClick: (x, y) => {
       if (dialogs.handleClick(x, y)) return;
+      if (session.shop) {
+        const hit = screen.shopScreen.hit(session.shop, x, y);
+        if (hit) handleShopHit(hit);
+        return;
+      }
       if (session.talk) {
         const word = screen.talkScreen.wordAt(session.talk, x, y);
         if (word) void activateTalkWord(word.node);
@@ -343,6 +380,20 @@ async function main(): Promise<void> {
     },
     onKey: (key) => {
       if (dialogs.handleKey(key)) return;
+      if (session.shop) {
+        // shop_chars: 'a'-'h' buy the eight visible rows, Escape leaves.
+        if (key === 'Escape') {
+          handleShopHit({ part: 'done' });
+          return;
+        }
+        if (key === 'ArrowUp' || key === 'ArrowDown') {
+          handleShopHit({ part: 'scroll', delta: key === 'ArrowUp' ? -1 : 1 });
+          return;
+        }
+        const row = screen.shopScreen.rowForKey(session.shop, key);
+        if (row >= 0) handleShopHit({ part: 'buy', row });
+        return;
+      }
       if (session.talk) {
         // Talking has its own letter shortcuts (talk_chars): l/n/j/b/s/r/d/g/a,
         // with Escape acting as Done and Space as Go Back.

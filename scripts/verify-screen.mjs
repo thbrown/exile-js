@@ -110,6 +110,61 @@ const talkClosed = await page.evaluate(() => {
 });
 console.log('TALK CLOSED:', JSON.stringify(talkClosed));
 
+// 2b-2. Shopping: open the first shop with stock, buy with its letter key, and
+//       leave with Escape.
+const shopOpened = await page.evaluate(() => {
+  const s = window.__session;
+  const which = window.__scen.shops.findIndex((sh) => sh.numItems() > 0);
+  const ok = s.startShopMode(which, 2, 'Verify Shop');
+  s.univ.party.gold = 30000;
+  s.shop.setUpArray();
+  window.__redraw();
+  return ok && {
+    which,
+    mode: s.mode,
+    inTown: s.inTown,
+    name: s.shop.name,
+    title: s.shop.title,
+    rows: s.shop.visible.length,
+    first: s.shop.rowEntry(0)?.entry.item.fullName,
+    firstCost: s.shop.rowEntry(0) && s.shop.cost(s.shop.rowEntry(0).entry),
+  };
+});
+console.log('SHOP:', JSON.stringify(shopOpened));
+await shot('01b2-shopping');
+
+// The shop panel must actually paint over the terrain view.
+const shopPainted = await page.evaluate(() => {
+  const ctx = document.getElementById('canvas').getContext('2d');
+  const d = ctx.getImageData(19, 7, 279, 351).data;
+  const seen = new Set();
+  for (let i = 0; i < d.length; i += 4) seen.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
+  return seen.size;
+});
+console.log('SHOP PANEL COLOURS:', shopPainted);
+
+// 'a' buys the first row (shop_chars).
+const goldBefore = await page.evaluate(() => window.__univ.party.gold);
+await page.keyboard.press('a');
+await page.waitForTimeout(200);
+const bought = await page.evaluate(() => {
+  const s = window.__session;
+  return {
+    gold: s.univ.party.gold,
+    lastLine: s.univ.transcript.at(-1),
+    stillShopping: !!s.shop,
+  };
+});
+console.log('SHOP BUY a:', JSON.stringify({ goldBefore, ...bought }));
+
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
+const shopClosed = await page.evaluate(() => {
+  const s = window.__session;
+  return { shopping: !!s.shop, mode: s.mode, inTown: s.inTown };
+});
+console.log('SHOP CLOSED:', JSON.stringify(shopClosed));
+
 // 2c. Doors: an unlocked one opens on contact; a locked one raises the prompt,
 //     and its Bash shortcut goes through the dialog host.
 const doors = await page.evaluate(() => {
@@ -344,6 +399,13 @@ const ok =
   bashPrompt?.text.startsWith('Who will bash?') &&
   talkKeys.job === true &&
   bashPrompt?.rows === 6 &&
+  shopOpened?.rows > 0 &&
+  shopOpened.inTown === true &&
+  shopPainted > 8 &&
+  bought.gold < goldBefore &&
+  bought.stillShopping === true &&
+  shopClosed.shopping === false &&
+  shopClosed.inTown === true &&
   bashDone.dialogGone === true &&
   (gotItem.skipped === true || gotItem.carried.includes(gotItem.name)) &&
   (sign.skipped === true || (sign.readable === true && signShown.dialogOpen === true)) &&

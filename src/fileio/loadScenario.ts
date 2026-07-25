@@ -36,6 +36,9 @@ export async function loadScenario(
   scen.scenMonsters = readMonstersFromXml(
     await parseXmlDoc(await src.getText('monsters.xml'), 'monsters.xml'),
   );
+  // fileio_scen.cpp:1395 — shops name items by index, so they can only be
+  // filled in once the item list exists.
+  for (const shop of scen.shops) shop.refreshItems(scen.scenItems);
   scen.scenSpecials = parseSpecials(await src.getText('scenario.spec'), opcodes, 'scenario.spec');
 
   for (let t = 0; t < scen.numTowns; t++) {

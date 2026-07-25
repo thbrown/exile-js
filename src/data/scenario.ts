@@ -7,6 +7,7 @@
 import { Item } from './item';
 import { Monster } from './monster';
 import { Sector } from './outdoors';
+import { Shop } from './shop';
 import { SpecialNode } from './special';
 import { Speech } from './talking';
 import { Terrain } from './terrain';
@@ -31,6 +32,8 @@ export interface Scenario {
   /** outdoors[x][y] — sector grid, x < outWidth, y < outHeight. */
   outdoors: Sector[][];
   scenSpecials: Map<number, SpecialNode>;
+  shops: Shop[];
+  storeItemRects: Map<number, { top: number; left: number; bottom: number; right: number }>;
 }
 
 /**

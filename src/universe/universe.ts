@@ -5,8 +5,11 @@
  */
 
 import { GameRng } from '../core/rng';
+import { Item, ItemType, defaultItem } from '../data/item';
 import { Scenario } from '../data/scenario';
+import { ShopItemType, ShopType } from '../data/shop';
 import { Town } from '../data/town';
+import { returnTreasure } from '../data/treasure';
 import { Terrain } from '../data/terrain';
 import { CurOut } from './curOut';
 import { CurTown } from './curTown';
@@ -39,6 +42,59 @@ export class Universe {
     this.party.outLoc = { ...scenario.sectorStart };
     this.out = new CurOut(scenario, this.party);
     this.out.addMaps();
+    this.refreshStoreItems();
+  }
+
+  /**
+   * cUniverse::refresh_store_items (universe.cpp:1486) — roll the stock of
+   * every random shop. Called when a scenario starts and whenever a special
+   * asks for a refresh.
+   */
+  refreshStoreItems(): void {
+    for (let i = 0; i < this.scenario.shops.length; i++) {
+      const shop = this.scenario.shops[i]!;
+      if (shop.type !== ShopType.RANDOM) continue;
+      for (let j = 0; j < shop.size; j++) {
+        const entry = shop.getItem(j);
+        if (entry.type === ShopItemType.TREASURE) {
+          this.setStoreItem(i, j, this.randomStoreItem(entry.item.itemLevel, entry.item.itemLevel === 0));
+        } else if (entry.type === ShopItemType.CLASS) {
+          const choices: number[] = [];
+          for (let k = 0; k < this.scenario.scenItems.length; k++) {
+            if (this.scenario.scenItems[k]!.specialClass === entry.item.specialClass) choices.push(k);
+          }
+          const choice = this.rng.getRan(1, 0, choices.length);
+          if (choice < choices.length)
+            this.setStoreItem(i, j, { ...this.scenario.scenItems[choices[choice]!]! });
+        } else if (entry.type === ShopItemType.OPT_ITEM) {
+          const roll = this.rng.getRan(1, 1, 100);
+          if (roll <= Math.trunc(entry.quantity / 1000)) this.setStoreItem(i, j, { ...entry.item });
+        }
+      }
+    }
+    // TODO(M6): generate_job_bank for each of the party's job banks.
+  }
+
+  /** cUniverse::get_random_store_item (universe.cpp:1478). */
+  private randomStoreItem(lootType: number, allowJunk: boolean): Item {
+    let item = returnTreasure(this.scenario, this.rng, lootType, allowJunk);
+    if (item.variety === ItemType.GOLD || item.variety === ItemType.SPECIAL
+      || item.variety === ItemType.FOOD || item.variety === ItemType.QUEST) item = defaultItem();
+    item.ident = true;
+    return item;
+  }
+
+  private setStoreItem(shop: number, slot: number, item: Item): void {
+    let byShop = this.party.magicStoreItems.get(shop);
+    if (!byShop) {
+      byShop = new Map();
+      this.party.magicStoreItems.set(shop, byShop);
+    }
+    byShop.set(slot, item);
+  }
+
+  storeItem(shop: number, slot: number): Item {
+    return this.party.magicStoreItems.get(shop)?.get(slot) ?? defaultItem();
   }
 
   get currentPc(): Player {

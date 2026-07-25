@@ -82,10 +82,15 @@ export interface GiveResult {
  * cPlayer::give_item. Gold, food, special items and quests go to the party
  * rather than a slot; everything else needs both spare capacity and a slot.
  *
+ * With `checkOnly` (GIVE_CHECK_ONLY) nothing changes hands — the caller just
+ * wants to know whether it could, which is how ok_to_buy tests a purchase.
+ *
  * TODO(M6): combine_things stacks matching ammo/potions into one slot, which
  * lets a full pack still accept more arrows.
  */
-export function giveItem(pc: Player, party: Party, item: Item): GiveResult {
+export function giveItem(
+  pc: Player, party: Party, item: Item, checkOnly = false,
+): GiveResult {
   if (pc.mainStatus !== MainStatus.ALIVE)
     return { status: GiveStatus.DEAD, slot: -1, message: '' };
   if (item.variety === ItemType.NO_ITEM)
@@ -93,13 +98,13 @@ export function giveItem(pc: Player, party: Party, item: Item): GiveResult {
 
   switch (item.variety) {
     case ItemType.GOLD:
-      party.gold += item.itemLevel;
+      if (!checkOnly) party.gold += item.itemLevel;
       return { status: GiveStatus.OK, slot: -1, message: 'You get some gold.' };
     case ItemType.FOOD:
-      party.food += item.itemLevel;
+      if (!checkOnly) party.food += item.itemLevel;
       return { status: GiveStatus.OK, slot: -1, message: 'You get some food.' };
     case ItemType.SPECIAL:
-      party.specItems.add(item.itemLevel);
+      if (!checkOnly) party.specItems.add(item.itemLevel);
       return { status: GiveStatus.OK, slot: -1, message: 'You get a special item.' };
     case ItemType.QUEST:
       // TODO(M6): quests need the party's active_quests table.
@@ -115,7 +120,7 @@ export function giveItem(pc: Player, party: Party, item: Item): GiveResult {
   if (slot < 0) return { status: GiveStatus.NO_SPACE, slot: -1, message: 'No room for item.' };
 
   // Taking an item clears the flags that only apply while it's on the floor.
-  pc.items[slot] = { ...item, property: false, contained: false, held: false };
+  if (!checkOnly) pc.items[slot] = { ...item, property: false, contained: false, held: false };
   const name = item.ident ? item.fullName : item.name;
   return { status: GiveStatus.OK, slot, message: `  ${pc.name} gets ${name}.` };
 }

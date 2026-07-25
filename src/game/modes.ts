@@ -32,16 +32,37 @@ export enum GameMode {
   RESTING,
 }
 
-/** is_out (boe.locutils.cpp:44) — shopping delegates to the pre-shop mode. */
-export function isOut(mode: GameMode): boolean {
-  return mode === GameMode.OUTDOORS || mode === GameMode.LOOK_OUTDOORS;
+/**
+ * Where the party physically is while a conversation or a shop is on screen:
+ * both modes stash the mode they interrupted, and is_out/is_town ask *that*
+ * question instead (boe.locutils.cpp:44 swaps the two and recurses).
+ */
+export interface PreModes {
+  shop: GameMode;
+  talk: GameMode;
+}
+
+function unwrap(mode: GameMode, pre?: PreModes): GameMode {
+  if (!pre) return mode;
+  // A shop opened from a conversation nests one level, so keep unwrapping.
+  for (let i = 0; i < 4; i++) {
+    if (mode === GameMode.SHOPPING) mode = pre.shop;
+    else if (mode === GameMode.TALKING) mode = pre.talk;
+    else break;
+  }
+  return mode;
+}
+
+/** is_out (boe.locutils.cpp:44). */
+export function isOut(mode: GameMode, pre?: PreModes): boolean {
+  const m = unwrap(mode, pre);
+  return m === GameMode.OUTDOORS || m === GameMode.LOOK_OUTDOORS;
 }
 
 /** is_town (boe.locutils.cpp:60) */
-export function isTown(mode: GameMode): boolean {
-  return (
-    (mode > GameMode.OUTDOORS && mode < GameMode.COMBAT) || mode === GameMode.LOOK_TOWN
-  );
+export function isTown(mode: GameMode, pre?: PreModes): boolean {
+  const m = unwrap(mode, pre);
+  return (m > GameMode.OUTDOORS && m < GameMode.COMBAT) || m === GameMode.LOOK_TOWN;
 }
 
 /** is_combat (boe.locutils.cpp:76) */

@@ -6,10 +6,12 @@
 
 import { Direction } from '../core/location';
 import { Item, defaultItem } from '../data/item';
-import { MainStatus, NUM_SKILLS, NUM_TRAITS, Race, Skill } from './skills';
+import { MainStatus, NUM_SKILLS, NUM_STATUSES, NUM_TRAITS, Race, Skill } from './skills';
 
 export const NUM_PC_SLOTS = 6;
 export const NUM_INVEN_SLOTS = 24;
+/** 62 spells per school (spell.hpp) — the last two are scenario-only. */
+export const NUM_SPELLS = 62;
 
 export enum PartyPreset {
   /** The six pregens a new game starts with (cPlayer ctor, pc.cpp:1084). */
@@ -38,6 +40,11 @@ export class Player {
   items: Item[] = Array.from({ length: NUM_INVEN_SLOTS }, () => defaultItem());
   /** Which slots are currently worn/wielded (cPlayer::equip). */
   equip: boolean[] = new Array<boolean>(NUM_INVEN_SLOTS).fill(false);
+  /** Timed status effects, indexed by Status; 0 means "not afflicted". */
+  status: number[] = new Array<number>(NUM_STATUSES).fill(0);
+  /** Which spells this PC knows (cPlayer::mage_spells / priest_spells). */
+  mageSpells: boolean[] = new Array<boolean>(NUM_SPELLS).fill(false);
+  priestSpells: boolean[] = new Array<boolean>(NUM_SPELLS).fill(false);
 
   get isAlive(): boolean {
     return this.mainStatus === MainStatus.ALIVE;
@@ -119,6 +126,8 @@ export function makePresetPlayer(preset: PartyPreset, slot: number): Player {
     pc.skillPts = 60;
     pc.expAdj = 50;
     for (let i = 0; i < 10; i++) pc.traits[i] = true;
+    pc.mageSpells.fill(true);
+    pc.priestSpells.fill(true);
     // 1, 4, 7, 10, 13, 16 — with slot 2 bumped by one
     pc.whichGraphic = slot * 3 + 1 + (slot === 2 ? 1 : 0);
     return pc;

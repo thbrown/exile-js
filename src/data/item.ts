@@ -199,3 +199,80 @@ export function defaultItem(): Item {
     desc: '',
   };
 }
+
+// min_defense_bonus / max_defense_bonus (item.cpp:110).
+function minDefenceBonus(bonus: number): number {
+  if (bonus === 0) return 0;
+  if (bonus < 0) return bonus;
+  return 1 + Math.trunc(bonus / 2);
+}
+
+function maxDefenceBonus(bonus: number): number {
+  if (bonus === 0) return 0;
+  if (bonus < 0) return bonus;
+  return bonus + Math.trunc(bonus / 2);
+}
+
+/**
+ * cItem::interesting_string (item.cpp:122) — the one-line summary the game
+ * shows under an item's name in shops and the inventory panel.
+ */
+export function interestingString(item: Item): string {
+  if (item.property) return 'Not yours.';
+  if (!item.ident) return 'Not identified.';
+  if (item.cursed) return 'Cursed item.';
+
+  let gotString = true;
+  let out = '';
+  switch (item.variety) {
+    case ItemType.ONE_HANDED:
+    case ItemType.TWO_HANDED:
+    case ItemType.ARROW:
+    case ItemType.THROWN_MISSILE:
+    case ItemType.BOLTS:
+    case ItemType.MISSILE_NO_AMMO:
+      out = `Damage: 1-${item.itemLevel}`;
+      if (item.bonus > 0) out += ` + ${item.bonus}`;
+      else if (item.bonus < 0) out += ` - ${-item.bonus}`;
+      break;
+    case ItemType.SHIELD:
+    case ItemType.ARMOR:
+    case ItemType.HELM:
+    case ItemType.GLOVES:
+    case ItemType.SHIELD_2:
+    case ItemType.BOOTS: {
+      let minDefense = item.itemLevel > 0 ? 1 : 0;
+      minDefense += minDefenceBonus(item.bonus) + Math.sign(item.protection);
+      const maxDefense = item.itemLevel + maxDefenceBonus(item.bonus) + item.protection;
+      out = `Blocks ${minDefense}`;
+      if (maxDefense !== minDefense) out += `-${Math.max(minDefense, item.itemLevel)}`;
+      out += ' damage';
+      break;
+    }
+    case ItemType.BOW:
+    case ItemType.CROSSBOW:
+      out = `Bonus: +${item.bonus} to hit`;
+      break;
+    case ItemType.GOLD:
+      out = `${item.itemLevel} gold pieces`;
+      break;
+    case ItemType.SPECIAL:
+    case ItemType.QUEST:
+      out = 'Special';
+      break;
+    case ItemType.FOOD:
+      out = `${item.itemLevel} food`;
+      break;
+    case ItemType.WEAPON_POISON:
+      out = `Poison: ${item.itemLevel}-${item.itemLevel * 6} damage`;
+      break;
+    default:
+      gotString = false;
+      break;
+  }
+  if (item.charges > 0 && item.ability !== ItemAbil.MESSAGE) {
+    if (gotString) out += '; ';
+    out += `Uses: ${item.charges}`;
+  }
+  return out.length > 0 ? `${out}.` : out;
+}
