@@ -38,6 +38,15 @@ export class Creature {
   yWidth = 1;
   /** Index in the town's creature list, for preset lookups. */
   slot = -1;
+  /** Absolute personality id (town * 10 + slot); negative means unable to talk. */
+  personality = -1;
+  facialPic = -1;
+  specialOnTalk = -1;
+  specialOnKill = -1;
+
+  get isFriendly(): boolean {
+    return this.attitude === Attitude.DOCILE || this.attitude === Attitude.FRIENDLY;
+  }
 
   get isAlive(): boolean {
     return this.active !== CreatureStatus.DEAD;
@@ -63,6 +72,10 @@ export function assignCreature(
   c.spec1 = preset.spec1;
   c.spec2 = preset.spec2;
   c.specEncCode = preset.specEncCode;
+  c.personality = preset.personality;
+  c.facialPic = preset.facialPic;
+  c.specialOnTalk = preset.specialOnTalk;
+  c.specialOnKill = preset.specialOnKill;
   c.health = c.maxHealth = template.level * 3;
   c.pictureNum = template.pictureNum;
   c.xWidth = template.xWidth;

@@ -38,6 +38,8 @@ export class Party {
   inHorse = -1;
   /** Accumulated light from spells/items; drives light_radius in dark towns. */
   lightLevel = 0;
+  /** Special items the party has acquired, by index (cParty::spec_items). */
+  specItems = new Set<number>();
 
   /** Stuff Done Flags — the scenario-visible persistent state array. */
   stuffDone: Uint8Array[] = Array.from({ length: SDF_ROWS }, () => new Uint8Array(SDF_COLUMNS));

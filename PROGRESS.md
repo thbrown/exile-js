@@ -5,7 +5,7 @@
 
 ## Current state
 
-**M2 in progress (2026-07-25): real Universe/GameSession architecture + the full game screen are in. A new game starts in the scenario's start town with the pregen party; you can walk out to the world map and back into towns on the classic 605×430 UI, with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds. Remaining M2: inventory panel contents (needs the item/equip model), fields overlay, replay driver.**
+**M2 mostly done, M3 started (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, and **talk to townspeople** (keyword conversations with portraits). Remaining M2: inventory panel (needs the item/equip model), fields overlay, replay driver. Next in M3: shops, then the dialogxml message/choice dialogs that signs and specials need.**
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -26,6 +26,7 @@ M2 landed so far:
   - Screen: unexplored/unlit tiles draw black (`can_draw`), roads draw stubs from fields.png (`place_road`/`extend_road_terrain`), and `render/trim.ts` stencils shoreline frills, rounded wall corners and walkway corners.
   - Floor items: preset items placed on town entry, drawn via `calc_item_rect` (objects.png / tinyobj.png).
 - **Sound**: `platform/sound.ts` (Web Audio, SND*.wav), wired to `move_sound`'s step sounds and the town-entry sound. Starts on the first user gesture, as browsers require.
+- **Talking (M3a)**: `game/talk.ts` (`TalkState`) ports start_talk_mode/handle_talk_node/reset_talk_words/scan_for_response; `render/talkScreen.ts` ports place_talk_str/place_talk_face. Press T (or the TALK toolbar button) then a direction. Keyword matching is first-4-chars case-insensitive, and nodes are filtered to the personality (or -2 = anyone in town). Node types implemented: REGULAR, DEP_ON_SDF, SET_SDF, DEP_ON_TIME(_AND_EVENT), DEP_ON_TOWN, BUY_INFO, BUY_SDF, BUY_SPEC_ITEM, BUY_TOWN_LOC, END_FORCE/FIGHT/ALARM/DIE. Everything else sets `lastUnsupported` and says so in the transcript rather than failing silently.
 
 Notes for M2 implementer:
 - The window is **605×430** (`global.hpp:30`), not 800×600 — the earlier plan text was wrong. index.html scales the canvas ×2 in CSS.
@@ -36,7 +37,7 @@ Notes for M2 implementer:
 - Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
 - scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
-- `npm test` → 69 tests green; `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
+- `npm test` → 84 tests green; `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
 - `node scripts/verify-screen.mjs` (needs `npx vite --port 5199` running) drives the real UI headless and screenshots it. Playwright + chromium installed as devDependency.
 - Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
@@ -47,7 +48,7 @@ Notes for M2 implementer:
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
 - [x] **M1 — Scenario loads, outdoor walkabout**: XML/.map/.spec parsers, terrain view, outdoor movement (gzip+tar for packed .boes deferred to file-upload work; items/monsters XML land with M2)
 - [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅; inventory panel, fields overlay, replay driver still open
-- [ ] **M3 — Dialog toolkit + talk + shops**
+- [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅ (keyword conversations, portraits, presets); shops, training, inns and the dialogxml message/choice dialogs still open
 - [ ] **M4 — Specials interpreter (breadth-first)**: VM + general/oneshot/ifthen/town groups
 - [ ] **M5 — Combat** (M5a melee, M5b missiles+AI, M5c spells)
 - [ ] **M6 — Specials depth + party ops** (valleydy completable)
@@ -81,5 +82,5 @@ Notes for M2 implementer:
 
 ## Next steps
 
-1. Finish M2: the fields/barriers overlay, the inventory panel once the item/equip model exists, and the replay driver.
-2. M3: dialogxml parser + async dialog runner, then talking and shopping modes.
+1. M3: the item/equip model → the inventory panel → shops (`start_shop_mode`), training and inns. Then the dialogxml message/choice dialogs, which signs and the specials VM both need.
+2. Finish M2's leftovers alongside: the fields/barriers overlay and the replay driver.

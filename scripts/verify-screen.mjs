@@ -62,6 +62,46 @@ const start = await page.evaluate(() => {
 });
 console.log('START:', JSON.stringify(start));
 
+// 2b. Talk to a townsperson: the talk screen replaces the left column, the
+//     reply's keywords are clickable, and Done returns to town mode.
+const talk = await page.evaluate(() => {
+  const s = window.__session;
+  const sc = window.__screen;
+  const who = s.univ.town.monsters.find((m) => m.isAlive && m.personality >= 0 && m.isFriendly);
+  if (!who) return { skipped: 'no talkable NPC' };
+  s.univ.party.townLoc = { x: who.curLoc.x, y: who.curLoc.y + 1 };
+  s.center = { ...s.univ.party.townLoc };
+  s.talkTo(who.curLoc);
+  window.__redraw();
+  const opening = s.talk?.str1;
+  // Click the first keyword through the renderer's own hit rects.
+  const kw = s.talk?.words.find((w) => !w.preset && w.rect);
+  let followed = null;
+  if (kw) {
+    const cx = (kw.rect.left + kw.rect.right) / 2;
+    const cy = (kw.rect.top + kw.rect.bottom) / 2;
+    const hit = sc.talkScreen.wordAt(s.talk, cx, cy);
+    if (hit) s.chooseTalkNode(hit.node);
+    window.__redraw();
+    followed = { word: kw.word, changed: s.talk?.str1 !== opening };
+  }
+  return {
+    title: s.talk?.title,
+    keywords: s.talk?.words.filter((w) => !w.preset).length,
+    presets: s.talk?.words.filter((w) => w.preset).map((w) => w.word),
+    followed,
+  };
+});
+console.log('TALK:', JSON.stringify(talk));
+await shot('01b-talking');
+const talkClosed = await page.evaluate(() => {
+  const s = window.__session;
+  s.chooseTalkNode(-14); // Done
+  window.__redraw();
+  return { talking: !!s.talk, inTown: s.inTown };
+});
+console.log('TALK CLOSED:', JSON.stringify(talkClosed));
+
 /**
  * Walk toward a target, sidestepping when creatures or walls block, until the
  * predicate holds or we run out of steps. Runs in-page so a step is one call.
@@ -167,6 +207,7 @@ const ok =
   Object.values(panels).every((n) => n > 8) &&
   start.inTown === true &&
   start.townNum === start.startTown &&
+  (talk.skipped !== undefined || (talk.followed?.changed === true && talkClosed.talking === false)) &&
   outdoors.inTown === false &&
   roam.moves > 0 &&
   reenter?.inTown === true &&

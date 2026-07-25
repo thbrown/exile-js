@@ -15,6 +15,7 @@ import { Item, ItemType } from '../data/item';
 import { MonstTime } from '../data/monster';
 import { SECTOR_SIZE } from '../data/outdoors';
 import { StepSound, TerObstruct, TerSpec } from '../data/terrain';
+import { TalkNodeType } from '../data/talking';
 import { Lighting } from '../data/town';
 import { Snd, SoundPlayer } from '../platform/sound';
 import { Creature, CreatureStatus, assignCreature } from '../universe/creature';
@@ -23,6 +24,7 @@ import { OUT_HALF_DIM, OUT_MAX_DIM } from '../universe/curOut';
 import { TOWN_NUM_OUTDOORS } from '../universe/party';
 import { Universe } from '../universe/universe';
 import { GameMode, isOut, isTown } from './modes';
+import { TalkAction, TalkState } from './talk';
 
 /** set_direction (boe.locutils.cpp) — direction from one point toward another. */
 function setDirection(from: Location, to: Location): Direction {
@@ -56,6 +58,9 @@ export class GameSession {
   private numTownMoves = 0;
   /** Optional; when absent the game runs silently (as tests do). */
   sound: SoundPlayer | null = null;
+  /** Non-null while a conversation is open. */
+  talk: TalkState | null = null;
+  private preTalkMode: GameMode = GameMode.TOWN;
 
   constructor(readonly univ: Universe) {
     this.center = { ...univ.party.outLoc };
@@ -291,6 +296,74 @@ export class GameSession {
     town.makeExplored(destination.x, destination.y);
     this.updateExplored(this.univ.party.townLoc);
     return true;
+  }
+
+  // ------------------------------------------------------------------- talk
+
+  /**
+   * The TALK action (boe.actions.cpp:826): pick an adjacent creature and open
+   * a conversation with it. Returns false when there's nobody to talk to.
+   */
+  talkTo(destination: Location): boolean {
+    const town = this.univ.town;
+    if (!town) return false;
+    const monst = town.monsterAt(destination);
+    if (!monst) {
+      this.univ.addStringToBuf('  Nobody there');
+      return false;
+    }
+    // TODO(M4): specialOnTalk fires a HAIL special before the conversation.
+    if (!monst.isFriendly) {
+      this.univ.addStringToBuf('  Creature is hostile.');
+      return false;
+    }
+    if (monst.personality < 0 || !monst.isAlive) {
+      this.univ.addStringToBuf('Talk: No response.');
+      return false;
+    }
+    // A creature's own face overrides its monster template's default one.
+    const template = this.univ.scenario.scenMonsters[monst.number];
+    const face = monst.facialPic >= 0 ? monst.facialPic : (template?.defaultFacialPic ?? -1);
+    this.startTalkMode(town.monsters.indexOf(monst), monst.personality, monst.number, face);
+    return true;
+  }
+
+  /** start_talk_mode (boe.dlgutil.cpp:709). */
+  startTalkMode(
+    monsterIndex: number,
+    personality: number,
+    monsterType: number,
+    facePic: number,
+  ): void {
+    this.preTalkMode = this.mode;
+    this.mode = GameMode.TALKING;
+    this.talk = new TalkState(this.univ, monsterIndex, personality, monsterType, facePic);
+  }
+
+  /** end_talk_mode (boe.dlgutil.cpp:752). */
+  endTalkMode(): void {
+    this.mode = this.preTalkMode === GameMode.TALK_TOWN ? GameMode.TOWN : this.preTalkMode;
+    this.talk = null;
+    if (this.mode === GameMode.TOWN) {
+      this.center = { ...this.univ.party.townLoc };
+      this.updateExplored(this.center);
+    }
+  }
+
+  /** Route a conversation choice; closes the conversation when it's done. */
+  chooseTalkNode(node: number): void {
+    if (!this.talk) return;
+    const before = this.talk.str1;
+    if (this.talk.handleNode(node) === 'done') {
+      this.endTalkMode();
+      return;
+    }
+    this.sound?.play(Snd.BUTTON);
+    if (this.talk.lastUnsupported !== null)
+      this.univ.addStringToBuf(
+        `(${TalkNodeType[this.talk.lastUnsupported]} conversation nodes are not implemented yet)`,
+      );
+    if (this.talk.str1 === before && node === TalkAction.RECORD) return;
   }
 
   // ------------------------------------------------------------ transitions

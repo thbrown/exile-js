@@ -143,6 +143,8 @@ export class Town {
   defyMapping = false;
   defyScrying = false;
   isHidden = false;
+  /** Set once the party learns where this town is (cTown::can_find). */
+  canFind = false;
   hasTavern = false;
   difficulty = 0;
   specialLocs: SpecLoc[] = [];

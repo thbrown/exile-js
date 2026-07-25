@@ -3,8 +3,10 @@
  * the classic 605x430 screen.
  */
 
+import { shiftLoc } from './core/location';
 import { GameRng } from './core/rng';
 import { GameSession } from './game/session';
+import { TalkAction } from './game/talk';
 import { loadOpcodes, loadScenario } from './fileio/loadScenario';
 import { FetchSource } from './fileio/source';
 import { InputRouter } from './platform/input';
@@ -41,9 +43,17 @@ async function main(): Promise<void> {
   const sheets = [...CHROME_SHEETS, 'ter1', 'ter2', 'ter3', 'ter4', 'ter5', 'teranim'];
   for (let i = 1; i <= 11; i++) sheets.push(`monst${i}`);
   await Promise.all(sheets.map((s) => store.load(s)));
-  // The bundled fonts must be ready before the first paint, or the panels
-  // measure and lay out text with fallback metrics.
-  if (document.fonts) await document.fonts.ready;
+  // Fonts load lazily on first use, so `fonts.ready` alone isn't enough — ask
+  // for each face explicitly or the first paint lays out with fallback metrics.
+  if (document.fonts) {
+    await Promise.all([
+      document.fonts.load('12px BoEPlain'),
+      document.fonts.load('bold 10px BoEBold'),
+      document.fonts.load('18px BoEDungeon'),
+      document.fonts.load('12px BoEMaidenword'),
+    ]);
+    await document.fonts.ready;
+  }
 
   const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
   const session = new GameSession(univ);
@@ -62,39 +72,100 @@ async function main(): Promise<void> {
   window.addEventListener('keydown', wakeSound, { once: true });
   canvas.addEventListener('mousedown', wakeSound, { once: true });
 
+  /** True while the next directional keypress should pick a creature to talk to. */
+  let awaitingTalkTarget = false;
+
+  const setStatus = (): void => {
+    if (session.talk) status.textContent = 'Click a highlighted word, or Done to stop talking.';
+    else if (awaitingTalkTarget) status.textContent = 'Talk to whom? (press a direction)';
+    else
+      status.textContent =
+        `${scen.title} — arrows/keypad to move` +
+        (session.inTown ? ', T to talk to someone next to you.' : '.');
+  };
+
   const router = new InputRouter(canvas, {
     onMove: (dir) => {
-      session.move(dir);
+      if (session.talk) return;
+      if (awaitingTalkTarget) {
+        awaitingTalkTarget = false;
+        session.talkTo(shiftLoc(univ.party.townLoc, dir));
+      } else {
+        session.move(dir);
+      }
+      setStatus();
       redraw();
     },
     onClick: (x, y) => {
+      if (session.talk) {
+        const word = screen.talkScreen.wordAt(session.talk, x, y);
+        if (word) {
+          if (word.node === TalkAction.ASK) {
+            const asked = window.prompt('Ask about what?') ?? '';
+            if (asked.trim().length > 0 && session.talk.askAbout(asked) === 'done')
+              session.endTalkMode();
+          } else {
+            session.chooseTalkNode(word.node);
+          }
+          setStatus();
+          redraw();
+        }
+        return;
+      }
       const btn = screen.buttonAt(x, y);
       if (btn) {
         sound.play(37); // the UI click
-        // TODO(M3+): wire the toolbar to real actions.
-        univ.addStringToBuf(`(${ToolbarButton[btn.btn]} is not implemented yet)`);
+        if (btn.btn === ToolbarButton.TALK) {
+          awaitingTalkTarget = true;
+        } else {
+          // TODO(M3+): wire the remaining toolbar buttons to real actions.
+          univ.addStringToBuf(`(${ToolbarButton[btn.btn]} is not implemented yet)`);
+        }
+        setStatus();
         redraw();
         return;
       }
       const cell = screen.terrainCellAt(x, y);
       if (cell) {
-        // Clicking the view moves one step toward the clicked tile.
         const dx = Math.sign(cell.q - 4);
         const dy = Math.sign(cell.r - 4);
-        if (dx !== 0 || dy !== 0) {
-          const from = session.inTown ? univ.party.townLoc : univ.party.outLoc;
-          session.moveTo({ x: from.x + dx, y: from.y + dy });
-          redraw();
+        if (dx === 0 && dy === 0) return;
+        const from = session.inTown ? univ.party.townLoc : univ.party.outLoc;
+        const target = { x: from.x + dx, y: from.y + dy };
+        if (awaitingTalkTarget) {
+          awaitingTalkTarget = false;
+          session.talkTo(target);
+        } else {
+          // Clicking the view moves one step toward the clicked tile.
+          session.moveTo(target);
         }
+        setStatus();
+        redraw();
       }
     },
-    onKey: () => {
-      /* TODO(M3): keyboard shortcuts for the toolbar actions */
+    onKey: (key) => {
+      if (session.talk) {
+        if (key === 'Escape') {
+          session.endTalkMode();
+          setStatus();
+          redraw();
+        }
+        return;
+      }
+      if (key === 't' || key === 'T') {
+        awaitingTalkTarget = session.inTown;
+        if (!session.inTown) univ.addStringToBuf('There is nobody to talk to out here.');
+        setStatus();
+        redraw();
+      } else if (key === 'Escape' && awaitingTalkTarget) {
+        awaitingTalkTarget = false;
+        setStatus();
+      }
     },
   });
   router.attach();
 
-  status.textContent = `${scen.title} — arrow keys or Home/End/PgUp/PgDn to move.`;
+  setStatus();
   redraw();
   setInterval(() => {
     screen.animFrame++;
