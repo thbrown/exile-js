@@ -171,7 +171,7 @@ async function main(): Promise<void> {
   session.attachSpecials({
     message: async (str1, str2, title, pic, picType) => {
       const text = [str1, str2].filter((s) => s.length > 0).join('\n\n');
-      await dialogs.run({
+      await dialogs.runQueued({
         text: title ? `${title}\n\n${text}` : text,
         escapeButton: 'okay',
         buttons: [{ name: 'okay', label: 'OK' }],
@@ -179,7 +179,7 @@ async function main(): Promise<void> {
     },
     choice: async (strs, buttons, title, pic, picType) => {
       const text = strs.filter((s) => s.length > 0).join('\n\n');
-      const picked = await dialogs.run({
+      const picked = await dialogs.runQueued({
         text: title ? `${title}\n\n${text}` : text,
         escapeButton: buttons[0] ?? 'okay',
         buttons: buttons.map((label) => ({ name: label, label })),

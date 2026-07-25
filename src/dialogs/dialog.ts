@@ -386,6 +386,20 @@ export class DialogHost {
     return this.current;
   }
 
+  /**
+   * Like run(), but waits its turn instead of failing when a dialog is already
+   * up. The specials VM needs this: a chain can show several messages, and can
+   * itself be triggered while something else is on screen.
+   */
+  runQueued(spec: DialogSpec): Promise<string> {
+    const next = this.tail.then(() => this.run(spec));
+    // Keep the chain alive even if one link rejects.
+    this.tail = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  private tail: Promise<void> = Promise.resolve();
+
   run(spec: DialogSpec): Promise<string> {
     // One dialog at a time: a second request while one is up is a bug, so fail
     // loudly rather than losing the first one's result.
