@@ -838,7 +838,7 @@ export class GameSession {
    * The TALK action (boe.actions.cpp:826): pick an adjacent creature and open
    * a conversation with it. Returns false when there's nobody to talk to.
    */
-  talkTo(destination: Location): boolean {
+  async talkTo(destination: Location): Promise<boolean> {
     const town = this.univ.town;
     if (!town) return false;
     const monst = town.monsterAt(destination);
@@ -846,7 +846,13 @@ export class GameSession {
       this.univ.addStringToBuf('  Nobody there');
       return false;
     }
-    // TODO(M4): specialOnTalk fires a HAIL special before the conversation.
+    // A creature can carry a HAIL special that runs first and, if it blocks,
+    // stands in for the conversation entirely (boe.actions.cpp:830).
+    if (monst.specialOnTalk >= 0) {
+      const { blocked } = await this.runSpecial(
+        SpecCtx.HAIL, SpecCtxType.TOWN, monst.specialOnTalk, monst.curLoc);
+      if (blocked) return false;
+    }
     if (!monst.isFriendly) {
       this.univ.addStringToBuf('  Creature is hostile.');
       return false;

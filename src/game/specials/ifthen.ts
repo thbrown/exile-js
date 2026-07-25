@@ -264,20 +264,12 @@ export async function ifThenSpec(univ: Universe, ctx: SpecialCtx): Promise<void>
     }
 
     case SpecType.IF_DAY_REACHED:
-      if (party.calcDay() >= spec.ex1a) ctx.nextSpec = spec.ex1b;
+      if (party.dayReached(spec.ex1a)) ctx.nextSpec = spec.ex1b;
       break;
 
-    case SpecType.IF_EVENT_OCCURRED: {
-      // day_reached(day, event): the event must have happened, and its day plus
-      // the delay must have passed.
-      const when = party.keyTimes.get(spec.ex1b);
-      if (spec.ex1b === 0) {
-        if (party.calcDay() >= spec.ex1a) ctx.nextSpec = spec.ex2b;
-      } else if (when !== undefined && party.calcDay() >= when + spec.ex1a) {
-        ctx.nextSpec = spec.ex2b;
-      }
+    case SpecType.IF_EVENT_OCCURRED:
+      if (party.dayReached(spec.ex1a, spec.ex1b)) ctx.nextSpec = spec.ex2b;
       break;
-    }
 
     case SpecType.IF_PARTY_SIZE: {
       // ex1a <= 0 counts only the living.

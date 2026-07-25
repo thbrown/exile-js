@@ -454,7 +454,7 @@ async function main(): Promise<void> {
     const what = pending;
     pending = null;
     if (what === 'talk') {
-      session.talkTo(target);
+      void session.talkTo(target).then(() => { setStatus(); redraw(); });
       return;
     }
     if (what === 'look') {

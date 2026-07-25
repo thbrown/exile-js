@@ -70,6 +70,20 @@ export class Party {
     return Math.floor(this.age / 3700) + 1;
   }
 
+  /**
+   * day_reached (boe.text.cpp:1233) — has day `day` arrived, and (when an
+   * event is named) did that event happen no earlier than it? Note the test
+   * is on the *day the event happened*, not on elapsed time since.
+   */
+  dayReached(day: number, event = 0): boolean {
+    if (event > 0) {
+      const when = this.keyTimes.get(event);
+      if (when === undefined) return false;
+      if (when < day) return false;
+    }
+    return this.calcDay() >= day;
+  }
+
   wipeSdfs(): void {
     for (const row of this.stuffDone) row.fill(0);
   }

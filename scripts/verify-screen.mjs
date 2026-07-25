@@ -71,7 +71,7 @@ const talk = await page.evaluate(async () => {
   if (!who) return { skipped: 'no talkable NPC' };
   s.univ.party.townLoc = { x: who.curLoc.x, y: who.curLoc.y + 1 };
   s.center = { ...s.univ.party.townLoc };
-  s.talkTo(who.curLoc);
+  await s.talkTo(who.curLoc);
   window.__redraw();
   const opening = s.talk?.str1;
   // Click the first keyword through the renderer's own hit rects.

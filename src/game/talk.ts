@@ -318,12 +318,11 @@ export class TalkState {
         party.setSdf(a, b, c);
         break;
       case TalkNodeType.DEP_ON_TIME:
-        if (party.calcDay() >= a) useSecond();
+        if (party.dayReached(a)) useSecond();
         else str2 = '';
         break;
       case TalkNodeType.DEP_ON_TIME_AND_EVENT:
-        // TODO(M4): the event half needs the party's key_times map.
-        if (party.calcDay() >= a) useSecond();
+        if (party.dayReached(a, b)) useSecond();
         else str2 = '';
         break;
       case TalkNodeType.DEP_ON_TOWN:

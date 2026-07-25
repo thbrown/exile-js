@@ -27,7 +27,7 @@ beforeAll(async () => {
 });
 
 /** A session standing next to the first talkable NPC in the start town. */
-function talkingSession(): { session: GameSession; talk: TalkState } {
+async function talkingSession(): Promise<{ session: GameSession; talk: TalkState }> {
   const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
   const session = new GameSession(univ);
   session.startNewGame();
@@ -36,13 +36,13 @@ function talkingSession(): { session: GameSession; talk: TalkState } {
   if (!who) throw new Error('no talkable NPC in the start town');
   univ.party.townLoc = { x: who.curLoc.x, y: who.curLoc.y + 1 };
   session.center = { ...univ.party.townLoc };
-  expect(session.talkTo(who.curLoc)).toBe(true);
+  expect(await session.talkTo(who.curLoc)).toBe(true);
   return { session, talk: session.talk! };
 }
 
 describe('starting a conversation', () => {
-  it('opens on the NPC\'s "look" text with the preset buttons', () => {
-    const { session, talk } = talkingSession();
+  it('opens on the NPC\'s "look" text with the preset buttons', async () => {
+    const { session, talk } = await talkingSession();
     expect(session.mode).toBe(GameMode.TALKING);
     expect(talk.title).toBe('Cmd. Terrance:');
     expect(talk.str1).toBe(talk.person!.look);
@@ -54,8 +54,8 @@ describe('starting a conversation', () => {
     expect(presets).not.toContain('Go Back');
   });
 
-  it('finds the keywords inside the reply', () => {
-    const { talk } = talkingSession();
+  it('finds the keywords inside the reply', async () => {
+    const { talk } = await talkingSession();
     const keywords = talk.words.filter((w) => !w.preset);
     expect(keywords.length).toBeGreaterThan(0);
     for (const word of keywords) {
@@ -64,20 +64,20 @@ describe('starting a conversation', () => {
     }
   });
 
-  it('refuses to talk to nobody, and to hostiles', () => {
+  it('refuses to talk to nobody, and to hostiles', async () => {
     const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
     const session = new GameSession(univ);
     session.startNewGame();
     // An empty tile.
     const empty = { x: univ.party.townLoc.x, y: univ.party.townLoc.y };
-    expect(session.talkTo(empty)).toBe(false);
+    expect(await session.talkTo(empty)).toBe(false);
     expect(univ.transcript.at(-1)).toContain('Nobody there');
   });
 });
 
 describe('keyword matching', () => {
-  it('matches on the first four characters, case-insensitively', () => {
-    const { talk } = talkingSession();
+  it('matches on the first four characters, case-insensitively', async () => {
+    const { talk } = await talkingSession();
     const node = talk.scanForResponse('fort');
     expect(node).toBeGreaterThanOrEqual(0);
     expect(talk.scanForResponse('FORT')).toBe(node);
@@ -88,8 +88,8 @@ describe('keyword matching', () => {
     expect(talk.scanForResponse('zzzz')).toBe(-1);
   });
 
-  it('only offers nodes belonging to this personality (or to anyone)', () => {
-    const { talk } = talkingSession();
+  it('only offers nodes belonging to this personality (or to anyone)', async () => {
+    const { talk } = await talkingSession();
     const nodes = talk.speech!.talkNodes;
     for (const word of talk.words) {
       if (word.preset) continue;
@@ -100,8 +100,8 @@ describe('keyword matching', () => {
 });
 
 describe('conversation flow', () => {
-  it('answers the Look, Name and Job buttons from the personality', () => {
-    const { session, talk } = talkingSession();
+  it('answers the Look, Name and Job buttons from the personality', async () => {
+    const { session, talk } = await talkingSession();
     session.chooseTalkNode(TalkAction.NAME);
     expect(talk.str1).toBe(talk.person!.name);
     session.chooseTalkNode(TalkAction.JOB);
@@ -110,8 +110,8 @@ describe('conversation flow', () => {
     expect(talk.str1).toBe(talk.person!.look);
   });
 
-  it('follows a keyword to its node text and can go back', () => {
-    const { session, talk } = talkingSession();
+  it('follows a keyword to its node text and can go back', async () => {
+    const { session, talk } = await talkingSession();
     const opening = talk.str1;
     const keyword = talk.words.find((w) => !w.preset)!;
     session.chooseTalkNode(keyword.node);
@@ -121,15 +121,15 @@ describe('conversation flow', () => {
     expect(talk.str1).toBe(opening);
   });
 
-  it('falls back to the "dunno" reply for an unknown topic', () => {
-    const { session, talk } = talkingSession();
+  it('falls back to the "dunno" reply for an unknown topic', async () => {
+    const { session, talk } = await talkingSession();
     talk.askAbout('zzzz');
     expect(talk.str1).toBe(talk.person!.dunno.length >= 2 ? talk.person!.dunno : 'You get no response.');
     expect(session.mode).toBe(GameMode.TALKING);
   });
 
-  it('maps Ask About to the same replies as the buttons', () => {
-    const { talk } = talkingSession();
+  it('maps Ask About to the same replies as the buttons', async () => {
+    const { talk } = await talkingSession();
     talk.askAbout('name');
     expect(talk.str1).toBe(talk.person!.name);
     talk.askAbout('work');
@@ -137,8 +137,8 @@ describe('conversation flow', () => {
     expect(talk.askAbout('bye')).toBe('done');
   });
 
-  it('Done closes the conversation and returns to town mode', () => {
-    const { session } = talkingSession();
+  it('Done closes the conversation and returns to town mode', async () => {
+    const { session } = await talkingSession();
     session.chooseTalkNode(TalkAction.DONE);
     expect(session.talk).toBeNull();
     expect(session.mode).toBe(GameMode.TOWN);
@@ -146,8 +146,8 @@ describe('conversation flow', () => {
 });
 
 describe('keyboard shortcuts', () => {
-  it('maps talk_chars to the preset buttons', () => {
-    const { talk } = talkingSession();
+  it('maps talk_chars to the preset buttons', async () => {
+    const { talk } = await talkingSession();
     const pairs: [string, TalkAction][] = [
       ['l', TalkAction.LOOK],
       ['n', TalkAction.NAME],
@@ -168,16 +168,16 @@ describe('keyboard shortcuts', () => {
     expect(talk.presetForKey('z')).toBeNull();
   });
 
-  it('only answers keys whose button is on screen', () => {
-    const { session, talk } = talkingSession();
+  it('only answers keys whose button is on screen', async () => {
+    const { session, talk } = await talkingSession();
     // "Go Back" isn't offered until there's history, so Space does nothing yet.
     expect(talk.presetForKey(' ')).toBeNull();
     session.chooseTalkNode(TalkAction.JOB);
     expect(talk.presetForKey(' ')?.node).toBe(TalkAction.BACK);
   });
 
-  it('drops every shortcut but Done and Record once the talk is forced to end', () => {
-    const { session, talk } = talkingSession();
+  it('drops every shortcut but Done and Record once the talk is forced to end', async () => {
+    const { session, talk } = await talkingSession();
     const node = talk.speech!.talkNodes.findIndex(
       (n) => n.type === TalkNodeType.END_FORCE && n.personality === talk.personality,
     );
@@ -201,7 +201,7 @@ describe('node effects', () => {
     return null;
   }
 
-  it('SET_SDF writes the flag it names', () => {
+  it('SET_SDF writes the flag it names', async () => {
     const found = findNode(TalkNodeType.SET_SDF);
     if (!found) return;
     const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
@@ -215,7 +215,7 @@ describe('node effects', () => {
     expect(session.talk!.str1).toBe(node.str1);
   });
 
-  it('DEP_ON_SDF picks its reply from the flag', () => {
+  it('DEP_ON_SDF picks its reply from the flag', async () => {
     const found = findNode(TalkNodeType.DEP_ON_SDF);
     if (!found) return;
     const node = scen.townTalk[found.town]!.talkNodes[found.index]!;
@@ -234,7 +234,7 @@ describe('node effects', () => {
     expect(run(c! + 1)).toBe(node.str2);
   });
 
-  it('BUY_INFO charges gold, and refuses when the party is short', () => {
+  it('BUY_INFO charges gold, and refuses when the party is short', async () => {
     const found = findNode(TalkNodeType.BUY_INFO);
     if (!found) return;
     const node = scen.townTalk[found.town]!.talkNodes[found.index]!;
@@ -254,7 +254,7 @@ describe('node effects', () => {
     expect(session.talk!.str1).toBe(node.str2);
   });
 
-  it('END_FORCE strips the conversation down to Done', () => {
+  it('END_FORCE strips the conversation down to Done', async () => {
     const found = findNode(TalkNodeType.END_FORCE);
     if (!found) return;
     const node = scen.townTalk[found.town]!.talkNodes[found.index]!;
@@ -271,7 +271,7 @@ describe('node effects', () => {
     expect(session.talk!.words.every((w) => w.preset)).toBe(true);
   });
 
-  it('a SHOP node opens the shop', () => {
+  it('a SHOP node opens the shop', async () => {
     const found = findNode(TalkNodeType.SHOP);
     if (!found) return;
     const node = scen.townTalk[found.town]!.talkNodes[found.index]!;
