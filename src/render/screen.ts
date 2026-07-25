@@ -6,7 +6,8 @@
  */
 
 import { Direction } from '../core/location';
-import { ItemType } from '../data/item';
+import { ItemAbil, ItemType } from '../data/item';
+import { variety } from '../data/itemVariety';
 import { groundFromTer, terFromGround } from '../data/scenario';
 import { TerSpec, TrimType, blocksMove } from '../data/terrain';
 import { Lighting } from '../data/town';
@@ -18,6 +19,9 @@ import {
   BOE_HEIGHT,
   BOE_WIDTH,
   BTN_SRC_RECTS,
+  ITEM_BTN_ICONS,
+  ITEM_PANEL,
+  ITEM_ROWS,
   OUT_BUTTONS,
   PANEL_IMAGES,
   PC_PANEL,
@@ -597,35 +601,107 @@ export class Screen {
   // --------------------------------------------------------------- inventory
 
   /**
-   * put_item_screen (boe.text.cpp:210). Items themselves need the inventory
-   * and equipment model, so for now the panel shows whose page is up.
-   * TODO(M3): full item rows, equip toggles, and the eight bottom buttons.
+   * put_item_screen (boe.text.cpp:213) — the eight visible inventory rows for
+   * whichever PC's page is showing, with equipped items italicised and coloured
+   * by kind.
+   *
+   * TODO(M3): the Use/Give/Info buttons, the bottom row of page buttons, and
+   * scrolling past the first eight slots.
    */
   private drawInventory(session: GameSession): void {
     const panel = WIN_RECTS.inven;
-    this.erasePanel(panel, { top: 17, left: 2, bottom: 122, right: 255 });
-    const pc = session.univ.currentPc;
-    const header: UiRect = {
-      top: panel.top + 3,
-      left: panel.left + 4,
-      bottom: panel.top + 15,
-      right: panel.right - 4,
-    };
-    drawString(this.ctx, header, `${pc.name}'s Readied Items`, {
+    this.erasePanel(panel, ITEM_PANEL.erase);
+    const pc = session.univ.party.pcs[this.itemPage] ?? session.univ.currentPc;
+
+    const at = (rect: UiRect): UiRect => ({
+      top: panel.top + rect.top,
+      left: panel.left + rect.left,
+      bottom: panel.top + rect.bottom,
+      right: panel.left + rect.right,
+    });
+
+    drawStringEllipsis(this.ctx, at(ITEM_PANEL.title), `${pc.name} inventory:`, {
       font: 'bold',
       size: 10,
       colour: Colours.YELLOW,
     });
-    const body: UiRect = {
-      top: panel.top + 22,
-      left: panel.left + 6,
-      bottom: panel.bottom - 4,
-      right: panel.right - 6,
-    };
-    drawString(this.ctx, body, '(inventory arrives with M3)', {
-      size: 12,
-      colour: Colours.GREY,
-    });
+
+    const btnSheet = this.store.get('invenbtns');
+    for (let i = 0; i < ITEM_ROWS.length; i++) {
+      const row = ITEM_ROWS[i]!;
+      const item = pc.items[i];
+      // The slot number is always shown, so empty slots read as empty.
+      drawString(this.ctx, at(row.name), `${i + 1}.`, { size: 12, colour: Colours.BLACK });
+      if (!item || item.variety === ItemType.NO_ITEM) continue;
+
+      const equipped = pc.equip[i] === true;
+      let colour: string = Colours.BLACK;
+      if (equipped) {
+        if (item.variety === ItemType.ONE_HANDED || item.variety === ItemType.TWO_HANDED)
+          colour = Colours.PINK;
+        else if (variety(item.variety).isArmour) colour = Colours.GREEN;
+        else colour = Colours.BLUE;
+      }
+
+      let label = item.ident ? item.fullName : item.name;
+      // Charges show for stacks, ammo and lockpicks; see put_item_screen.
+      let showCharges = item.maxCharges > 1 || item.charges > 1;
+      if (item.missile < 0 && item.ability !== ItemAbil.LOCKPICKS) showCharges &&= item.ident;
+      showCharges &&= item.ability !== ItemAbil.MESSAGE;
+      if (showCharges) label += ` (${item.charges})`;
+
+      const nameRect = at(row.name);
+      drawStringEllipsis(
+        this.ctx,
+        { ...nameRect, left: nameRect.left + 36, top: nameRect.top - 2 },
+        label,
+        { size: 12, colour, italic: equipped },
+      );
+
+      // The item's icon sits in the left gutter of its row.
+      const g = itemGraphic(item.graphicNum);
+      const iconSheet = g ? this.store.get(g.sheetName) : undefined;
+      if (g && iconSheet) {
+        const icon = at(row.icon);
+        this.ctx.drawImage(
+          iconSheet, g.rect.left, g.rect.top, g.rect.width, g.rect.height,
+          icon.left, icon.top, 18, 18,
+        );
+      }
+      if (btnSheet) {
+        // Give, drop and info act on any carried item; Use needs the item
+        // ability system, so it isn't offered yet.
+        const icon = (src: UiRect, dest: UiRect): void => {
+          this.ctx.drawImage(
+            btnSheet, src.left, src.top, width(src), height(src),
+            dest.left, dest.top, width(src), height(src),
+          );
+        };
+        icon(ITEM_BTN_ICONS.give, at(row.give));
+        icon(ITEM_BTN_ICONS.drop, at(row.drop));
+        icon(ITEM_BTN_ICONS.info, at(row.info));
+      }
+    }
+  }
+
+  /** Which PC's inventory page is showing. */
+  itemPage = 0;
+
+  /** The inventory row and part a click landed on, if any. */
+  inventoryHit(x: number, y: number): { row: number; part: 'name' | 'give' | 'drop' | 'info' } | null {
+    const panel = WIN_RECTS.inven;
+    const lx = x - panel.left;
+    const ly = y - panel.top;
+    for (let i = 0; i < ITEM_ROWS.length; i++) {
+      const row = ITEM_ROWS[i]!;
+      const inside = (rect: UiRect): boolean =>
+        lx >= rect.left && lx < rect.right && ly >= rect.top && ly < rect.bottom;
+      if (inside(row.give)) return { row: i, part: 'give' };
+      if (inside(row.drop)) return { row: i, part: 'drop' };
+      if (inside(row.info)) return { row: i, part: 'info' };
+      if (inside(row.name) || inside(row.icon)) return { row: i, part: 'name' };
+    }
+    return null;
   }
 
   // -------------------------------------------------------------- transcript

@@ -6,15 +6,17 @@
 import { shiftLoc } from './core/location';
 import { GameRng } from './core/rng';
 import { DialogHost } from './dialogs/dialog';
+import { TerSpec } from './data/terrain';
 import { GameSession } from './game/session';
 import { TalkAction } from './game/talk';
 import { loadOpcodes, loadScenario } from './fileio/loadScenario';
 import { FetchSource } from './fileio/source';
 import { InputRouter } from './platform/input';
-import { SoundPlayer } from './platform/sound';
+import { Snd, SoundPlayer } from './platform/sound';
 import { BOE_HEIGHT, BOE_WIDTH, ToolbarButton } from './render/layout';
 import { CHROME_SHEETS, Screen } from './render/screen';
 import { SheetStore } from './render/sheets';
+import { itemWeight } from './universe/inventory';
 import { PartyPreset } from './universe/player';
 import { Skill } from './universe/skills';
 import { Universe } from './universe/universe';
@@ -23,21 +25,6 @@ import { Universe } from './universe/universe';
 const ANIM_INTERVAL_MS = 250;
 
 const DEFAULT_SCENARIO = 'valleydy';
-
-/** The living PC with the highest value in a skill — a stand-in for select_pc. */
-function bestPcFor(univ: Universe, skill: Skill): number {
-  let best = 0;
-  let bestValue = -1;
-  univ.party.pcs.forEach((pc, i) => {
-    if (!pc.isAlive) return;
-    const value = pc.skills[skill] ?? 0;
-    if (value > bestValue) {
-      bestValue = value;
-      best = i;
-    }
-  });
-  return best;
-}
 
 function scenarioFromQuery(): string {
   const q = new URLSearchParams(window.location.search).get('scenario');
@@ -86,8 +73,33 @@ async function main(): Promise<void> {
   const dialogs = new DialogHost(ctx, store, () => redraw());
 
   /**
-   * A locked door: ask what to do, then act. This is the async replacement for
-   * the C++ blocking cChoiceDlog — the promise resolves when the player picks.
+   * select_pc (boe.items.cpp:878): ask which party member acts. Returns the PC
+   * index, or -1 if cancelled. PCs who can't act are listed with the reason and
+   * aren't selectable.
+   */
+  const selectPc = async (
+    mode: 'living' | 'lockpick',
+    prompt: string,
+    highlight?: Skill,
+  ): Promise<number> => {
+    const options = session.selectPcOptions(mode, highlight);
+    const rows = options.map((option) => ({
+      name: option.canPick ? String(option.index) : `no-${option.index}`,
+      label: `${option.index + 1}. ${option.label}`,
+    }));
+    const picked = await dialogs.run({
+      text: prompt,
+      rows,
+      escapeButton: 'cancel',
+      buttons: [{ name: 'cancel', label: 'Cancel' }],
+    });
+    const index = Number(picked);
+    return Number.isInteger(index) && options[index]?.canPick ? index : -1;
+  };
+
+  /**
+   * A locked door: ask what to do and who does it, then act. This is the async
+   * replacement for the C++ blocking cChoiceDlog + select_pc pair.
    */
   session.onLockedDoor = (where, terrain) => {
     // Bumping the door again while the prompt is up shouldn't stack prompts.
@@ -103,18 +115,94 @@ async function main(): Promise<void> {
           { name: 'pick', label: 'Pick Lock', key: 'p' },
         ],
       });
-      // TODO(M3): select_pc should let the player choose who tries; for now the
-      // strongest (bash) or most dexterous (pick) living PC has a go.
-      if (choice === 'bash') session.bashDoor(where, bestPcFor(univ, Skill.STRENGTH));
-      else if (choice === 'pick') session.pickLock(where, bestPcFor(univ, Skill.DEXTERITY));
+      if (choice === 'bash') {
+        const who = await selectPc('living', 'Who will bash?', Skill.STRENGTH);
+        if (who >= 0) session.bashDoor(where, who);
+      } else if (choice === 'pick') {
+        const who = await selectPc('lockpick', 'Who will pick the lock?', Skill.LOCKPICKING);
+        if (who >= 0) session.pickLock(where, who);
+      }
       redraw();
     })();
+  };
+
+  /**
+   * The Get action (get_item, boe.items.cpp:258): list what's in reach and let
+   * the player take one at a time.
+   */
+  const getItems = async (): Promise<void> => {
+    if (dialogs.active) return;
+    const reachable = session.reachableItems(univ.party.townLoc);
+    if (reachable.length === 0) {
+      univ.addStringToBuf('Get: nothing here');
+      redraw();
+      return;
+    }
+    const picked = await dialogs.run({
+      text: 'Take which item?',
+      rows: reachable.map((item, i) => ({
+        name: String(i),
+        label: `${item.ident ? item.fullName : item.name}${item.property ? ' (not yours)' : ''}`,
+        itemPic: item.graphicNum,
+      })),
+      escapeButton: 'done',
+      buttons: [{ name: 'done', label: 'Done' }],
+    });
+    const index = Number(picked);
+    const item = reachable[index];
+    if (item) {
+      const who = await selectPc('living', 'Give the item to whom?');
+      if (who >= 0) session.takeItem(item, who);
+    }
+    redraw();
+  };
+
+  /** A click on an inventory row: equip/unequip, give, drop, or describe. */
+  const handleInventoryClick = async (
+    row: number,
+    part: 'name' | 'give' | 'drop' | 'info',
+  ): Promise<void> => {
+    const pc = univ.party.pcs[screen.itemPage];
+    const item = pc?.items[row];
+    if (!pc || !item || item.variety === 0) return;
+    if (part === 'name') {
+      session.toggleEquip(screen.itemPage, row);
+    } else if (part === 'drop') {
+      if (session.inTown) session.dropItem(screen.itemPage, row);
+      else univ.addStringToBuf('  Not while outdoors.');
+    } else if (part === 'give') {
+      const who = await selectPc('living', 'Give the item to whom?');
+      if (who >= 0 && who !== screen.itemPage) session.giveItemTo(screen.itemPage, row, who);
+    } else {
+      const lines = [item.ident ? item.fullName : item.name];
+      if (item.desc) lines.push('', item.desc);
+      lines.push('', `Weight: ${itemWeight(item)}   Value: ${item.value}`);
+      await dialogs.run({
+        text: lines.join('\n'),
+        escapeButton: 'okay',
+        buttons: [{ name: 'okay', label: 'OK' }],
+      });
+    }
+    redraw();
   };
 
   // Browsers only allow audio after a user gesture, so the first keypress or
   // click is what actually starts it.
   const wakeSound = (): void => {
-    void sound.resume().then(() => sound.preloadCommon());
+    void sound.resume().then(async () => {
+      await sound.preloadCommon();
+      // Terrain that changes when stepped on or used keeps its sound in flag2
+      // (a door swinging, for instance). Other specials use flag2 for other
+      // things, so only these two kinds contribute.
+      const terrainSounds = new Set<number>();
+      for (const ter of scen.terTypes)
+        if (
+          ter.flag2 > 0 &&
+          (ter.special === TerSpec.CHANGE_WHEN_STEP_ON || ter.special === TerSpec.CHANGE_WHEN_USED)
+        )
+          terrainSounds.add(ter.flag2);
+      await sound.preloadAll(terrainSounds);
+    });
   };
   window.addEventListener('keydown', wakeSound, { once: true });
   canvas.addEventListener('mousedown', wakeSound, { once: true });
@@ -128,8 +216,8 @@ async function main(): Promise<void> {
     else if (pending === 'look') status.textContent = 'Look where? (pick a direction)';
     else
       status.textContent =
-        `${scen.title} — arrows/keypad to move, L to look` +
-        (session.inTown ? ', T to talk to someone next to you.' : '.');
+        `${scen.title} — arrows to move, L look` +
+        (session.inTown ? ', T talk, G get items, 1-6 whose pack to show.' : ', 1-6 whose pack to show.');
   };
 
   /** Look at a space: describe it, and read an adjacent sign if there is one. */
@@ -180,13 +268,21 @@ async function main(): Promise<void> {
         }
         return;
       }
+      const invenHit = screen.inventoryHit(x, y);
+      if (invenHit) {
+        sound.play(Snd.BUTTON);
+        void handleInventoryClick(invenHit.row, invenHit.part);
+        return;
+      }
       const btn = screen.buttonAt(x, y);
       if (btn) {
-        sound.play(37); // the UI click
+        sound.play(Snd.BUTTON); // the UI click
         if (btn.btn === ToolbarButton.TALK) {
           pending = 'talk';
         } else if (btn.btn === ToolbarButton.LOOK) {
           pending = 'look';
+        } else if (btn.btn === ToolbarButton.HAND) {
+          void getItems();
         } else {
           // TODO(M3+): wire the remaining toolbar buttons to real actions.
           univ.addStringToBuf(`(${ToolbarButton[btn.btn]} is not implemented yet)`);
@@ -229,6 +325,15 @@ async function main(): Promise<void> {
       } else if (key === 'l' || key === 'L') {
         pending = 'look';
         setStatus();
+      } else if (key === 'g' || key === 'G') {
+        if (session.inTown) void getItems();
+        else univ.addStringToBuf('Get: nothing here');
+        redraw();
+      } else if (key >= '1' && key <= '6') {
+        // Switch which PC's inventory page is showing.
+        screen.itemPage = Number(key) - 1;
+        univ.curPc = screen.itemPage;
+        redraw();
       } else if (key === 'Escape' && pending) {
         pending = null;
         setStatus();

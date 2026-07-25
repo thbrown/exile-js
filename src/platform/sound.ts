@@ -20,6 +20,10 @@ export const Snd = {
   ENTER_DUNGEON: 95,
   BUTTON: 37,
   BLOCKED: 0,
+  /** A lock giving way, whether picked or bashed (boe.town.cpp:1197, :1225). */
+  LOCK_OPENED: 9,
+  /** A lockpick failing (boe.town.cpp:1194). */
+  LOCK_FAILED: 41,
 } as const;
 
 export class SoundPlayer {
@@ -43,16 +47,29 @@ export class SoundPlayer {
     if (this.ctx.state === 'suspended') await this.ctx.resume();
   }
 
-  /** play_sound(n): fire and forget. */
+  /**
+   * play_sound(n): fire and forget. A negative number means "asynchronously"
+   * in the C++ (sounds.cpp:97) — the sound itself is `abs(n)`, which matters
+   * because terrain stores its sound as a value the game negates.
+   *
+   * A sound that isn't cached yet is fetched and then played, rather than
+   * dropped — otherwise the first door you open is always silent.
+   */
   play(which: number): void {
-    if (!this.enabled || which < 0) return;
-    const buf = this.buffers.get(which);
+    if (!this.enabled) return;
+    const num = Math.abs(which);
+    const buf = this.buffers.get(num);
     if (!buf) {
-      void this.preload(which);
+      void this.preload(num).then(() => this.emit(num));
       return;
     }
+    this.emit(num);
+  }
+
+  private emit(which: number): void {
+    const buf = this.buffers.get(which);
     const ctx = this.ctx;
-    if (!ctx || ctx.state !== 'running') return;
+    if (!buf || !ctx || ctx.state !== 'running') return;
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(ctx.destination);
@@ -78,5 +95,10 @@ export class SoundPlayer {
   /** Warm the cache for the sounds walking around needs. */
   async preloadCommon(): Promise<void> {
     await Promise.all(Object.values(Snd).map((n) => this.preload(n)));
+  }
+
+  /** Warm any extra sounds a scenario's content refers to (door swings, etc.). */
+  async preloadAll(which: Iterable<number>): Promise<void> {
+    await Promise.all([...which].map((n) => this.preload(Math.abs(n))));
   }
 }

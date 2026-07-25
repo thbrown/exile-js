@@ -8,8 +8,10 @@
  */
 
 import { Location } from '../core/location';
-import { ItemAbil, ItemType } from '../data/item';
+import { ItemAbil, defaultItem } from '../data/item';
 import { TerSpec } from '../data/terrain';
+import { Snd, SoundPlayer } from '../platform/sound';
+import { hasAbilEquip } from '../universe/inventory';
 import { Skill, Trait } from '../universe/skills';
 import { Player } from '../universe/player';
 import { Universe } from '../universe/universe';
@@ -32,33 +34,27 @@ export function statAdj(pc: Player, which: Skill): number {
   return tr;
 }
 
-/** The first equipped item with the given ability, or null. */
-function equippedWithAbility(pc: Player, abil: ItemAbil): { slot: number; strength: number } | null {
-  for (let i = 0; i < pc.items.length; i++) {
-    const item = pc.items[i]!;
-    if (item.variety === ItemType.NO_ITEM) continue;
-    if (item.ability !== abil) continue;
-    return { slot: i, strength: item.abilStrength };
-  }
-  return null;
-}
-
 export type DoorResult = 'opened' | 'failed' | 'no-picks' | 'wrong-terrain';
 
 /** pick_lock (boe.town.cpp:1156). */
-export function pickLock(univ: Universe, where: Location, pcNum: number): DoorResult {
+export function pickLock(
+  univ: Universe,
+  where: Location,
+  pcNum: number,
+  sound?: SoundPlayer | null,
+): DoorResult {
   const town = univ.town;
   if (!town) return 'wrong-terrain';
   const pc = univ.party.pcs[pcNum];
   if (!pc) return 'wrong-terrain';
   const terrain = town.record.terrain[where.x]![where.y]!;
-  const picks = equippedWithAbility(pc, ItemAbil.LOCKPICKS);
+  const picks = hasAbilEquip(pc, ItemAbil.LOCKPICKS);
   if (!picks) {
     univ.addStringToBuf('  Need lockpick equipped.');
     return 'no-picks';
   }
 
-  let r1 = univ.rng.getRan(1, 1, 100) + picks.strength * 7;
+  let r1 = univ.rng.getRan(1, 1, 100) + picks.item.abilStrength * 7;
   const willBreak = r1 < 75;
 
   r1 =
@@ -66,26 +62,34 @@ export function pickLock(univ: Universe, where: Location, pcNum: number): DoorRe
     5 * statAdj(pc, Skill.DEXTERITY) +
     town.record.difficulty * 7 -
     5 * (pc.skills[Skill.LOCKPICKING] ?? 0) -
-    picks.strength * 7;
+    picks.item.abilStrength * 7;
   if (pc.traits[Trait.NIMBLE]) r1 -= 8;
-  if (equippedWithAbility(pc, ItemAbil.THIEVING)) r1 -= 12;
+  if (hasAbilEquip(pc, ItemAbil.THIEVING)) r1 -= 12;
 
   const unlockAdjust = univ.terrainType(terrain).flag2;
   if (unlockAdjust >= 5 || r1 > unlockAdjust * 15 + 30) {
     univ.addStringToBuf("  Didn't work.");
     if (willBreak) {
       univ.addStringToBuf('  Pick breaks.');
-      // TODO(M3): removing a charge needs the inventory model.
+      const item = pc.items[picks.slot]!;
+      if (item.charges > 0 && --item.charges <= 0) pc.items[picks.slot] = defaultItem();
     }
+    sound?.play(Snd.LOCK_FAILED);
     return 'failed';
   }
   univ.addStringToBuf('  Door unlocked.');
+  sound?.play(Snd.LOCK_OPENED);
   unlockDoor(univ, where, terrain);
   return 'opened';
 }
 
 /** bash_door (boe.town.cpp:1204). */
-export function bashDoor(univ: Universe, where: Location, pcNum: number): DoorResult {
+export function bashDoor(
+  univ: Universe,
+  where: Location,
+  pcNum: number,
+  sound?: SoundPlayer | null,
+): DoorResult {
   const town = univ.town;
   if (!town) return 'wrong-terrain';
   const pc = univ.party.pcs[pcNum];
@@ -110,6 +114,7 @@ export function bashDoor(univ: Universe, where: Location, pcNum: number): DoorRe
     return 'failed';
   }
   univ.addStringToBuf('  Lock breaks.');
+  sound?.play(Snd.LOCK_OPENED);
   unlockDoor(univ, where, terrain);
   return 'opened';
 }

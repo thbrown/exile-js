@@ -141,10 +141,61 @@ await shot('01c-locked-door');
 await page.keyboard.press('b');
 await page.waitForTimeout(200);
 const bashed = await page.evaluate(() => ({
+  // 'b' picks Bash, which then asks who does it, so a dialog is still up.
+  stillAsking: !!window.__dialogs.active,
+}));
+console.log('DOOR PROMPT:', JSON.stringify({ promptUp, ...bashed }));
+
+// 2c-2. Bashing must ask who does it, and play its sound.
+const bashPrompt = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  return d ? { text: d.spec.text, rows: (d.spec.rows ?? []).length } : null;
+});
+console.log('BASH ASKS WHO:', JSON.stringify(bashPrompt));
+if (bashPrompt) {
+  // Pick the first selectable PC through the dialog's own hit test.
+  const hit = await page.evaluate(() => {
+    const d = window.__dialogs.active;
+    for (let y = 0; y < 430; y++)
+      for (let x = 0; x < 605; x += 4) {
+        const h = d.buttonAt(x, y);
+        if (h && h.name === '0') return { x, y };
+      }
+    return null;
+  });
+  if (hit) {
+    const box = await (await page.$('#canvas')).boundingBox();
+    await page.mouse.click(
+      box.x + (hit.x / 605) * box.width,
+      box.y + (hit.y / 430) * box.height,
+    );
+    await page.waitForTimeout(200);
+  }
+}
+const bashDone = await page.evaluate(() => ({
   dialogGone: !window.__dialogs.active,
   tail: window.__session.univ.transcript.slice(-1),
 }));
-console.log('DOOR PROMPT:', JSON.stringify({ promptUp, ...bashed }));
+console.log('BASH RESULT:', JSON.stringify(bashDone));
+
+// 2e. Items: stand on a floor item, take it, and see it in the pack.
+const gotItem = await page.evaluate(() => {
+  const s = window.__session;
+  const target = s.univ.town.items.find((i) => !i.contained);
+  if (!target) return { skipped: true };
+  s.univ.party.townLoc = { ...target.itemLoc };
+  s.center = { ...s.univ.party.townLoc };
+  const reachable = s.reachableItems(s.univ.party.townLoc);
+  s.takeItem(target, 0);
+  window.__redraw();
+  return {
+    name: target.name,
+    reachable: reachable.length,
+    carried: s.univ.party.pcs[0].items.filter((i) => i.variety !== 0).map((i) => i.name),
+  };
+});
+console.log('GOT ITEM:', JSON.stringify(gotItem));
+await shot('01e-inventory');
 
 // 2d. Signs: looking at an adjacent sign opens a dialog with its text.
 const sign = await page.evaluate(() => {
@@ -286,7 +337,11 @@ const ok =
   (talk.skipped !== undefined || (talk.followed?.changed === true && talkClosed.talking === false)) &&
   doors.unlocked?.after !== doors.unlocked?.before &&
   promptUp === true &&
-  bashed.dialogGone === true &&
+  bashed.stillAsking === true &&
+  bashPrompt?.text === 'Who will bash?' &&
+  bashPrompt?.rows === 6 &&
+  bashDone.dialogGone === true &&
+  (gotItem.skipped === true || gotItem.carried.includes(gotItem.name)) &&
   (sign.skipped === true || (sign.readable === true && signShown.dialogOpen === true)) &&
   outdoors.inTown === false &&
   roam.moves > 0 &&

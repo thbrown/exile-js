@@ -97,6 +97,52 @@ export const PC_PANEL = {
   dayValue: r(103, 174, 114, 201),
 } as const;
 
+// --- Inventory panel rows (init_inven_rects, boe.actions.cpp:200) ----------
+
+/** The item pane shows eight rows at a time. */
+export const LINES_IN_ITEM_WIN = 8;
+
+export interface ItemRowRects {
+  icon: UiRect;
+  name: UiRect;
+  use: UiRect;
+  give: UiRect;
+  drop: UiRect;
+  info: UiRect;
+}
+
+export const ITEM_ROWS: ItemRowRects[] = Array.from({ length: LINES_IN_ITEM_WIN }, (_, i) => {
+  const dy = 13 * i;
+  // The name row starts at 17 and then shifts down 3 (boe.actions.cpp:234).
+  const nameTop = 20 + dy;
+  const btnTop = 18 + dy;
+  return {
+    icon: r(15 + dy, 20, 33 + dy, 38),
+    name: r(nameTop, 3, nameTop + 12, 188),
+    use: r(btnTop, 196, btnTop + 12, 210),
+    give: r(btnTop, 210, btnTop + 12, 224),
+    drop: r(btnTop, 224, btnTop + 12, 238),
+    info: r(btnTop, 238, btnTop + 12, 252),
+  };
+});
+
+/** The inventory panel's title line and the area erased before drawing. */
+export const ITEM_PANEL = {
+  title: r(3, 3, 15, 268),
+  erase: r(17, 2, 122, 255),
+} as const;
+
+/**
+ * Row-button icons in invenbtns.png — item_buttons_from (boe.text.cpp:47),
+ * indexed by eItemButton minus 2 (USE, GIVE, DROP, INFO).
+ */
+export const ITEM_BTN_ICONS = {
+  use: r(12, 0, 24, 14),
+  give: r(12, 14, 24, 28),
+  drop: r(12, 28, 24, 42),
+  info: r(12, 42, 24, 56),
+} as const;
+
 /** The transcript pane's text area, relative to its panel. */
 export const TRANSCRIPT_TEXT = r(2, 2, 136, 255);
 export const TRANSCRIPT_LINE_HEIGHT = 12;

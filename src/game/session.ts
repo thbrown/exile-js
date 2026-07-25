@@ -11,7 +11,7 @@
 
 import { Direction, Location, dist, loc, shiftLoc } from '../core/location';
 import { SIGHT_BLOCKED, canSee } from '../core/sight';
-import { Item, ItemType } from '../data/item';
+import { Item, ItemAbil, ItemType, defaultItem } from '../data/item';
 import { MonstTime } from '../data/monster';
 import { SECTOR_SIZE } from '../data/outdoors';
 import { StepSound, TerObstruct, TerSpec, blocksMove } from '../data/terrain';
@@ -20,6 +20,15 @@ import { Lighting } from '../data/town';
 import { Snd, SoundPlayer } from '../platform/sound';
 import { Creature, CreatureStatus, assignCreature } from '../universe/creature';
 import { CurTown } from '../universe/curTown';
+import {
+  GiveStatus,
+  equipItem,
+  giveItem,
+  hasAbilEquip,
+  takeItemFrom,
+  unequipItem,
+} from '../universe/inventory';
+import { Skill } from '../universe/skills';
 import { OUT_HALF_DIM, OUT_MAX_DIM } from '../universe/curOut';
 import { TOWN_NUM_OUTDOORS } from '../universe/party';
 import { Universe } from '../universe/universe';
@@ -50,6 +59,13 @@ const DIR_NAMES = ['north', 'northeast', 'east', 'southeast', 'south', 'southwes
  * first usable start location.
  */
 export const FORCED_ENTRY = 9;
+
+/** One row of a select_pc prompt. */
+export interface PcChoice {
+  index: number;
+  label: string;
+  canPick: boolean;
+}
 
 export class GameSession {
   mode: GameMode = GameMode.OUTDOORS;
@@ -407,6 +423,112 @@ export class GameSession {
     return null;
   }
 
+  // ------------------------------------------------------------------ items
+
+  /**
+   * The items a "get" at `place` can reach — get_item (boe.items.cpp:258).
+   * Adjacent items are always in reach; anything further (up to 4 spaces, in
+   * sight) only if no hostile creature is watching.
+   */
+  reachableItems(place: Location): Item[] {
+    const town = this.univ.town;
+    if (!town) return [];
+    let massGet = true;
+    for (const monst of town.monsters)
+      if (
+        monst.isAlive &&
+        !monst.isFriendly &&
+        this.canSeeLight(place, monst.curLoc) < SIGHT_BLOCKED
+      )
+        massGet = false;
+
+    const found: Item[] = [];
+    for (const item of town.items) {
+      if (item.variety === ItemType.NO_ITEM || item.contained) continue;
+      const adjacent =
+        Math.max(Math.abs(place.x - item.itemLoc.x), Math.abs(place.y - item.itemLoc.y)) <= 1;
+      const nearby =
+        massGet &&
+        dist(place, item.itemLoc) <= 4 &&
+        this.canSeeLight(place, item.itemLoc) < SIGHT_BLOCKED;
+      if (!adjacent && !nearby) continue;
+      // Worthless items identify themselves when you pick them up.
+      if (item.value < 2) item.ident = true;
+      found.push(item);
+    }
+    return found;
+  }
+
+  /**
+   * Give a floor item to a PC and remove it from the town. Returns what should
+   * be printed; an empty string means nothing happened.
+   */
+  takeItem(item: Item, pcNum: number): string {
+    const town = this.univ.town;
+    if (!town) return '';
+    const pc = this.univ.party.pcs[pcNum];
+    if (!pc) return '';
+    const result = giveItem(pc, this.univ.party, item);
+    if (result.status !== GiveStatus.OK) {
+      this.univ.addStringToBuf(`  ${result.message}`);
+      return result.message;
+    }
+    const index = town.items.indexOf(item);
+    if (index >= 0) town.items.splice(index, 1);
+    // Remember that a preset item has been taken, so it doesn't come back.
+    if (item.isSpecial > 0) town.record.itemTaken[item.isSpecial - 1] = true;
+    this.univ.addStringToBuf(result.message);
+    return result.message;
+  }
+
+  /** Drop a carried item onto the party's space. */
+  dropItem(pcNum: number, slot: number): boolean {
+    const town = this.univ.town;
+    const pc = this.univ.party.pcs[pcNum];
+    if (!town || !pc) return false;
+    const item = takeItemFrom(pc, slot);
+    if (!item) {
+      this.univ.addStringToBuf('  Item is cursed.');
+      return false;
+    }
+    town.items.push({ ...item, itemLoc: { ...this.univ.party.townLoc }, isSpecial: 0 });
+    this.univ.addStringToBuf(`  ${pc.name} drops ${item.ident ? item.fullName : item.name}.`);
+    return true;
+  }
+
+  /** Hand a carried item to another party member. */
+  giveItemTo(fromPc: number, slot: number, toPc: number): boolean {
+    const from = this.univ.party.pcs[fromPc];
+    const to = this.univ.party.pcs[toPc];
+    if (!from || !to) return false;
+    const item = from.items[slot];
+    if (!item || item.variety === ItemType.NO_ITEM) return false;
+    // Check it will fit before taking it away, so a refusal loses nothing.
+    const check = giveItem(to, this.univ.party, item);
+    if (check.status !== GiveStatus.OK) {
+      this.univ.addStringToBuf(`  ${check.message}`);
+      return false;
+    }
+    if (!takeItemFrom(from, slot)) {
+      // The receiver already has a copy, so undo it.
+      if (check.slot >= 0) to.items[check.slot] = defaultItem();
+      this.univ.addStringToBuf('  Item is cursed.');
+      return false;
+    }
+    this.univ.addStringToBuf(check.message);
+    return true;
+  }
+
+  /** Toggle whether a carried item is equipped. */
+  toggleEquip(pcNum: number, slot: number): void {
+    const pc = this.univ.party.pcs[pcNum];
+    if (!pc) return;
+    const item = pc.items[slot];
+    if (!item || item.variety === ItemType.NO_ITEM) return;
+    const result = pc.equip[slot] ? unequipItem(pc, slot) : equipItem(pc, slot);
+    this.univ.addStringToBuf(result.message);
+  }
+
   // ------------------------------------------------------- special terrain
 
   /**
@@ -452,14 +574,46 @@ export class GameSession {
    */
   onLockedDoor: ((where: Location, terrain: number) => void) | null = null;
 
+  /**
+   * select_pc's candidate list (boe.items.cpp:878). `mode` mirrors the eSelectPC
+   * values this port needs so far; `highlight` names a skill to show beside each
+   * PC, the way the original does for "who will bash?".
+   */
+  selectPcOptions(mode: 'living' | 'lockpick', highlight?: Skill): PcChoice[] {
+    return this.univ.party.pcs.map((pc, index) => {
+      let canPick = pc.isAlive;
+      let extra = '';
+      if (mode === 'lockpick' && canPick) {
+        const equipped = hasAbilEquip(pc, ItemAbil.LOCKPICKS);
+        const carried = pc.items.some(
+          (item) => item.variety !== ItemType.NO_ITEM && item.ability === ItemAbil.LOCKPICKS,
+        );
+        if (!carried) {
+          canPick = false;
+          extra = 'no picks';
+        } else if (!equipped) {
+          canPick = false;
+          extra = 'picks not equipped';
+        } else {
+          const picks = equipped.item;
+          extra = `${picks.ident ? picks.fullName : picks.name} x${picks.charges}`;
+        }
+      }
+      let label = pc.name;
+      if (highlight !== undefined) label += ` (${pc.skills[highlight] ?? 0})`;
+      if (extra) label += `: ${extra}`;
+      return { index, label, canPick };
+    });
+  }
+
   /** Try to pick a locked door's lock with a given PC. */
   pickLock(where: Location, pcNum: number): void {
-    pickLockAt(this.univ, where, pcNum);
+    pickLockAt(this.univ, where, pcNum, this.sound);
   }
 
   /** Try to bash a locked door open with a given PC. */
   bashDoor(where: Location, pcNum: number): void {
-    bashDoorAt(this.univ, where, pcNum);
+    bashDoorAt(this.univ, where, pcNum, this.sound);
   }
 
   // ------------------------------------------------------------------- talk

@@ -13,6 +13,7 @@
 
 import { Colours } from '../render/colours';
 import { BOE_HEIGHT, BOE_WIDTH, UiRect, height, width } from '../render/layout';
+import { itemGraphic } from '../render/itemPics';
 import { SheetStore } from '../render/sheets';
 import { terrainGraphic } from '../render/terrainPics';
 import { drawString, wrapLines } from '../render/text';
@@ -45,11 +46,22 @@ export interface DialogButton {
   key?: string;
 }
 
+/** A selectable row, used for pick-lists like "get which item?". */
+export interface DialogRow {
+  /** Returned by `run()` when this row is clicked. */
+  name: string;
+  label: string;
+  /** Item graphic number to show beside the label, if any. */
+  itemPic?: number;
+}
+
 export interface DialogSpec {
   text: string;
   buttons: DialogButton[];
   /** Terrain picture number shown at the left, if any. */
   terPic?: number;
+  /** Selectable rows shown between the text and the buttons. */
+  rows?: DialogRow[];
   /** Button returned when the player presses Escape. */
   escapeButton?: string;
   title?: string;
@@ -60,9 +72,17 @@ interface PlacedDialogButton extends DialogButton {
   large: boolean;
 }
 
+interface PlacedDialogRow extends DialogRow {
+  rect: UiRect;
+}
+
+/** Selectable rows are a line tall plus a little breathing room. */
+const ROW_H = 20;
+
 export class Dialog {
   private frame: UiRect = { top: 0, left: 0, bottom: 0, right: 0 };
   private placed: PlacedDialogButton[] = [];
+  private placedRows: PlacedDialogRow[] = [];
   private lines: string[] = [];
 
   constructor(
@@ -106,8 +126,10 @@ export class Dialog {
     const buttonsWidth =
       sizes.reduce((a, b) => a + b, 0) + (this.spec.buttons.length - 1) * BUTTON_GAP;
     const innerWidth = Math.max(textWidth + picWidth, buttonsWidth);
+    const rows = this.spec.rows ?? [];
     const innerHeight =
       Math.max(this.lines.length * LINE_HEIGHT, this.spec.terPic === undefined ? 0 : 36) +
+      (rows.length > 0 ? PADDING + rows.length * ROW_H : 0) +
       PADDING +
       BUTTON_H;
 
@@ -116,6 +138,25 @@ export class Dialog {
     const left = Math.round((BOE_WIDTH - w) / 2);
     const top = Math.round((BOE_HEIGHT - h) / 2);
     this.frame = { top, left, bottom: top + h, right: left + w };
+
+    // Rows stack under the text, each one clickable across the full width.
+    this.placedRows = [];
+    let rowY = this.frame.top + PADDING + Math.max(
+      this.lines.length * LINE_HEIGHT,
+      this.spec.terPic === undefined ? 0 : 36,
+    ) + (rows.length > 0 ? PADDING : 0);
+    for (const row of rows) {
+      this.placedRows.push({
+        ...row,
+        rect: {
+          top: rowY,
+          left: this.frame.left + PADDING,
+          bottom: rowY + ROW_H,
+          right: this.frame.right - PADDING,
+        },
+      });
+      rowY += ROW_H;
+    }
 
     // Buttons sit right-aligned along the bottom edge, as the game's do.
     this.placed = [];
@@ -174,6 +215,28 @@ export class Dialog {
       y += LINE_HEIGHT;
     }
 
+    for (const row of this.placedRows) {
+      const label = row.rect;
+      let textLeft2 = label.left + 2;
+      if (row.itemPic !== undefined) {
+        const g = itemGraphic(row.itemPic);
+        const sheet = g ? this.store.get(g.sheetName) : undefined;
+        if (g && sheet) {
+          ctx.drawImage(
+            sheet, g.rect.left, g.rect.top, g.rect.width, g.rect.height,
+            textLeft2, label.top, 18, 18,
+          );
+        }
+        textLeft2 += 22;
+      }
+      drawString(
+        ctx,
+        { ...label, left: textLeft2, top: label.top + 3 },
+        row.label,
+        { size: TEXT_SIZE, colour: Colours.LIGHT_BLUE },
+      );
+    }
+
     for (const btn of this.placed) {
       const btnSheet = this.store.get(btn.large ? 'dlogbtnlg' : 'dlogbtnmed');
       if (btnSheet) {
@@ -202,11 +265,15 @@ export class Dialog {
     }
   }
 
-  /** The button (if any) at a screen position. */
-  buttonAt(x: number, y: number): DialogButton | null {
+  /** The button or row (if any) at a screen position. */
+  buttonAt(x: number, y: number): { name: string } | null {
     for (const btn of this.placed) {
       const r = btn.rect;
       if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) return btn;
+    }
+    for (const row of this.placedRows) {
+      const r = row.rect;
+      if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) return row;
     }
     return null;
   }

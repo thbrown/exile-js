@@ -36,6 +36,8 @@ export class Player {
   whichGraphic = 0;
   uniqueId = 0;
   items: Item[] = Array.from({ length: NUM_INVEN_SLOTS }, () => defaultItem());
+  /** Which slots are currently worn/wielded (cPlayer::equip). */
+  equip: boolean[] = new Array<boolean>(NUM_INVEN_SLOTS).fill(false);
 
   get isAlive(): boolean {
     return this.mainStatus === MainStatus.ALIVE;
