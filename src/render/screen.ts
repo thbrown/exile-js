@@ -6,7 +6,8 @@
  */
 
 import { Direction } from '../core/location';
-import { TerSpec, TrimType } from '../data/terrain';
+import { groundFromTer, terFromGround } from '../data/scenario';
+import { TerSpec, TrimType, blocksMove } from '../data/terrain';
 import { Lighting } from '../data/town';
 import { GameSession } from '../game/session';
 import { GameMode } from '../game/modes';
@@ -41,6 +42,7 @@ import { pcGraphic } from './pcPics';
 import { SheetStore, TILE_H, TILE_W } from './sheets';
 import { terrainGraphic } from './terrainPics';
 import { DEFAULT_BG, PANEL_BG, tilePattern } from './tiling';
+import { Trim, TrimMasks } from './trim';
 import { drawString, drawStringEllipsis, drawStringRight, wrapLines } from './text';
 
 /** Every image the main screen needs, beyond the terrain/monster sheets. */
@@ -55,17 +57,23 @@ export const CHROME_SHEETS = [
   'invenbtns',
   'pcs',
   'fields',
+  'trim',
 ];
 
 export class Screen {
   private buttons: PlacedButton[] = [];
   private buttonsMode: 'out' | 'town' | 'combat' | null = null;
+  private trim: TrimMasks;
+  /** The ground terrain trim falls back to when a neighbour is impassable. */
+  private currentGround = 0;
   animFrame = 0;
 
   constructor(
     private ctx: CanvasRenderingContext2D,
     private store: SheetStore,
-  ) {}
+  ) {
+    this.trim = new TrimMasks(store);
+  }
 
   draw(session: GameSession): void {
     const { ctx } = this;
@@ -149,7 +157,8 @@ export class Screen {
           continue;
         }
         const ter = town ? town.record.terrain[x]![y]! : univ.out.at(x, y);
-        this.drawTerrainSpot(univ.terrainType(ter).picture, pos.x, pos.y);
+        this.drawTerrainCell(session, ter, q, row, x, y, pos);
+        this.placeTrim(session, ter, q, row, x, y);
         if (this.isRoad(session, x, y)) this.placeRoad(session, q, row, x, y);
       }
 
@@ -166,6 +175,191 @@ export class Screen {
       img, g.rect.left, g.rect.top, g.rect.width, g.rect.height,
       px, py, TILE_W, TILE_H,
     );
+  }
+
+  // -------------------------------------------------------------------- trim
+
+  /**
+   * The terrain-drawing branch of draw_terrain (boe.graphics.cpp:958-1000):
+   * walkway terrain draws its ground type with a corner shape stencilled on
+   * top; everything else draws its own tile.
+   */
+  private drawTerrainCell(
+    session: GameSession,
+    ter: number,
+    q: number,
+    row: number,
+    x: number,
+    y: number,
+    pos: { x: number; y: number },
+  ): void {
+    const { univ } = session;
+    const spec = univ.terrainType(ter);
+    if (spec.trimType !== TrimType.WALKWAY) {
+      this.currentGround = groundFromTer(univ.scenario, ter);
+      this.drawTerrainSpot(spec.picture, pos.x, pos.y);
+      return;
+    }
+    const groundT = spec.trimTer;
+    const groundTer = terFromGround(univ.scenario, groundT);
+    const nature = (nx: number, ny: number): boolean =>
+      univ.terrainType(this.coordToTer(session, nx, ny)).groundType === groundT;
+
+    // Which walkway corner/edge shape fits, from the neighbours' ground type.
+    let shape = -1;
+    if (nature(x - 1, y)) {
+      if (nature(x, y - 1)) {
+        if (nature(x + 1, y)) shape = nature(x, y + 1) ? 8 : 4;
+        else shape = nature(x, y + 1) ? 7 : 1;
+      } else if (nature(x, y + 1)) shape = nature(x + 1, y) ? 6 : 0;
+    } else if (nature(x, y - 1)) {
+      if (nature(x + 1, y)) shape = nature(x, y + 1) ? 5 : 2;
+    } else if (nature(x + 1, y) && nature(x, y + 1)) shape = 3;
+
+    this.drawTerrainSpot(
+      univ.terrainType(shape < 0 ? ter : groundTer).picture,
+      pos.x,
+      pos.y,
+    );
+    if (shape >= 0)
+      this.trim.draw(this.ctx, Trim.WALKWAY_BASE + shape, spec.picture, pos.x, pos.y, this.animFrame);
+  }
+
+  private coordToTer(session: GameSession, x: number, y: number): number {
+    const town = session.univ.town;
+    if (town) return town.isOnMap(x, y) ? town.record.terrain[x]![y]! : 0;
+    return session.univ.out.isOnMap(x, y) ? session.univ.out.at(x, y) : 0;
+  }
+
+  /** get_ground_for_shore (boe.graphics.cpp:1085). */
+  private groundForShore(session: GameSession, ter: number): number {
+    const spec = session.univ.terrainType(ter);
+    if (spec.blockHorse || blocksMove(spec)) return this.currentGround;
+    return ter;
+  }
+
+  /**
+   * place_trim (boe.graphics.cpp:1088) — shoreline frills around fluids, and
+   * rounded corners where walls meet open ground.
+   */
+  private placeTrim(
+    session: GameSession,
+    ter: number,
+    q: number,
+    row: number,
+    x: number,
+    y: number,
+  ): void {
+    const { univ } = session;
+    const pos = terrainSpotPos(q, row);
+    const spec = univ.terrainType(ter);
+    const town = session.univ.town;
+    const lastX = town ? town.record.maxDim - 1 : 95;
+    const lastY = lastX;
+    const atLeft = x === 0;
+    const atTop = y === 0;
+    const atRight = x === lastX;
+    const atBot = y === lastY;
+
+    const trimAt = (which: Trim, nx: number, ny: number): void => {
+      const shore = this.groundForShore(session, this.coordToTer(session, nx, ny));
+      this.trim.draw(this.ctx, which, univ.terrainType(shore).picture, pos.x, pos.y, this.animFrame);
+    };
+
+    if (spec.trimType === TrimType.FRILLS) {
+      const bits = this.fluidTrimBits(session, x, y, atLeft, atTop, atRight, atBot);
+      if (bits !== 0) {
+        // Corners first, then edges — the order the C++ draws them in.
+        if (bits & 2) trimAt(Trim.TOP_RIGHT, x + 1, y - 1);
+        if (bits & 8) trimAt(Trim.BOTTOM_RIGHT, x + 1, y + 1);
+        if (bits & 32) trimAt(Trim.BOTTOM_LEFT, x - 1, y + 1);
+        if (bits & 128) trimAt(Trim.TOP_LEFT, x - 1, y - 1);
+        if (bits & 1) trimAt(Trim.TOP, x, y - 1);
+        if (bits & 4) trimAt(Trim.RIGHT, x + 1, y);
+        if (bits & 16) trimAt(Trim.BOTTOM, x, y + 1);
+        if (bits & 64) trimAt(Trim.LEFT, x - 1, y);
+      }
+    }
+
+    if (spec.trimType !== TrimType.WALL || atTop || atBot || atLeft || atRight) return;
+
+    // Rounded wall corners: a wall corner is cut where open ground meets it.
+    const isWall = (nx: number, ny: number): boolean =>
+      univ.terrainType(this.coordToTer(session, nx, ny)).trimType === TrimType.WALL;
+    const isGround = (nx: number, ny: number): boolean => {
+      const t = univ.terrainType(this.coordToTer(session, nx, ny));
+      return t.trimType !== TrimType.WALL && !t.blockHorse;
+    };
+    const left = this.coordToTer(session, x - 1, y);
+    const right = this.coordToTer(session, x + 1, y);
+    const wall = { l: isWall(x - 1, y), r: isWall(x + 1, y), u: isWall(x, y - 1), d: isWall(x, y + 1) };
+    const gnd = { l: isGround(x - 1, y), r: isGround(x + 1, y), u: isGround(x, y - 1), d: isGround(x, y + 1) };
+    const cut = (which: Trim, groundTer: number): void => {
+      this.trim.draw(
+        this.ctx, which, univ.terrainType(groundTer).picture, pos.x, pos.y, this.animFrame,
+      );
+    };
+
+    if (wall.l && wall.u && gnd.r && gnd.d) cut(Trim.WALL_BR, right);
+    if (wall.l && wall.d && gnd.r && gnd.u) cut(Trim.WALL_TR, right);
+    if (wall.r && wall.u && gnd.l && gnd.d) cut(Trim.WALL_BL, left);
+    if (wall.r && wall.d && gnd.l && gnd.u) cut(Trim.WALL_TL, left);
+    if (gnd.l && gnd.u && gnd.r && wall.d) {
+      cut(Trim.WALL_TL, right);
+      cut(Trim.WALL_TR, right);
+    }
+    if (wall.l && gnd.d && gnd.r && gnd.u) {
+      cut(Trim.WALL_TR, right);
+      cut(Trim.WALL_BR, right);
+    }
+    if (gnd.r && wall.u && gnd.l && gnd.d) {
+      cut(Trim.WALL_BL, left);
+      cut(Trim.WALL_BR, left);
+    }
+    if (wall.r && gnd.d && gnd.l && gnd.u) {
+      cut(Trim.WALL_TL, left);
+      cut(Trim.WALL_BL, left);
+    }
+    if (gnd.r && gnd.d && gnd.l && gnd.u) {
+      cut(Trim.WALL_TL, left);
+      cut(Trim.WALL_TR, right);
+      cut(Trim.WALL_BL, left);
+      cut(Trim.WALL_BR, right);
+    }
+  }
+
+  /**
+   * get_fluid_trim (boe.graphutil.cpp:575) — a bitmask of which neighbours are
+   * shore, with the final masking that suppresses corners next to a full edge.
+   */
+  private fluidTrimBits(
+    session: GameSession,
+    x: number,
+    y: number,
+    atLeft: boolean,
+    atTop: boolean,
+    atRight: boolean,
+    atBot: boolean,
+  ): number {
+    const isShore = (nx: number, ny: number): boolean => {
+      const t = session.univ.terrainType(this.coordToTer(session, nx, ny));
+      return t.trimType !== TrimType.FRILLS && t.trimType !== TrimType.WATERFALL;
+    };
+    let bits = 0;
+    if (!atLeft && isShore(x - 1, y)) bits |= 64;
+    if (!atRight && isShore(x + 1, y)) bits |= 4;
+    if (!atTop && isShore(x, y - 1)) bits |= 1;
+    if (!atBot && isShore(x, y + 1)) bits |= 16;
+    if (!atLeft && !atTop && isShore(x - 1, y - 1)) bits |= 128;
+    if (!atRight && !atBot && isShore(x + 1, y + 1)) bits |= 8;
+    if (!atRight && !atTop && isShore(x + 1, y - 1)) bits |= 2;
+    if (!atLeft && !atBot && isShore(x - 1, y + 1)) bits |= 32;
+    // An edge trim already covers its adjacent corners, so drop those.
+    if (bits & 1) bits &= 125;
+    if (bits & 4) bits &= 245;
+    if (bits & 10) bits &= 215;
+    if (bits & 64) bits &= 95;
+    return bits;
   }
 
   private isRoad(session: GameSession, x: number, y: number): boolean {

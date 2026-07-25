@@ -32,3 +32,23 @@ export interface Scenario {
   outdoors: Sector[][];
   scenSpecials: Map<number, SpecialNode>;
 }
+
+/**
+ * get_ter_from_ground (scenario.cpp:341) — the terrain type that represents a
+ * ground type, preferring the one flagged as its archetype.
+ */
+export function terFromGround(scen: Scenario, ground: number): number {
+  let fallback = -1;
+  for (let i = 0; i < scen.terTypes.length; i++) {
+    const ter = scen.terTypes[i]!;
+    if (ter.groundType !== ground) continue;
+    if (ter.isArchetype) return i;
+    if (fallback < 0) fallback = i;
+  }
+  return Math.max(fallback, 0);
+}
+
+/** get_ground_from_ter (scenario.cpp:337). */
+export function groundFromTer(scen: Scenario, ter: number): number {
+  return terFromGround(scen, scen.terTypes[ter]!.groundType);
+}
