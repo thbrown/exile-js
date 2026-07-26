@@ -11,6 +11,7 @@ import { SpecType } from '../../data/special';
 import { TerSpec } from '../../data/terrain';
 import { Universe } from '../../universe/universe';
 import { SpecialCtx } from './context';
+import { crumbleWall, dispelFields } from '../fieldEffects';
 import { alterSpace, reportUnsupported } from './general';
 import { handleMessage } from './vm';
 
@@ -98,14 +99,15 @@ export async function rectSpec(univ: Universe, ctx: SpecialCtx): Promise<void> {
           // sd1 is a percentage chance per square; a dispel always applies.
           if (field !== FieldType.FIELD_DISPEL && univ.rng.getRan(1, 1, 100) > spec.sd1) break;
           if (field === FieldType.FIELD_DISPEL) {
-            // sd1 0 clears the ordinary fields, anything else the barriers too.
-            town.dispelFields(x, y, spec.sd1 !== 0);
+            // sd1 0 is mode 1, anything else mode 2. Both are the strong
+            // dispel — every saving roll is nobbled by -10 — and mode 2 also
+            // clears the barriers, crates and barrels.
+            dispelFields(ctx.session, { x, y }, spec.sd1 === 0 ? 1 : 2);
           } else if (field === FieldType.SPECIAL_EXPLORED
             || field === FieldType.SPECIAL_SPOT || field === FieldType.SPECIAL_ROAD) {
             // Not placeable.
           } else if (field === FieldType.FIELD_SMASH) {
-            // TODO(M5): crumble_wall turns a wall square into its rubble.
-            reportUnsupported(univ, spec.type);
+            crumbleWall(ctx.session, { x, y });
           } else {
             town.setField(x, y, field, true);
           }

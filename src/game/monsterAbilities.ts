@@ -14,6 +14,8 @@ import { FieldType } from '../data/fields';
 import {
   Ability, MonstAbil, MonstGen, MonstMissile, MonstSummon, abilityApCost,
 } from '../data/monsterAbility';
+import { SpellPat } from '../data/pattern';
+import { placeSpellPattern } from './spellPatterns';
 import { getSummonMonster, summonMonster } from './monsterPlace';
 import { ItemAbil } from '../data/item';
 import { Creature } from '../universe/creature';
@@ -22,8 +24,8 @@ import { Living, SpellNote, livingSound } from '../universe/living';
 import { Player } from '../universe/player';
 import { MainStatus, Status } from '../universe/skills';
 import { damageMonst, damagePc, hitChance } from './damage';
+import { webSpace } from './fieldEffects';
 import { runAMissile } from './missileAnim';
-import { isCombat } from './modes';
 import type { GameSession } from './session';
 
 /** The ability a monster picked this turn, and which slot it came from. */
@@ -200,24 +202,6 @@ export function monstFireMissile(
 }
 
 /**
- * web_space (boe.combat.cpp:5253) — a web lands on a square, and anyone
- * standing there is caught in it as well.
- */
-function webSpace(session: GameSession, where: Location): void {
-  const univ = session.univ;
-  const town = univ.town;
-  if (!town) return;
-  town.setField(where.x, where.y, FieldType.FIELD_WEB, true);
-  if (isCombat(session.mode)) {
-    for (const pc of univ.party.pcs)
-      if (pc.mainStatus === MainStatus.ALIVE
-        && pc.combatPos.x === where.x && pc.combatPos.y === where.y) pc.web(3);
-  } else if (univ.party.townLoc.x === where.x && univ.party.townLoc.y === where.y) {
-    for (const pc of univ.party.pcs) pc.web(3);
-  }
-}
-
-/**
  * monst_fire_missile's MISSILE branch — the arrow, spear or spine itself.
  *
  * TODO(M5b): the target's HIT_CALL_SPECIAL item ability.
@@ -359,7 +343,13 @@ export function monsterBasicAbil(
       break;
 
     case MonstAbil.FIELD:
-      // TODO(M5c): place_spell_pattern.
+      // The *strength* field doubles as the pattern id here, and `extra` as
+      // the field type — the union's `fld` arm.
+      placeSpellPattern(session, strength as SpellPat, target.getLoc(), {
+        field: abil.gen.extra as FieldType,
+        rot: target.direction + 6,
+        whoHit: 7, // out of the 0-5 PC range: nobody is credited
+      });
       break;
 
     default:

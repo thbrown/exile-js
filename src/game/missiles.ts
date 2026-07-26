@@ -19,6 +19,8 @@ import { Race, Skill, Status, Trait } from '../universe/skills';
 import { Universe } from '../universe/universe';
 import { MonstAbil } from '../data/monsterAbility';
 import { runAMissile } from './missileAnim';
+import { SpellPat } from '../data/pattern';
+import { placeSpellPattern } from './spellPatterns';
 import { takeAp } from './combat';
 import { onHitItemAbility, onHitTargetSpecial } from './weaponAbilities';
 import { damageMonst, damagePc, hitChance } from './damage';
@@ -248,8 +250,6 @@ function seekTarget(
  * `target`. The caller has already put the game in FIRING or THROWING mode and
  * knows which slots are in play.
  *
- * TODO(M5c): EXPLODING_WEAPON needs `place_spell_pattern` (PAT_RAD2), so an
- * exploding arrow currently says so and doesn't fire.
  */
 export function fireMissile(
   session: GameSession, loaded: LoadedMissile, target: Location,
@@ -302,8 +302,16 @@ export function fireMissile(
   }
 
   if (ammo.ability === ItemAbil.EXPLODING_WEAPON) {
-    // TODO(M5c): place_spell_pattern(PAT_RAD2) is what makes this a blast.
-    univ.addStringToBuf('(Exploding missiles need M5c)');
+    // An exploding arrow never rolls to hit: it flies to the square and the
+    // blast does the work, so the shot can't miss but also can't crit.
+    takeAp(univ, firing ? 3 : 2);
+    firer.voidSanctuary();
+    univ.addStringToBuf('  The arrow explodes!');
+    runAMissile(firer.combatPos, aim, 2, 1, 5, 0, 0, 100);
+    placeSpellPattern(session, SpellPat.RADIUS_2, aim, {
+      damage: { type: ammo.abilData as DamageType, dice: ammo.abilStrength * 2 },
+      whoHit: univ.curPc,
+    });
     return;
   }
 

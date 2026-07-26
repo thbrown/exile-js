@@ -3,7 +3,9 @@
  * the classic 605x430 screen.
  */
 
-import { shiftLoc } from './core/location';
+import { Location, shiftLoc } from './core/location';
+import { SpellPat } from './data/pattern';
+import { placeSpellPattern } from './game/spellPatterns';
 import { GameMode } from './game/modes';
 import { BOOM_MS, setBoomSink } from './game/booms';
 import { MISSILE_MS, setMissileSink } from './game/missileAnim';
@@ -809,6 +811,9 @@ async function main(): Promise<void> {
     __screen: screen,
     __scen: scen,
     __redraw: redraw,
+    // The protective circle, for the verifier's place_spell_pattern check.
+    __placePattern: (at: Location) =>
+      placeSpellPattern(session, SpellPat.PROT, at, { whoHit: univ.curPc }),
     // Lets the headless verifier watch which sound files actually get played.
     __setLivingSound: (fn: ((which: number) => void) | null) =>
       setLivingSound(fn ?? ((which: number) => { sound.play(which); })),

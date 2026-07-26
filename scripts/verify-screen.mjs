@@ -996,6 +996,34 @@ await page.evaluate(() => {
 });
 console.log('MISSILE FLIGHT:', JSON.stringify(missileFlight));
 
+// place_spell_pattern: lay a protective circle down next to the party. It is
+// the one builtin whose cells are field types rather than a single shape, so
+// one call raises four different kinds of wall in concentric rings — which
+// makes it the best single check that the tables and the field overlay agree.
+const pattern = await page.evaluate(() => {
+  const s = window.__session;
+  const town = s.univ.town;
+  if (!town) return { skipped: 'not in a town' };
+  const pc = s.univ.party.pcs[s.univ.firstActivePc()];
+  const at = { ...(s.mode === 9 ? pc.combatPos : s.univ.party.townLoc) };
+  s.center = { ...at };
+  window.__placePattern(at);
+  // Count what actually landed, by ring: 1 = force wall, 5 = ice, 6 = blades,
+  // 3 = antimagic.
+  const counts = { forceWall: 0, ice: 0, blades: 0, antimagic: 0 };
+  for (let x = at.x - 4; x <= at.x + 4; x++)
+    for (let y = at.y - 4; y <= at.y + 4; y++) {
+      if (town.hasField(x, y, 1)) counts.forceWall++;
+      if (town.hasField(x, y, 5)) counts.ice++;
+      if (town.hasField(x, y, 6)) counts.blades++;
+      if (town.hasField(x, y, 3)) counts.antimagic++;
+    }
+  window.__redraw();
+  return { at, counts, total: Object.values(counts).reduce((a, b) => a + b, 0) };
+});
+await shot('02i-spell-pattern');
+console.log('SPELL PATTERN:', JSON.stringify(pattern));
+
 console.log('PARRY:', JSON.stringify(parryButtons));
 await shot('02c3-encounter');
 
@@ -1146,6 +1174,10 @@ const ok =
   // three held-still sprites all draw.
   missileFired.launched.length === 1 &&
   missileFlight.drawn === 3 &&
+  // place_spell_pattern: the protective circle raises all four of its rings.
+  (pattern.skipped !== undefined || (pattern.counts.forceWall > 0
+    && pattern.counts.ice > 0 && pattern.counts.blades > 0
+    && pattern.counts.antimagic > 0)) &&
   errors.length === 0;
 console.log(ok ? 'PASS' : 'FAIL');
 process.exit(ok ? 0 : 1);

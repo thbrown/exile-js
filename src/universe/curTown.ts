@@ -5,7 +5,7 @@
  */
 
 import { Location } from '../core/location';
-import { BARRIERS, DISPELLABLE, FieldType } from '../data/fields';
+import { FieldType } from '../data/fields';
 import { Item } from '../data/item';
 import { Town } from '../data/town';
 import { Creature } from './creature';
@@ -65,13 +65,9 @@ export class CurTown {
     else this.fields[x]![y]!.delete(which);
   }
 
-  /** dispel_fields — clear the transient magical fields off a square. */
-  dispelFields(x: number, y: number, includeBarriers = false): void {
-    if (!this.isOnMap(x, y)) return;
-    const set = this.fields[x]![y]!;
-    for (const f of DISPELLABLE) set.delete(f);
-    if (includeBarriers) for (const f of BARRIERS) set.delete(f);
-  }
+  // The real `dispel_fields` is `game/fieldEffects.ts` — it rolls a save per
+  // field type and needs the RNG, so it doesn't belong on the map state. The
+  // deterministic clear that used to live here cleared far too much.
 
   isLit(x: number, y: number): boolean {
     return this.isOnMap(x, y) && this.lighting[x]![y]! !== 0;

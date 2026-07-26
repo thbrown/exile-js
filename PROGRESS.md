@@ -31,7 +31,7 @@
 
 ## Current state
 
-**M2 done bar two items, M3 nearly done, M4 complete, M5a (melee combat) complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; what's still missing from combat is monster spellcasting (M5b) and the spells and field behaviours (M5c).**
+**M2 done bar two items, M3 nearly done, M4 complete, M5a (melee combat) complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; projectiles fly across the screen; and `place_spell_pattern` works, so exploding weapons blast, monsters lay fields and a protective circle raises four rings of wall. What's still missing from combat is monster spellcasting, the spell list itself, and `process_fields` — what fields do over time (M5c).**
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -70,7 +70,7 @@ Notes for M2 implementer:
 - Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
 - scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
-- `npm test` → 433 tests green (32 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
+- `npm test` → 461 tests green (33 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
 - `node scripts/verify-screen.mjs` (needs `npx vite --port 5199` running) drives the real UI headless and screenshots it. Playwright + chromium installed as devDependency.
 - Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
@@ -168,6 +168,28 @@ Notes for M2 implementer:
   Not ported with it: the mid-flight camera move (`camera_dest` and the
   `recentered` branch), which follows a missile off the edge of the view. Ours
   clips there instead.
+- **Spell patterns (M5c, 2026-07-26)**: `data/pattern.ts` ports `eSpellPat` and
+  every builtin table from pattern.cpp; `game/spellPatterns.ts` ports
+  `place_spell_pattern` and `modify_pattern`; `game/fieldEffects.ts` ports the
+  helpers it leans on — `web_space`, `scloud_space`, `sleep_cloud_space`,
+  `dispel_fields`, `break_force_cage` and `crumble_wall`. Wired into exploding
+  weapons (melee **and** missile), the monsters' FIELD ability, and RADIATE.
+  Three things worth knowing:
+  - **The pattern literals are indexed `[x][y]`**, so each line as written in
+    pattern.cpp is a *column*. Every builtin but `PAT_WALL` is symmetric, so it
+    only shows up in which wall rotation is which — rotation 0 is the
+    horizontal band, rotation 2 the vertical one.
+  - **`PAT_PROT`'s cells are field types, not shape marks** (1 = force wall,
+    5 = ice, 6 = blades, 3 = antimagic), which is why it is the one builtin
+    placed unmodified and why one call raises four concentric rings.
+  - **`dispel_fields`'s `mode >= 1` sets the adjustment to -10**, which no
+    saving roll can recover from — so the scripted dispel sweeps the square
+    clean and mode 0 (the spell) is the *weaker* one. The six rolls happen
+    either way, so the RNG sequence matches. The deterministic
+    `CurTown.dispelFields` that used to stand in for this cleared far too much
+    and is gone.
+  Still to come in M5c: the spells themselves, and `process_fields` — what
+  fields do *over time*, as opposed to when they land.
 - **The rest of `monst_fire_missile` (M5b, 2026-07-26)**: the port used to send
   only MISSILE through `monsterFireMissile` and everything else straight to
   `monsterBasicAbil`, which silently skipped the whole preamble — so a ray, a
@@ -578,14 +600,20 @@ Smaller things outstanding, all independent of M5:
 
 ## Next steps
 
-1. M5b is nearly done: missiles (both sides), breath, summons, the touch
-   abilities, the on-hit weapon abilities, outdoor encounters, the projectile
-   animation and the rest of `monst_fire_missile` all landed 2026-07-26. What's
-   left is **monster spellcasting** (`monst_cast_mage` / `monst_cast_priest`),
-   which wants M5c's spell list to cast from — so the natural order now is M5c
-   first (spells, `place_spell_pattern`, and what fields *do*), then come back
-   for the casters.
-2. (The MAP overlay and `place_treasure` both landed 2026-07-26.)
-3. M2's last leftover is the replay driver.
-4. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in
+1. M5b is done bar **monster spellcasting** (`monst_cast_mage` /
+   `monst_cast_priest`), which wants a spell list to cast from. Everything else
+   landed 2026-07-26: missiles both ways, breath, summons, the touch abilities,
+   the on-hit weapon abilities, outdoor encounters, the projectile animation
+   and the rest of `monst_fire_missile`.
+2. M5c is under way. **`place_spell_pattern` and the field helpers landed**
+   2026-07-26 (see above), which unblocked exploding weapons, monster FIELD and
+   RADIATE. What's left, in the order that unblocks the most:
+   a. **`process_fields`** — what fields do over time: quickfire spreading,
+      clouds damaging whoever stands in them, webs slowing. Hook is marked in
+      `combat_run_monst` (`monsterTurn.ts`).
+   b. **The spell list itself** (`cSpell`, the mage and priest tables) and
+      `cast_spell` — after which monster spellcasting closes out M5b too.
+3. (The MAP overlay and `place_treasure` both landed 2026-07-26.)
+4. M2's last leftover is the replay driver.
+5. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in
    parallel at any time.

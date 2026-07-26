@@ -28,7 +28,9 @@ import { GameMode } from './modes';
 import { damageMonst, damagePc, hitChance } from './damage';
 import { onHitTargetSpecial } from './weaponAbilities';
 import { ItemAbil } from '../data/item';
+import { FieldType } from '../data/fields';
 import { hasAbilEquip } from '../universe/inventory';
+import { placeSpellPattern } from './spellPatterns';
 import type { GameSession } from './session';
 
 /** move_to_zero — one step toward zero from either side. */
@@ -738,8 +740,18 @@ export function doMonsterTurn(session: GameSession): void {
       // Summoning rides along with the action rather than costing one, and it
       // happens once per action the monster takes — the C++ puts it at the
       // bottom of the same loop, gated on the monster actually seeing its foe.
-      // TODO(M5c): the RADIATE half of this block needs place_spell_pattern.
       if (target !== NO_ONE && session.canSeeLight(monst.curLoc, targSpace) < 5) {
+        // RADIATE rolls before SUMMON does, and both use the same stream —
+        // don't reorder them.
+        const radiate = monst.mon.abil[MonstAbil.RADIATE];
+        if (radiate?.active && univ.rng.getRan(1, 1, 100) < radiate.radiate.chance) {
+          placeSpellPattern(session, radiate.radiate.pat, monst.curLoc, {
+            field: radiate.radiate.type as FieldType,
+            rot: monst.direction + 6,
+            // 7 is out of the 0-5 PC range, so nobody is credited with a kill.
+            whoHit: 7,
+          });
+        }
         monsterSummon(session, monst);
       }
 

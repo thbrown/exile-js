@@ -20,6 +20,8 @@ import { MainStatus, Race, Skill, Status, Trait } from '../universe/skills';
 import { Universe } from '../universe/universe';
 import { damageMonst, damagePc, hitChance } from './damage';
 import { calcSpecDam } from './missiles';
+import { SpellPat } from '../data/pattern';
+import { placeSpellPattern } from './spellPatterns';
 import { onHitItemAbility } from './weaponAbilities';
 import type { GameSession } from './session';
 import type { Item } from '../data/item';
@@ -424,8 +426,6 @@ function pcTargetDefence(target: Living): number {
  * only weapon, 2 for the main hand of two, 0 for the off-hand; it changes both
  * the to-hit and the damage.
  *
- * TODO(M5c): EXPLODING_WEAPON needs `place_spell_pattern`; a swing with one
- * currently lands as an ordinary blow.
  */
 export function pcAttackWeapon(
   univ: Universe,
@@ -483,6 +483,21 @@ export function pcAttackWeapon(
   }
 
   r1 += pcTargetDefence(target);
+
+  // An exploding weapon replaces the swing outright: the blast goes off on the
+  // target's square whether or not the blow would have connected, so the roll
+  // above is made and then thrown away.
+  if (weap.ability === ItemAbil.EXPLODING_WEAPON) {
+    univ.addStringToBuf('  The weapon produces an explosion!');
+    livingSound(5);
+    if (session) {
+      placeSpellPattern(session, SpellPat.RADIUS_2, target.getLoc(), {
+        damage: { type: weap.abilData as DamageType, dice: weap.abilStrength * 2 },
+        whoHit: whoAtt,
+      });
+    }
+    return;
+  }
 
   if (r1 > hitChance(skill)) {
     univ.addStringToBuf(`  ${attacker.name} misses.`);

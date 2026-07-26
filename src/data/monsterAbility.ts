@@ -15,6 +15,8 @@
  * `monst.abil[eMonstAbil::SPLITS].active` does there.
  */
 
+import { SpellPat } from './pattern';
+
 /** eMonstAbil (monster_abilities.hpp:20) — the ability slots, in order. */
 export enum MonstAbil {
   NO_ABIL = 0,
@@ -65,21 +67,9 @@ export enum MonstSummon {
   TYPE = 0, LEVEL = 1, SPECIES = 2,
 }
 
-/** eSpellPat (pattern.hpp:14) — the shape an effect covers. */
-export enum SpellPat {
-  SINGLE = 0,
-  SQUARE = 1,
-  SMALL_SQUARE = 2,
-  OPEN_SQUARE = 3,
-  RADIUS_2 = 4,
-  RADIUS_3 = 5,
-  PLUS = 6,
-  WALL = 7,
-  /** PAT_WALL + 8 — the eight protective-wall variants sit in between. */
-  PROT = 15,
-  CUSTOM = 16,
-  CURRENT = -1,
-}
+// eSpellPat lives in `pattern.ts` alongside the tables it indexes; it is
+// re-exported here because RADIATE stores one and the parsers read it.
+export { SpellPat };
 
 /** eMonstAbilCat — which arm of the union a key selects. */
 export enum MonstAbilCat {
