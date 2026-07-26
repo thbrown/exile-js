@@ -25,7 +25,7 @@
 
 ## Current state
 
-**M2 done bar two items, M3 nearly done, M4 breadth-first complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently.**
+**M2 done bar two items, M3 nearly done, M4 complete, M5a (melee combat) complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable in melee**: walking into a hostile creature starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. The monsters don't fight back yet — that's M5b, and it needs the monster-ability port first.**
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -76,6 +76,30 @@ Notes for M2 implementer:
   - The host (`main.ts`) supplies message/choice/askText/selectPc/startShop/startTalk/sound/rest/moveParty/changeLevel/endScenario. `DialogHost.runQueued` serialises dialogs so a chain can show several in a row.
   - Triggers: town + outdoor movement, `adj_town_look`, town entry (`spec_on_entry`) and exit (each exit's node), `CALL_SPECIAL` terrain, `use_space` (**U**), the scenario's `on-init`, and talk's CALL_TOWN_SPEC / CALL_SCEN_SPEC.
 
+- **The `iLiving` seam (M5a)**: `universe/living.ts` — `eSpellNote` and its
+  message table, `apply_status` / `clear_bad_status` / `clear_brief_status` /
+  `void_sanctuary` / `spell_note` / `damaged_msg`, and the two module-level
+  hooks the C++ keeps static (`setPrintResult`, `setLivingSound`) because status
+  effects fire from deep inside the damage pipeline with no Universe to hand.
+  `Player` and `Creature` both extend it and carry cPlayer's and cCreature's
+  full set of effects; a `Creature` owns a *copy* of its monster definition
+  (`monst.mon`), mirroring cCreature inheriting cMonster.
+- **Damage (M5a)**: `game/damage.ts` — `damagePc` (armour rolls per piece,
+  parry, toughness, luck, damage/species/full protection, invulnerability,
+  magic resistance), `killPc` (the luck save, life-saving items, the pack
+  spilling on the floor), `damageMonst` (resistances, elemental saving throw,
+  invulnerability by tenths, morale loss in steps), `killMonst` (the SDF, the
+  on-kill special, xp, gore), `awardXp`/`awardPartyXp` with the level-up loop,
+  and `hitParty`. DAMAGING and DANGEROUS terrain both go through it now.
+- **Combat (M5a)**: `game/combat.ts` — `setPcMoves` (action points with
+  encumbrance, haste, slow and webs), `pickNextPc`, `takeAp`, `placeParty`,
+  `startTownCombat`/`endTownCombat`, and `pcAttack`/`pcAttackWeapon` with the
+  bless/curse and dexterity adjustments, two-weapon and ambidexterity rules,
+  the slith pole-arm bonus, assassination, poisoned blades and martyr's shield.
+  Session gains `startCombat`/`endCombat`/`combatMove`/`attackAt`; walking into
+  a hostile creature starts a fight. Keys: arrows move the acting PC, **C**
+  starts or ends a fight, **Space** passes.
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
@@ -83,7 +107,7 @@ Notes for M2 implementer:
 - [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅, inventory panel ✅, fields overlay ✅; replay driver still open
 - [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅, shops ✅, sell/identify/recharge ✅, training ✅, inns ✅; item Use, enchanting, and full dialogxml still open
 - [x] **M4 — Specials interpreter (breadth-first)**: VM core (pointers, queueing, messages) + all seven opcode groups; triggers wired for movement, look, town entry/exit, use-space, call-special terrain and the two talk nodes. Opcodes needing combat/fields/timers/quests report themselves and wait for M5/M6.
-- [ ] **M5 — Combat** (M5a melee, M5b missiles+AI, M5c spells)
+- [ ] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b (missiles + monster AI) and M5c (spells, patterns, fields) still open
 - [ ] **M6 — Specials depth + party ops** (valleydy completable)
 - [ ] **M7 — Save/load (.exg) + startup flow**
 - [ ] **M8 — Fidelity hardening** (replay golden masters)
@@ -131,43 +155,81 @@ Notes for M2 implementer:
 - (2026-07-25) `end_town_mode` **returns** the outdoor square to walk out onto, and `handle_action` assigns it straight over the move's destination (boe.actions.cpp:770). A town with no defined exits (Fort Talrus has none) falls back to "one step from where you entered", so the party leaves from wherever it was standing outdoors.
 - (2026-07-25) `use_space` checks webs and pushable crates/barrels/blocks **before** the terrain specials, so a port that starts with terrain can never reach them.
 - (2026-07-25) Drawing creatures needs `party_can_see_monst`, or they show through unexplored walls and darkness — a big creature counts as visible if any one of its squares is.
+- (2026-07-25) **`inTown` is false in combat.** `MODE_COMBAT` sits *outside*
+  `is_town`'s range (the enum comment even says so), so every sight and
+  lighting check quietly switched to outdoor rules the moment a fight started
+  — and nothing at all was drawn. Visibility asks `worldIsTown` (the party's
+  town number) instead, which is what the C++ tests. If a whole panel goes
+  blank in a new mode, suspect this shape of bug.
+- (2026-07-25) A PC **only dies from a blow taken while already at zero
+  health** (`damage_pc`): the hit that empties the bar leaves them standing.
+  That is not a port slip, and a "fix" would make the game much harder.
+- (2026-07-25) The saving roll in `cPlayer::sleep` compares `get_ran(1,1,100) +
+  adjust` against a *floor*, so a **large positive `adjust` is what makes an
+  effect land** — the specials pass 200 when a sleep is meant to be
+  unavoidable. Easy to read backwards.
+- (2026-07-25) `cCreature::sleep`'s negative-amount branch does
+  `status[which] -= amount`, which *raises* the status instead of curing it,
+  even though the code below reports "alert". It looks like a sign slip in
+  CBoE; the port keeps it, with a test pinning the behaviour so nobody
+  "fixes" it into a divergence.
+- (2026-07-25) Sleep subtracts 25 from the roll *before* the `charm_odds`
+  comparison (paralysis 15), so a roll of 1-25 beats even a threshold of 0.
+  That's why sleep lands on high-level monsters that resist everything else.
+- (2026-07-25) `is_special` is a *boolean* test in the C++, and this port's
+  `specialAt` returns **-1** for "no special" — which is truthy. Comparing is
+  required; `!session.specialAt(where)` silently marks every square special,
+  which stacked the whole party on one tile in `placeParty`.
+- (2026-07-25) `cPlayer::skill` (gear-adjusted, capped at 20 plus bulk
+  bonuses) and `cPlayer::stat_adj` (raw skill through `skill_bonus`) are
+  different functions and not interchangeable. Rolls use `skill`; the training
+  screen and the stat bonuses use `stat_adj`.
 - (2026-07-25) Movement, `talkTo` and `useSpace` are **async** now, because each can raise a dialog mid-action. `main.ts` keeps an `acting` flag so a held arrow key can't start a second move on top of the first — the C++ gets that for free by blocking.
 
-## Handoff: how to build combat (the next chunk)
+## Handoff: what combat still needs (M5b and M5c)
 
-M5 is the biggest single piece in the plan (~30% of the effort) and the one
-that unlocks most of what's still stubbed. It's explicitly split three ways:
-**M5a melee → M5b missiles + monster AI → M5c spells, patterns and fields.**
+M5a is done: the `iLiving` seam, damage and dying, combat mode, turn order and
+the melee attack. `grep -rn "TODO(M5b" src/` is the honest list of what M5a
+deliberately left at the seam — 13 markers as of now. In rough order:
 
-Before starting, `grep -rn "TODO(M5" src/` — that's the list of places already
-waiting for it, and it's the honest scope. As of now it includes: terrain
-damage, item Use and abilities, traps, encounters, spell patterns, fields,
-enchanting, disease, and the specials VM's damage/monster opcodes.
+1. **Monster abilities (`uAbility`).** This is the blocker for most of the
+   rest. `monster.ts` still captures abilities as lossless `RawAbility` records
+   (element + type tag + fields); porting the typed union unlocks
+   ABSORB_SPELLS, MARTYRS_SHIELD, SPLITS, DEATH_TRIGGER, radiated fields and
+   every missile and breath attack. Reference: `readMonstAbilFromXml`
+   (fileio_scen.cpp:1425) for the data and `boe.monster.cpp` for the uses.
+2. **`monster_attack` and `combat_run_monst`** (boe.combat.cpp:1867) — the
+   monsters' half of a round. `session.afterCombatAction` is where it hooks in;
+   right now a round simply deals fresh moves. This also brings the free
+   back-shot a monster gets when you step out of its reach, marked inside
+   `session.combatMove`.
+3. **Monster movement and targeting** (`boe.monster.cpp`) — `combat_move_monster`,
+   morale-driven fleeing, and the pathing.
+4. **Missiles**: FIRING/THROWING modes are already in the `GameMode` enum in the
+   right places. `calc_spec_dam` (boe.combat.cpp:711) belongs here too — it's
+   the slay-the-species damage bonus, and `pcAttackWeapon` notes where it goes.
+5. **On-hit item abilities**: exploding weapons (needs spell patterns),
+   STATUS_WEAPON, SOULSUCKER, ANTIMAGIC_WEAPON, WEAPON_CALL_SPECIAL.
+6. **Random encounters outdoors** — the user reported this. It needs
+   `create_wand_monst` and outdoor combat terrain (`create_out_combat_terrain`,
+   boe.town.cpp:817), and `Sector.wandering` is already parsed and waiting.
+7. **`place_treasure` / `place_glands`** (boe.items.cpp) — what a corpse leaves
+   to loot. Marked in `killMonst`. Self-contained and worth doing early, since
+   it's what makes clearing a dungeon feel like anything.
 
-Suggested order:
+Then M5c: spells, spell patterns (`place_spell_pattern`), and the field
+*behaviours* — damage on entry, quickfire spreading, webs slowing. The field
+model, the overlay and the two field opcodes all landed with M4, so M5c is
+about what fields *do*.
 
-1. **The `iLiving` seam first.** PLAN.md §2.4: the C++ has an abstract base
-   over Player and Creature, and all damage/status code targets it. This port
-   has `universe/player.ts` and `universe/creature.ts` with no shared base yet.
-   Introduce it before combat, not after — `boe.combat.cpp` ports nearly
-   line-by-line against it, and retrofitting is much worse.
-2. **Damage and status.** `damage_pc` / `damage_monst` (boe.specials.cpp:1442
-   is the monster half) plus `eStatus` handling. `Status` is already ported in
-   `universe/skills.ts` and PCs already carry the array.
-3. **Combat mode.** The `GameMode` enum already has COMBAT, SPELL_TARGET,
-   FIRING, THROWING, FANCY_TARGET, DROP_COMBAT in the right order, and
-   `isCombat()` works. `start_town_combat` / `end_town_combat` are the entry
-   and exit points the town nodes already call for.
-4. **Preserve the `get_ran` call order.** This is the fidelity constraint that
-   makes replays possible, and combat is where it matters most. The RNG is
-   already bit-compatible; the sequence is the part a port loses.
-5. **Fields already exist** — the model, the overlay and the two field opcodes
-   landed with M4. What M5c adds is the *behaviour*: damage on entry, quickfire
-   spreading, webs slowing, and the spell patterns that place them.
-
-Once combat exists, these open up almost for free: the specials VM's DAMAGE /
-AFFECT_MONST / spell-pattern opcodes, `ONCE_TRAP` and the encounter nodes,
-item Use, and the enchanting service (which just needs `eEnchant`).
+Fidelity notes for whoever picks this up:
+- **`get_ran` call order is the spec.** `damagePc` rolls once per equipped
+  armour piece and once for luck; `pcAttackWeapon` rolls to-hit then damage
+  then (for a primary weapon) assassination. Keep the sequence even where a
+  result goes unused.
+- **`inTown` is false during combat** — MODE_COMBAT sits outside `is_town`'s
+  range. Anything about seeing or lighting must ask `worldIsTown` instead.
+    This one silently blanked the whole combat view once already.
 
 ### Reported by the user and still open (2026-07-25)
 
@@ -181,8 +243,9 @@ and both are honest gaps rather than bugs:
   `draw_map` and the `MODE_...` map handling in `boe.actions.cpp`.
 - **No random encounters outdoors.** `check_special_terrain`'s wandering-
   monster path, `create_wand_monst` and `handle_wandering_specials`
-  (boe.specials.cpp:119) all need combat to have anywhere to go, so this is
-  M5b work. `Sector.wandering` is already parsed and sitting unused.
+  (boe.specials.cpp:119) need monster AI, so this is now M5b work — melee
+  combat exists, but nothing knows how to take a monster's turn yet.
+  `Sector.wandering` is already parsed and sitting unused.
 
 The other five were fixed: talk-by-click, NPCs visible through unexplored
 walls, using a web to clear it, the town-exit coordinate, and the Rest
@@ -200,6 +263,10 @@ Smaller things outstanding, all independent of M5:
 
 ## Next steps
 
-1. M5: combat, following the handoff plan above — starting with the `iLiving` seam.
-2. Finish M2's leftovers alongside: the fields/barriers overlay (which M5c needs anyway) and the replay driver.
-3. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in parallel at any time.
+1. M5b: the monsters' half of combat, following the handoff above — starting
+   with the `uAbility` port, because most of the rest depends on it.
+2. The **MAP overlay** is still unbuilt and depends on nothing; likewise
+   `place_treasure`. Either is a good standalone chunk.
+3. M2's last leftover is the replay driver.
+4. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in
+   parallel at any time.
