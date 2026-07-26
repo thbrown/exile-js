@@ -36,6 +36,8 @@ export class Party {
 
   inBoat = -1;
   inHorse = -1;
+  /** Halves every monster's health (cParty::easy_mode). */
+  easyMode = false;
   /** Accumulated light from spells/items; drives light_radius in dark towns. */
   lightLevel = 0;
   /** Special items the party has acquired, by index (cParty::spec_items). */
@@ -122,6 +124,11 @@ export class Party {
     if (p < 100) return this.magicPtrs[p - 10] ?? 0;
     const cell = this.pointers.get(p);
     return cell ? this.getSdf(cell[0], cell[1]) : 0;
+  }
+
+  /** cParty::get_loc (party.cpp) — whichever of the two positions is live. */
+  getLoc(): Location {
+    return this.townNum === TOWN_NUM_OUTDOORS ? this.outLoc : this.townLoc;
   }
 
   /** The sector the party is standing in, in scenario coordinates. */

@@ -60,12 +60,35 @@ export enum Trait {
 
 export const NUM_TRAITS = 17;
 
+/**
+ * eRace (race.hpp:12) — one enum for both PCs and monsters. Only the first four
+ * are selectable for a party; the rest come from monster definitions, and the
+ * comments are the values these had in the legacy eMonsterType.
+ */
 export enum Race {
   UNKNOWN = -1,
   HUMAN = 0,
   NEPHIL = 1,
   SLITH = 2,
   VAHNATAI = 3,
+  REPTILE = 4,
+  BEAST = 5,
+  IMPORTANT = 6,
+  MAGE = 7,
+  PRIEST = 8,
+  HUMANOID = 9,
+  DEMON = 10,
+  UNDEAD = 11,
+  GIANT = 12,
+  SLIME = 13,
+  STONE = 14,
+  BUG = 15,
+  DRAGON = 16,
+  MAGICAL = 17,
+  PLANT = 18,
+  BIRD = 19,
+  SKELETAL = 20,
+  GOBLIN = 21,
 }
 
 /** eStatus (damage.hpp:37) — the per-PC timed status effects. */
@@ -106,6 +129,42 @@ export function statusBounds(which: Status): [number, number] {
   else if (which === Status.PARALYZED) hi = 5000;
   else if (which === Status.FORCECAGE) hi = 1000;
   return [allowNegative.has(which) ? -hi : 0, hi];
+}
+
+/**
+ * status_info (damage.cpp:13) — per-status presentation and, more importantly,
+ * `isNegative`, which is what `clear_bad_status` keys off. `icon`/`negIcon` are
+ * indices into the status-icon strip; `special` overrides the icon while the
+ * value falls in [lo, hi] (poison's only use of it).
+ */
+export interface StatusInfo {
+  isNegative: boolean;
+  icon: number;
+  negIcon: number;
+  special?: { icon: number; lo: number; hi: number };
+}
+
+const STATUS_INFO: StatusInfo[] = [
+  { isNegative: false, icon: 4, negIcon: -1 }, // POISONED_WEAPON
+  { isNegative: false, icon: 2, negIcon: 3 }, // BLESS_CURSE
+  { isNegative: true, icon: 0, negIcon: -1, special: { icon: 1, lo: 4, hi: Infinity } }, // POISON
+  { isNegative: false, icon: 6, negIcon: 8 }, // HASTE_SLOW
+  { isNegative: false, icon: 5, negIcon: -1 }, // INVULNERABLE
+  { isNegative: false, icon: 9, negIcon: 19 }, // MAGIC_RESISTANCE
+  { isNegative: true, icon: 10, negIcon: -1 }, // WEBS
+  { isNegative: true, icon: 11, negIcon: -1 }, // DISEASE
+  { isNegative: false, icon: 12, negIcon: -1 }, // INVISIBLE
+  { isNegative: true, icon: 13, negIcon: 18 }, // DUMB
+  { isNegative: false, icon: 14, negIcon: -1 }, // MARTYRS_SHIELD
+  { isNegative: true, icon: 15, negIcon: 21 }, // ASLEEP
+  { isNegative: true, icon: 16, negIcon: -1 }, // PARALYZED
+  { isNegative: true, icon: 17, negIcon: -1 }, // ACID
+  { isNegative: true, icon: 20, negIcon: -1 }, // FORCECAGE
+  { isNegative: true, icon: 22, negIcon: -1 }, // CHARM
+];
+
+export function statusInfo(which: Status): StatusInfo {
+  return STATUS_INFO[which] ?? { isNegative: false, icon: -1, negIcon: -1 };
 }
 
 export enum MainStatus {

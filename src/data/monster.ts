@@ -38,6 +38,22 @@ export interface RawAbility {
   fields: Record<string, string>;
 }
 
+/** eDamageType (damage.hpp:22) — the index into a monster's `resist` array. */
+export enum DamageType {
+  WEAPON = 0,
+  FIRE = 1,
+  POISON = 2,
+  MAGIC = 3,
+  UNBLOCKABLE = 4,
+  COLD = 5,
+  UNDEAD = 6,
+  DEMON = 7,
+  ACID = 8,
+  /** Unblockable damage from the assassination skill. */
+  SPECIAL = 9,
+  MARKED = 10,
+}
+
 export const NUM_DAMAGE_TYPES = 10; // eDamageType weap..spec (dmgNames)
 
 export interface Monster {

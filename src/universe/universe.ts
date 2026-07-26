@@ -17,6 +17,7 @@ export const BUFFER_STR = -8;
 import { Terrain } from '../data/terrain';
 import { CurOut } from './curOut';
 import { CurTown } from './curTown';
+import { setPrintResult } from './living';
 import { Party, TOWN_NUM_OUTDOORS } from './party';
 import { PartyPreset, NUM_PC_SLOTS, Player, makePresetPlayer } from './player';
 
@@ -37,7 +38,15 @@ export class Universe {
     readonly rng: GameRng,
     preset: PartyPreset = PartyPreset.DEFAULT,
   ) {
-    for (let i = 0; i < NUM_PC_SLOTS; i++) this.party.pcs.push(makePresetPlayer(preset, i));
+    for (let i = 0; i < NUM_PC_SLOTS; i++) {
+      const pc = makePresetPlayer(preset, i);
+      pc.party = this.party;
+      this.party.pcs.push(pc);
+    }
+    // iLiving's status effects print through a static hook in the C++; point it
+    // at this Universe's transcript. Constructing a second Universe steals it,
+    // which is fine — tests build one at a time and the game only ever has one.
+    setPrintResult((line) => { this.addStringToBuf(line); });
     // The scenario decides where the party starts; the cParty defaults are
     // Exile III relics that get overwritten immediately (party.cpp:28).
     this.party.outdoorCorner = { ...scenario.outdoorStart };
@@ -77,6 +86,23 @@ export class Universe {
       }
     }
     // TODO(M6): generate_job_bank for each of the party's job banks.
+  }
+
+  /**
+   * cUniverse::difficulty_adjust (universe.cpp:1352) — the multiplier on every
+   * monster's health, so a strong party meets tougher versions of the same
+   * monsters. A scenario can opt out, and its own difficulty rating decides how
+   * early the steps kick in.
+   */
+  difficultyAdjust(): number {
+    if (!this.scenario.adjustDiff) return 1;
+    let partyLevel = 0;
+    for (const pc of this.party.pcs) if (pc.isAlive) partyLevel += pc.level;
+    let adj = 1;
+    if (this.scenario.difficulty <= 0 && partyLevel >= 60) adj++;
+    if (this.scenario.difficulty <= 1 && partyLevel >= 130) adj++;
+    if (this.scenario.difficulty <= 2 && partyLevel >= 210) adj++;
+    return adj;
   }
 
   /** cUniverse::get_random_store_item (universe.cpp:1478). */

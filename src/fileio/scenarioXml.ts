@@ -13,7 +13,7 @@ import { ItemType } from '../data/item';
 import { attr, children, intAttr, intText, locFromXml, rectFromXml, tag, text } from './xml';
 
 const DEFERRED_TOP = new Set([
-  'icon', 'id', 'version', 'language', 'author', 'ratings', 'flags', 'feature-flags', 'creator',
+  'icon', 'id', 'version', 'language', 'author', 'feature-flags', 'creator',
   'editor',
 ]);
 const DEFERRED_GAME = new Set([
@@ -117,6 +117,8 @@ export interface ScenarioHeader {
   outWidth: number;
   outHeight: number;
   startTown: number;
+  difficulty: number;
+  adjustDiff: boolean;
   townStart: { x: number; y: number };
   outdoorStart: { x: number; y: number };
   sectorStart: { x: number; y: number };
@@ -139,6 +141,8 @@ export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): Scen
     outWidth: 0,
     outHeight: 0,
     startTown: 0,
+    difficulty: 0,
+    adjustDiff: false,
     townStart: { x: 0, y: 0 },
     outdoorStart: { x: 0, y: 0 },
     sectorStart: { x: 0, y: 0 },
@@ -154,6 +158,15 @@ export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): Scen
       for (const t of children(elem)) {
         if (tag(t) === 'teaser') hdr.teasers.push(text(t));
         else if (tag(t) === 'intro-msg') hdr.introMsgs.push(text(t));
+      }
+    } else if (type === 'ratings') {
+      // Stored one lower than it reads in the file: 1-4 in XML, 0-3 in memory.
+      for (const r of children(elem)) {
+        if (tag(r) === 'difficulty') hdr.difficulty = intText(r) - 1;
+      }
+    } else if (type === 'flags') {
+      for (const f of children(elem)) {
+        if (tag(f) === 'adjust-difficulty') hdr.adjustDiff = text(f) === 'true';
       }
     } else if (type === 'game') {
       for (const g of children(elem)) {

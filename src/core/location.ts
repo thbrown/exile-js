@@ -88,3 +88,12 @@ export class Rect {
 export function minmax(min: number, max: number, k: number): number {
   return Math.max(min, Math.min(max, k));
 }
+
+/**
+ * percent (mathutil.cpp:...) — `value * percentage / 100` with C++'s truncating
+ * integer division. Resistances are stored as percentages, so this is on the
+ * hot path of every damage calculation and the truncation matters.
+ */
+export function percent(value: number, percentage: number): number {
+  return Math.trunc((value * percentage) / 100);
+}

@@ -5,7 +5,6 @@ import { Direction } from '../src/core/location';
 import { GameRng } from '../src/core/rng';
 import { Scenario } from '../src/data/scenario';
 import { TerSpec } from '../src/data/terrain';
-import { statAdj } from '../src/game/doors';
 import { FORCED_ENTRY, GameSession } from '../src/game/session';
 import { loadScenario } from '../src/fileio/loadScenario';
 import { FsSource } from '../src/fileio/source';
@@ -49,23 +48,23 @@ describe('statAdj', () => {
     const pc = session.univ.party.pcs[0]!;
     // skill_bonus = {-3,-3,-2,-1,0,0,1,...}; Jenneke has strength 8 -> +1.
     pc.skills[Skill.STRENGTH] = 8;
-    expect(statAdj(pc, Skill.STRENGTH)).toBe(1);
+    expect(pc.statAdj(Skill.STRENGTH)).toBe(1);
     pc.skills[Skill.STRENGTH] = 0;
-    expect(statAdj(pc, Skill.STRENGTH)).toBe(-3);
+    expect(pc.statAdj(Skill.STRENGTH)).toBe(-3);
     pc.skills[Skill.STRENGTH] = 20;
-    expect(statAdj(pc, Skill.STRENGTH)).toBe(5);
+    expect(pc.statAdj(Skill.STRENGTH)).toBe(5);
     // Traits adjust two of the stats.
     pc.skills[Skill.INTELLIGENCE] = 6;
-    expect(statAdj(pc, Skill.INTELLIGENCE)).toBe(1);
+    expect(pc.statAdj(Skill.INTELLIGENCE)).toBe(1);
     pc.traits[Trait.MAGICALLY_APT] = true;
-    expect(statAdj(pc, Skill.INTELLIGENCE)).toBe(2);
+    expect(pc.statAdj(Skill.INTELLIGENCE)).toBe(2);
   });
 
   it('clamps a skill above the end of the table', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     pc.skills[Skill.STRENGTH] = 99;
-    expect(statAdj(pc, Skill.STRENGTH)).toBe(5);
+    expect(pc.statAdj(Skill.STRENGTH)).toBe(5);
   });
 });
 

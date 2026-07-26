@@ -185,14 +185,39 @@ export function unequipItem(pc: Player, slot: number): EquipResult {
   return { ok: true, message: 'Equip: Unequipped' };
 }
 
-/** cPlayer::has_abil_equip — the first equipped item with an ability. */
-export function hasAbilEquip(pc: Player, abil: ItemAbil): { slot: number; item: Item } | null {
+/**
+ * cPlayer::has_abil_equip (pc.cpp:...) — the first equipped item with an
+ * ability. `dat` narrows to abilities that carry a parameter (which status a
+ * ring protects against, which stat an item boosts); -1 means "any".
+ */
+export function hasAbilEquip(
+  pc: Player, abil: ItemAbil, dat = -1,
+): { slot: number; item: Item } | null {
   for (let i = 0; i < NUM_INVEN_SLOTS; i++) {
     const item = pc.items[i]!;
     if (!pc.equip[i] || item.variety === ItemType.NO_ITEM) continue;
-    if (item.ability === abil) return { slot: i, item };
+    if (item.ability !== abil) continue;
+    if (dat >= 0 && dat !== item.abilData) continue;
+    return { slot: i, item };
   }
   return null;
+}
+
+/**
+ * cPlayer::get_prot_level (pc.cpp:...) — the *summed* strength of every
+ * equipped item with this ability. Two rings of protection stack; the status
+ * methods divide the total down before subtracting it from an effect.
+ */
+export function getProtLevel(pc: Player, abil: ItemAbil, dat = -1): number {
+  let sum = 0;
+  for (let i = 0; i < NUM_INVEN_SLOTS; i++) {
+    const item = pc.items[i]!;
+    if (!pc.equip[i] || item.variety === ItemType.NO_ITEM) continue;
+    if (item.ability !== abil) continue;
+    if (dat >= 0 && dat !== item.abilData) continue;
+    sum += item.abilStrength;
+  }
+  return sum;
 }
 
 /**

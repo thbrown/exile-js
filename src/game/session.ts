@@ -30,7 +30,6 @@ import {
   unequipItem,
 } from '../universe/inventory';
 import { MainStatus, Skill, Status } from '../universe/skills';
-import { applyStatus, diseasePc, poisonPc } from '../universe/statuses';
 import { ShopItemType } from '../data/shop';
 import { ShopState, handleSale } from './shop';
 import { ItemShopMode, ItemShopState, handleItemShopAction } from './itemShop';
@@ -861,33 +860,57 @@ export class GameSession {
    * (boe.specials.cpp:390) — swamps, briar patches and the like. flag2 is a
    * per-PC percentage chance, flag3 names the status, flag1 its strength.
    *
+   * Now that the PC status methods exist, each case hands off to the one the
+   * C++ names, and they print their own transcript lines.
+   *
    * TODO(M5): the party can't be harmed while flying or in a boat, which
    * needs those systems.
    */
   private dangerousTerrain(spec: Terrain): void {
+    const strength = spec.flag1;
     for (const pc of this.univ.party.pcs) {
       if (pc.mainStatus !== MainStatus.ALIVE) continue;
       if (this.univ.rng.getRan(1, 1, 100) > spec.flag2) continue;
-      const which = spec.flag3 as Status;
-      let message: string | null = null;
-      switch (which) {
-        case Status.POISON:
-          message = poisonPc(pc, spec.flag1, () => this.univ.rng.getRan(1, 0, 1));
-          if (message) this.sound?.play(17);
-          break;
-        case Status.DISEASE:
-          message = diseasePc(pc, spec.flag1);
-          break;
+      switch (spec.flag3 as Status) {
         case Status.POISONED_WEAPON:
-          // The original has nothing here but an atmospheric line.
+          // Nothing but atmosphere here in the original either.
           if (this.univ.rng.getRan(1, 1, 100) > 60)
             this.univ.addStringToBuf("It's eerie here...");
           break;
+        case Status.BLESS_CURSE: pc.curse(strength); break;
+        case Status.POISON:
+          pc.poison(strength, this.univ.rng);
+          this.sound?.play(17);
+          break;
+        case Status.HASTE_SLOW: pc.slow(strength); break;
+        case Status.WEBS: pc.web(strength); break;
+        case Status.DISEASE: pc.disease(strength, this.univ.rng); break;
+        case Status.INVISIBLE:
+          this.univ.addStringToBuf(strength < 0 ? 'You feel obscure.' : 'You feel exposed.');
+          pc.applyStatus(Status.INVISIBLE, strength);
+          break;
+        case Status.DUMB: pc.dumbfound(strength, this.univ.rng); break;
+        case Status.ASLEEP:
+          pc.sleep(Status.ASLEEP, strength, Math.trunc(strength / 2), this.univ.rng);
+          break;
+        case Status.PARALYZED:
+          pc.sleep(Status.PARALYZED, strength, Math.trunc(strength / 2), this.univ.rng);
+          break;
+        case Status.ACID: pc.acid(strength); break;
+        case Status.FORCECAGE:
+          // A cage can't hold you in the open.
+          if (this.univ.isInTown())
+            pc.sleep(Status.FORCECAGE, strength, Math.trunc(strength / 2), this.univ.rng);
+          break;
+        case Status.INVULNERABLE:
+        case Status.MAGIC_RESISTANCE:
+        case Status.MARTYRS_SHIELD:
+          pc.applyStatus(spec.flag3 as Status, strength);
+          break;
         default:
-          applyStatus(pc, which, spec.flag1);
+          // MAIN and CHARM are illegal here; the C++ ignores them too.
           break;
       }
-      if (message) this.univ.addStringToBuf(message);
     }
   }
 
@@ -1381,7 +1404,8 @@ export class GameSession {
       if (preset.number <= 0) continue;
       const template = scenario.scenMonsters[preset.number];
       if (!template) continue;
-      const monst = assignCreature(i, preset, template);
+      const monst = assignCreature(
+        i, preset, template, this.univ.party.easyMode, this.univ.difficultyAdjust());
 
       // A creature gated behind an unset special encounter starts inactive.
       if (monst.specEncCode > 0) monst.active = CreatureStatus.DEAD;

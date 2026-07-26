@@ -6,24 +6,8 @@
 
 import { ItemAbil } from '../data/item';
 import { hasAbilEquip } from '../universe/inventory';
-import { Player } from '../universe/player';
 import { MainStatus, Status, Trait } from '../universe/skills';
 import { Universe } from '../universe/universe';
-
-/** cPlayer::heal (pc.cpp:128) — never past max, never below zero. */
-export function healPc(pc: Player, amount: number): void {
-  if (pc.mainStatus !== MainStatus.ALIVE) return;
-  if (pc.curHealth >= pc.maxHealth) return;
-  pc.curHealth = Math.max(0, Math.min(pc.maxHealth, pc.curHealth + amount));
-}
-
-/** cPlayer::restore_sp (pc.cpp:306). */
-export function restorePcSp(pc: Player, amount: number): void {
-  if (pc.mainStatus !== MainStatus.ALIVE) return;
-  if (amount <= 0) return;
-  if (pc.curSp >= pc.maxSp) return;
-  pc.curSp = Math.max(0, Math.min(pc.maxSp, pc.curSp + amount));
-}
 
 /**
  * do_rest — advance the clock by `length` ticks and restore the party.
@@ -46,14 +30,14 @@ export function doRest(
     univ.refreshStoreItems();
 
   for (const pc of univ.party.pcs) {
-    healPc(pc, hpRestore);
-    restorePcSp(pc, spRestore);
+    pc.heal(hpRestore);
+    pc.restoreSp(spRestore);
   }
 
   for (const pc of univ.party.pcs) {
     if (pc.mainStatus !== MainStatus.ALIVE) continue;
     if (pc.traits[Trait.RECUPERATION] && pc.curHealth < pc.maxHealth)
-      healPc(pc, Math.trunc(hpRestore / 5));
+      pc.heal(Math.trunc(hpRestore / 5));
     // TODO(M5): CHRONIC_DISEASE has a 1-in-111 chance of a bout here.
     if (pc.traits[Trait.CHRONIC_DISEASE]) univ.rng.getRan(1, 0, 110);
 
@@ -66,7 +50,7 @@ export function doRest(
       let j = univ.rng.getRan(1, 0, strength);
       if (strength === 0) j = univ.rng.getRan(1, 0, 1);
       if (isOutdoors) j *= 4;
-      healPc(pc, j);
+      pc.heal(j);
     }
     // Bonus SP and HP wear off with the rest.
     if (pc.curSp > pc.maxSp) pc.curSp = pc.maxSp;

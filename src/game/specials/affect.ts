@@ -16,7 +16,6 @@ import { GiveStatus, giveItem } from '../../universe/inventory';
 import { Player } from '../../universe/player';
 import { MainStatus, Skill, Status } from '../../universe/skills';
 import { Universe } from '../../universe/universe';
-import { healPc, restorePcSp } from '../rest';
 import { SpecialCtx } from './context';
 import { reportUnsupported } from './general';
 import { handleMessage } from './vm';
@@ -55,12 +54,12 @@ export async function affectSpec(univ: Universe, ctx: SpecialCtx): Promise<void>
     }
 
     case SpecType.AFFECT_HP:
-      for (const pc of targets()) healPc(pc, signed(spec.ex1a));
+      for (const pc of targets()) pc.heal(signed(spec.ex1a));
       break;
 
     case SpecType.AFFECT_SP:
       for (const pc of targets()) {
-        if (spec.ex1b === 0) restorePcSp(pc, spec.ex1a);
+        if (spec.ex1b === 0) pc.restoreSp(spec.ex1a);
         else pc.curSp = Math.max(0, pc.curSp - spec.ex1a);
       }
       break;

@@ -14,6 +14,7 @@ import { loadOpcodes, loadScenario } from './fileio/loadScenario';
 import { FetchSource } from './fileio/source';
 import { InputRouter } from './platform/input';
 import { Snd, SoundPlayer } from './platform/sound';
+import { setLivingSound } from './universe/living';
 import { BOE_HEIGHT, BOE_WIDTH, ToolbarButton } from './render/layout';
 import { CHROME_SHEETS, Screen } from './render/screen';
 import { ShopHit, shopItemInfo } from './render/shopScreen';
@@ -75,6 +76,10 @@ async function main(): Promise<void> {
   const session = new GameSession(univ);
   const sound = new SoundPlayer();
   session.sound = sound;
+  // iLiving's effects call one_sound/play_sound from deep inside the damage
+  // pipeline, where there's no session to hand; the C++ uses globals for the
+  // same reason (universe/living.ts).
+  setLivingSound((which) => { sound.play(which); });
   session.startNewGame();
   const screen = new Screen(ctx, store);
 

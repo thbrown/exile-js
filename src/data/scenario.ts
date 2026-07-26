@@ -21,6 +21,10 @@ export interface Scenario {
   outWidth: number;
   outHeight: number;
   startTown: number;
+  /** 0-3, one lower than the 1-4 the file carries (fileio_scen.cpp:846). */
+  difficulty: number;
+  /** Whether monster health scales with the party's total level. */
+  adjustDiff: boolean;
   townStart: { x: number; y: number };
   outdoorStart: { x: number; y: number };
   sectorStart: { x: number; y: number };

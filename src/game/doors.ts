@@ -16,24 +16,6 @@ import { Skill, Trait } from '../universe/skills';
 import { Player } from '../universe/player';
 import { Universe } from '../universe/universe';
 
-/** skill_bonus (shop.cpp:43) — the stat bonus table, indexed by skill level. */
-const SKILL_BONUS = [
-  -3, -3, -2, -1, 0, 0, 1, 1, 1, 2,
-  2, 2, 3, 3, 3, 3, 4, 4, 4, 5, 5,
-];
-
-/** cPlayer::stat_adj (pc.cpp:336), minus the equipment bonus. */
-export function statAdj(pc: Player, which: Skill): number {
-  let tr = SKILL_BONUS[Math.min(pc.skills[which] ?? 0, SKILL_BONUS.length - 1)] ?? 0;
-  if (which === Skill.INTELLIGENCE && pc.traits[Trait.MAGICALLY_APT]) tr++;
-  if (which === Skill.STRENGTH) {
-    if (pc.traits[Trait.STRENGTH]) tr++;
-    // TODO(M5): the Vahnatai strength penalty needs that race to be selectable.
-  }
-  // TODO(M3): BOOST_STAT equipment adds one here, once items can be equipped.
-  return tr;
-}
-
 export type DoorResult = 'opened' | 'failed' | 'no-picks' | 'wrong-terrain';
 
 /** pick_lock (boe.town.cpp:1156). */
@@ -59,7 +41,7 @@ export function pickLock(
 
   r1 =
     univ.rng.getRan(1, 1, 100) -
-    5 * statAdj(pc, Skill.DEXTERITY) +
+    5 * pc.statAdj(Skill.DEXTERITY) +
     town.record.difficulty * 7 -
     5 * (pc.skills[Skill.LOCKPICKING] ?? 0) -
     picks.item.abilStrength * 7;
@@ -97,7 +79,7 @@ export function bashDoor(
   const terrain = town.record.terrain[where.x]![where.y]!;
   const spec = univ.terrainType(terrain);
   const r1 =
-    univ.rng.getRan(1, 1, 100) - 15 * statAdj(pc, Skill.STRENGTH) + town.record.difficulty * 4;
+    univ.rng.getRan(1, 1, 100) - 15 * pc.statAdj(Skill.STRENGTH) + town.record.difficulty * 4;
 
   if (spec.special !== TerSpec.UNLOCKABLE) {
     univ.addStringToBuf('  Wrong terrain type.');

@@ -5,7 +5,7 @@ import { GameRng } from '../src/core/rng';
 import { Scenario } from '../src/data/scenario';
 import { TalkNodeType } from '../src/data/talking';
 import { FORCED_ENTRY, GameSession } from '../src/game/session';
-import { doRest, healPc, restorePcSp } from '../src/game/rest';
+import { doRest } from '../src/game/rest';
 import { TrainingState, trainCost } from '../src/game/training';
 import { loadScenario } from '../src/fileio/loadScenario';
 import { FsSource } from '../src/fileio/source';
@@ -173,16 +173,16 @@ describe('resting', () => {
     const pc = univ.party.pcs[3]!;
     pc.curHealth = 1;
     pc.curSp = 0;
-    healPc(pc, 5);
+    pc.heal(5);
     expect(pc.curHealth).toBe(6);
-    healPc(pc, 1000);
+    pc.heal(1000);
     expect(pc.curHealth).toBe(pc.maxHealth);
-    restorePcSp(pc, 1000);
+    pc.restoreSp(1000);
     expect(pc.curSp).toBe(pc.maxSp);
     // The dead don't recover.
     pc.mainStatus = MainStatus.DEAD;
     pc.curHealth = 1;
-    healPc(pc, 10);
+    pc.heal(10);
     expect(pc.curHealth).toBe(1);
   });
 
