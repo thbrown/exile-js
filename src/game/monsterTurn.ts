@@ -14,6 +14,7 @@ import { Location, dist, loc, locsEqual } from '../core/location';
 import { Attack, Attitude, DamageType } from '../data/monster';
 import { Creature, CreatureStatus } from '../universe/creature';
 import { Living, SpellNote, livingSound } from '../universe/living';
+import { MonstMelee } from '../data/monster';
 import { Player } from '../universe/player';
 import { MainStatus, Race, Skill, Status } from '../universe/skills';
 import { Universe } from '../universe/universe';
@@ -305,18 +306,45 @@ function fleeParty(session: GameSession, monst: Creature, target: Location): boo
   return seekParty(session, monst, away);
 }
 
-/** get_monst_sound (boe.combat.cpp:5296) — the sound one of its attacks makes. */
-function monstSound(attack: Attack): number {
-  // eMonstMelee: 0 claw/hit, 1 bite, 2 sting/spear, 3 web, 4 wall touch,
-  // 5 punch/kick, 6 fire, 7 cold, 8 lightning, 9 slime.
+/**
+ * get_monst_sound (boe.combat.cpp:5296) — which *sound type* one of a monster's
+ * attacks uses. The return value is an index into `boom_space`'s lookup table,
+ * not a sound file: playing it directly is what made a rat's bite sound like a
+ * cash register. It is handed to `damagePc`/`damageMonst` as `soundType` and
+ * they pass it on to `boomSpace`.
+ *
+ * eMonstMelee: 0 claw, 1 bite, 2 sting, 3 web, 4 wall touch, 5 punch,
+ * 6 club, 7 burn, 8 harm, 9 slime, 10 stab, 11 swing.
+ */
+function monstSoundType(attacker: Creature, attack: Attack): number {
   switch (attack.type) {
-    case 1: return 15;
-    case 2: return 15;
-    case 6: return 5;
-    case 7: return 7;
-    case 8: return 12;
+    case MonstMelee.SLIME: return 11;
+    case MonstMelee.PUNCH: return 4;
+    case MonstMelee.CLAW: return 9;
+    case MonstMelee.BITE: return 10;
+    case MonstMelee.STING: return 12;
+    case MonstMelee.CLUB: return 4;
+    case MonstMelee.BURN: return 5;
+    case MonstMelee.HARM: return 0;
+    case MonstMelee.STAB:
+    case MonstMelee.SWING: {
+      // A weapon's sound depends on who is swinging it.
+      const race = attacker.mon.race;
+      if (race === Race.HUMAN) return attack.sides > 9 ? 3 : 2;
+      if (race === Race.MAGE) return 1;
+      if (race === Race.PRIEST) return 4;
+      if (isHumanoidRace(race) || race === Race.GIANT) return 2;
+      return 1;
+    }
     default: return 0;
   }
+}
+
+/** isHumanoid (race.hpp) — the races Protection from Humanoids covers. */
+function isHumanoidRace(race: Race): boolean {
+  return [
+    Race.HUMAN, Race.NEPHIL, Race.SLITH, Race.VAHNATAI, Race.HUMANOID, Race.GOBLIN,
+  ].includes(race);
 }
 
 /**
@@ -395,12 +423,13 @@ export function monsterAttack(
     } else if (monst.mon.race === Race.DEMON) damType = DamageType.DEMON;
 
     const storeHp = target.getHealth();
-    livingSound(monstSound(attack));
+    const soundType = monstSoundType(monst, attack);
     let damaged = 0;
     if (monstTarget) {
-      damaged = damageMonst(univ, monstTarget, 7, r2, damType, { doPrint: false, session });
+      damaged = damageMonst(univ, monstTarget, 7, r2, damType,
+        { doPrint: false, soundType, session });
     } else if (pcTarget) {
-      damaged = damagePc(univ, pcTarget, r2, damType, monst.mon.race);
+      damaged = damagePc(univ, pcTarget, r2, damType, monst.mon.race, { soundType });
     }
     if (damaged <= 0) continue;
 

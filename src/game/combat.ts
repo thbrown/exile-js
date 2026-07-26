@@ -177,9 +177,12 @@ export function placeParty(session: GameSession, direction: Direction): void {
     const where = loc(univ.party.townLoc.x - xAdj, univ.party.townLoc.y - yAdj);
     posLocs.push(where);
 
-    // Note `is_special` is a boolean test in the C++, and specialAt returns
-    // -1 for "no special" — which is truthy, so it has to be compared.
-    const usable = !session.townIsBlocked(where) && session.specialAt(where) < 0
+    // `is_blocked` is the broad test — terrain, creatures, the party, barriers
+    // and (in combat) marked specials and portals — which is what keeps a PC
+    // from being placed inside a wall or on top of a monster. `is_special` is a
+    // boolean test in the C++ and `specialAt` returns -1 for none, which is
+    // truthy, so it has to be compared rather than negated.
+    const usable = !session.isBlocked(where) && session.specialAt(where) < 0
       && session.sightObscurity(where.x, where.y) === 0 && !session.locOffActiveArea(where);
     spotOk[i] = usable;
     if (usable && i > 1) howManyOk++;
@@ -274,10 +277,13 @@ export function damageTarget(
   race: Race,
   doPrint = false,
   session?: GameSession,
+  soundType = -1,
 ): number {
-  if (target instanceof Player) return damagePc(univ, target, dam, type, race, { doPrint });
+  if (target instanceof Player) {
+    return damagePc(univ, target, dam, type, race, { doPrint, soundType });
+  }
   if (target instanceof Creature) {
-    return damageMonst(univ, target, whoHit, dam, type, { doPrint, session });
+    return damageMonst(univ, target, whoHit, dam, type, { doPrint, soundType, session });
   }
   return 0;
 }
@@ -371,7 +377,8 @@ export function pcAttack(
       let type = DamageType.WEAPON;
       if (attacker.race === Race.UNDEAD || attacker.race === Race.SKELETAL) type = DamageType.UNDEAD;
       else if (attacker.race === Race.DEMON) type = DamageType.DEMON;
-      damageTarget(univ, target, r2, type, whoAtt, attacker.race, true, session);
+      // The punch passes sound type 4 (a thump) in the C++.
+      damageTarget(univ, target, r2, type, whoAtt, attacker.race, true, session, 4);
     } else {
       univ.addStringToBuf(`${attacker.name} misses.`);
       livingSound(2);
@@ -504,15 +511,18 @@ export function pcAttackWeapon(
     return;
   }
 
+  // Note this is a sound *type* (an index into boom_space's table), not a sound
+  // file — `damageTarget` passes it on to `boomSpace`, which looks it up.
+  const dmgSnd = weaponSoundType(weap);
   const weaponDone = damageTarget(
-    univ, target, r2, DamageType.WEAPON, whoAtt, attacker.race, false, session);
+    univ, target, r2, DamageType.WEAPON, whoAtt, attacker.race, false, session, dmgSnd);
   let specialDone = 0;
   if (specDam) {
+    // Special damage always booms with sound type 5.
     specialDone = damageTarget(
-      univ, target, specDam, DamageType.SPECIAL, whoAtt, attacker.race, false, session);
+      univ, target, specDam, DamageType.SPECIAL, whoAtt, attacker.race, false, session, 5);
   }
   target.damagedMsg(weaponDone, specialDone);
-  livingSound(weaponSound(weap));
 
   if (doPoison && (attacker.status[Status.POISONED_WEAPON] ?? 0) > 0) {
     let amount = attacker.status[Status.POISONED_WEAPON] ?? 0;
@@ -522,8 +532,12 @@ export function pcAttackWeapon(
   }
 }
 
-/** The hit sound a weapon makes, by the skill it uses. */
-function weaponSound(weap: Item): number {
+/**
+ * The *sound type* a weapon's hit uses (pc_attack_weapon's `dmg_snd`). These
+ * are boom_space table indices — 0 is the plain "ouch", 1 and 2 are a light and
+ * a heavy blade, 3 a pole arm, 4 a club — not sound file numbers.
+ */
+function weaponSoundType(weap: Item): number {
   switch (weap.weapType) {
     case Skill.EDGED_WEAPONS: return weap.itemLevel < 8 ? 1 : 2;
     case Skill.BASHING_WEAPONS: return 4;

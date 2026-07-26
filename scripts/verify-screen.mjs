@@ -673,6 +673,67 @@ const encounter = await page.evaluate(async () => {
   };
 });
 console.log('ENCOUNTER:', JSON.stringify(encounter));
+
+// Combat placement must not drop a PC inside a wall or on top of a monster.
+const placement = await page.evaluate(() => {
+  const s = window.__session;
+  const univ = s.univ;
+  let worst = null;
+  for (let attempt = 0; attempt < 8 && !worst; attempt++) {
+    if (s.mode === 9) s.endCombat();
+    s.startCombat(univ.party.direction);
+    for (const pc of univ.party.pcs) {
+      if (!pc.isAlive) continue;
+      const p = pc.combatPos;
+      const onMonster = !!univ.town.monsterAt(p);
+      const inWall = s.townIsBlocked(p);
+      // The leader's own square is exempt: the C++ forces index 0 through.
+      const isLeader = pc === univ.party.pcs.find((q) => q.isAlive);
+      if ((onMonster || inWall) && !isLeader) {
+        worst = { name: pc.name, at: { ...p }, onMonster, inWall };
+        break;
+      }
+    }
+  }
+  const stacked = new Set(univ.party.pcs.filter((pc) => pc.isAlive)
+    .map((pc) => `${pc.combatPos.x},${pc.combatPos.y}`)).size;
+  s.endCombat();
+  window.__redraw();
+  return { worst, distinctSquares: stacked };
+});
+console.log('PLACEMENT:', JSON.stringify(placement));
+
+// Hit animation + the right sound type for a bite.
+const booms = await page.evaluate(async () => {
+  const s = window.__session;
+  const univ = s.univ;
+  const played = [];
+  window.__setLivingSound((n) => played.push(n));
+  const monst = univ.town.monsters.find((m) => m.isAlive);
+  if (!monst) return { skipped: true };
+  monst.attitude = 1;
+  monst.mon.armor = 0;
+  monst.health = monst.maxHealth = 400;
+  monst.curLoc = { x: univ.party.townLoc.x + 1, y: univ.party.townLoc.y };
+  await s.moveTo(monst.curLoc); // starts combat
+  const pc = univ.currentPc;
+  pc.skills[3] = 20; pc.skills[1] = 20;
+  pc.items[0] = { ...pc.items[0], variety: 1, name: 'sword', fullName: 'sword',
+    itemLevel: 10, weapType: 3, ability: 0 };
+  pc.equip[0] = true;
+  const before = monst.health;
+  for (let i = 0; i < 25 && monst.health === before; i++) {
+    pc.ap = 4;
+    s.attackAt(monst.curLoc);
+  }
+  const boomCount = window.__screen.booms.length;
+  const boom = boomCount > 0 ? { ...window.__screen.booms[0], where: { ...window.__screen.booms[0].where } } : null;
+  window.__redraw();
+  window.__setLivingSound(null);
+  return { boomCount, boom, played, hurt: before - monst.health };
+});
+console.log('BOOMS:', JSON.stringify(booms));
+await shot('02c4-boom');
 await shot('02c3-encounter');
 
 console.log('ERRORS:', errors.length ? errors.join(' | ') : 'none');
@@ -722,6 +783,11 @@ const ok =
   fightButton.swordStillThere === false &&
   fightButton.backTo === 1 &&
   (encounter.skipped !== undefined || (encounter.noticed === true && encounter.hurt > 0)) &&
+  placement.worst === null &&
+  // sound_lookup[2] = 70 is the heavy-blade hit. Before the fix this played the
+  // *sound type* (2) as a file number, which is the cash-register noise.
+  (booms.skipped === true || (booms.boomCount > 0 && booms.boom.damage > 0
+    && booms.played.includes(70))) &&
   reenter?.inTown === true &&
   errors.length === 0;
 console.log(ok ? 'PASS' : 'FAIL');

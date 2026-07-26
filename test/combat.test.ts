@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Direction, loc } from '../src/core/location';
 import { GameRng } from '../src/core/rng';
+import { FieldType } from '../src/data/fields';
 import { ItemAbil, ItemType } from '../src/data/item';
 import { Attitude } from '../src/data/monster';
 import { Scenario } from '../src/data/scenario';
@@ -413,6 +414,90 @@ describe('the melee attack', () => {
     univ.party.pcs[0]!.ap = 4;
     expect(session.attackAt(monst.curLoc)).toBe(true);
     expect(session.attackAt(loc(1, 1))).toBe(false);
+  });
+});
+
+describe('placement, parry and holding a turn', () => {
+  it('never places a PC in a wall or on top of a monster', async () => {
+    const { univ, session } = newGame();
+    // Ring the party with monsters so a naive placement would overlap one.
+    const from = univ.party.townLoc;
+    for (const d of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]]) {
+      const at = loc(from.x + d[0]!, from.y + d[1]!);
+      if (session.townIsBlocked(at) || univ.town!.monsterAt(at)) continue;
+      const m = hostileBeside(univ, session);
+      m.curLoc = at;
+    }
+    const leader = univ.party.pcs[univ.firstActivePc()]!;
+    placeParty(session, Direction.N);
+    for (const pc of univ.party.pcs) {
+      if (!pc.isAlive || pc === leader) continue; // index 0 is forced through
+      expect(univ.town!.monsterAt(pc.combatPos)).toBeNull();
+      expect(session.townIsBlocked(pc.combatPos)).toBe(false);
+    }
+  });
+
+  it('isBlocked counts creatures, the party and barriers, not just terrain', () => {
+    const { univ, session } = newGame();
+    const monst = hostileBeside(univ, session);
+    expect(session.isBlocked(monst.curLoc)).toBe(true);
+    expect(session.townIsBlocked(monst.curLoc)).toBe(false); // terrain is clear
+    // The party's own square blocks in town mode.
+    expect(session.isBlocked(univ.party.townLoc)).toBe(true);
+    // And a force barrier blocks even open floor.
+    const open = loc(univ.party.townLoc.x, univ.party.townLoc.y + 1);
+    if (!session.townIsBlocked(open) && !univ.town!.monsterAt(open)) {
+      expect(session.isBlocked(open)).toBe(false);
+      univ.town!.setField(open.x, open.y, FieldType.BARRIER_FORCE);
+      expect(session.isBlocked(open)).toBe(true);
+    }
+  });
+
+  it('parry spends the turn and scales with the moves given up', async () => {
+    const { univ, session } = newGame();
+    const monst = hostileBeside(univ, session);
+    await session.moveTo(monst.curLoc);
+    const pc = univ.currentPc;
+    pc.skills[Skill.DEFENSE] = 8;
+    pc.ap = 8;
+    expect(session.parry()).toBe(true);
+    expect(pc.parry).toBeGreaterThan(0);
+    expect(pc.ap).toBe(0);
+    expect(univ.transcript).toContain('Parry.');
+  });
+
+  it('standing ready is parry pinned at 100, and clears webs', async () => {
+    const { univ, session } = newGame();
+    const monst = hostileBeside(univ, session);
+    await session.moveTo(monst.curLoc);
+    const pc = univ.currentPc;
+    pc.status[Status.WEBS] = 5;
+    pc.ap = 4;
+    session.pause();
+    expect(pc.parry).toBe(100);
+    expect(pc.status[Status.WEBS]).toBe(3);
+    expect(univ.transcript).toContain('Stand ready.');
+  });
+
+  it('pausing outside combat is a plain pause', () => {
+    const { univ, session } = newGame();
+    univ.party.pcs[0]!.status[Status.WEBS] = 4;
+    session.pause();
+    expect(univ.transcript).toContain('Pause.');
+    expect(univ.party.pcs[0]!.status[Status.WEBS]).toBe(2);
+  });
+
+  it('X holds the turn on one PC and gives it back', async () => {
+    const { univ, session } = newGame();
+    const monst = hostileBeside(univ, session);
+    await session.moveTo(monst.curLoc);
+    univ.curPc = 2;
+    session.toggleActivePc();
+    expect(session.combatActivePc).toBe(2);
+    expect(univ.transcript).toContain('This PC now active.');
+    session.toggleActivePc();
+    expect(session.combatActivePc).toBe(NO_ONE);
+    expect(univ.curPc).toBe(2);
   });
 });
 

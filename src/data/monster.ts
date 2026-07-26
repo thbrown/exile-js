@@ -25,6 +25,20 @@ export enum MonstTime {
   APPEAR_AFTER_CHOP = 8,
 }
 
+/** eMonstMelee (monster_abilities.hpp:34) — what kind of blow an attack is. */
+export enum MonstMelee {
+  SWING = 0,
+  CLAW = 1,
+  BITE = 2,
+  SLIME = 3,
+  PUNCH = 4,
+  STING = 5,
+  CLUB = 6,
+  BURN = 7,
+  HARM = 8,
+  STAB = 9,
+}
+
 export interface Attack {
   dice: number;
   sides: number;

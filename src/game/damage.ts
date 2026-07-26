@@ -20,6 +20,7 @@ import { DamageType } from '../data/monster';
 import { Creature, CreatureStatus } from '../universe/creature';
 import { getProtLevel, hasAbilEquip, takeItem } from '../universe/inventory';
 import { SpellNote, livingSound } from '../universe/living';
+import { boomSpace } from './booms';
 import { NUM_INVEN_SLOTS, Player } from '../universe/player';
 import { MainStatus, Race, Skill, Status, Trait } from '../universe/skills';
 import { Universe } from '../universe/universe';
@@ -110,7 +111,7 @@ export function damagePc(
   options: DamageOptions = {},
 ): number {
   if (pc.mainStatus !== MainStatus.ALIVE) return 0;
-  const { doPrint = true } = options;
+  const { doPrint = true, boom = true } = options;
 
   // Armour, and the shield-and-blessing bonus that comes with it.
   if (ARMOUR_RESISTS.has(damType)) {
@@ -188,6 +189,7 @@ export function damagePc(
   }
 
   if (howMuch <= 0) {
+    // The "clang off the armour" sound, which really is file 2.
     if (ARMOUR_RESISTS.has(damType)) livingSound(2);
     univ.addStringToBuf('  No damage.');
     return 0;
@@ -196,6 +198,10 @@ export function damagePc(
   // Being hit stirs a sleeping PC toward waking.
   if ((pc.status[Status.ASLEEP] ?? 0) > 0) pc.status[Status.ASLEEP]!--;
   if (doPrint) univ.addStringToBuf(`  ${pc.name} takes ${howMuch}.`);
+  if (damType !== DamageType.MARKED && boom) {
+    boomSpace(hitLocation(univ, pc), boomType(damType), howMuch,
+      getSoundType(damType, options.soundType ?? -1));
+  }
   univ.party.totalDamTaken += howMuch;
 
   if (pc.curHealth >= howMuch) pc.curHealth -= howMuch;
@@ -342,6 +348,10 @@ export function damageMonst(
   }
 
   if (doPrint) victim.damagedMsg(howMuch, 0);
+  if (damType !== DamageType.MARKED) {
+    boomSpace(victim.curLoc, boomType(damType), howMuch,
+      getSoundType(damType, options.soundType ?? -1));
+  }
   victim.health -= howMuch;
   // TODO(M5b): a SPLITS monster spawns a copy of itself here.
   if (whoHit < 7) univ.party.totalDamDone += howMuch;

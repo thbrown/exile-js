@@ -13,6 +13,7 @@ import { TerSpec, TrimType, blocksMove } from '../data/terrain';
 import { Lighting } from '../data/town';
 import { GameSession } from '../game/session';
 import { GameMode } from '../game/modes';
+import { Boom } from '../game/booms';
 import { MAIN_STATUS_LABEL, MainStatus } from '../universe/skills';
 import { Colours } from './colours';
 import {
@@ -58,7 +59,9 @@ import { DEFAULT_BG, PANEL_BG, tilePattern } from './tiling';
 import { TalkScreen } from './talkScreen';
 import { ShopScreen } from './shopScreen';
 import { Trim, TrimMasks } from './trim';
-import { drawString, drawStringEllipsis, drawStringRight, wrapLines } from './text';
+import {
+  drawString, drawStringCentre, drawStringEllipsis, drawStringRight, wrapLines,
+} from './text';
 
 /** Every image the main screen needs, beyond the terrain/monster sheets. */
 export const CHROME_SHEETS = [
@@ -76,9 +79,12 @@ export const CHROME_SHEETS = [
   'objects',
   'tinyobj',
   'talkportraits',
+  'booms',
 ];
 
 export class Screen {
+  /** Hit animations still on screen; see `drawBooms`. */
+  booms: Boom[] = [];
   private buttons: PlacedButton[] = [];
   private buttonsMode: 'out' | 'town' | 'combat' | null = null;
   private trim: TrimMasks;
@@ -201,6 +207,7 @@ export class Screen {
     if (town) this.drawTownItems(session);
     if (town) this.drawTownMonsters(session);
     this.drawPartySymbol(session);
+    this.drawBooms(session);
   }
 
   private drawTerrainSpot(pic: number, px: number, py: number): void {
@@ -571,6 +578,44 @@ export class Screen {
         this.ctx.strokeRect(pos.x + 0.5, pos.y + 0.5, TILE_W - 1, TILE_H - 1);
         this.ctx.restore();
       }
+    }
+  }
+
+  /**
+   * The hit animation — boom_space's drawing half (boe.graphics.cpp). One frame
+   * from booms.png over the square, with the damage printed on it in white with
+   * a black shadow, exactly as the C++ lays it out. The C++ then sleeps; here
+   * each boom carries an expiry and `main.ts` keeps redrawing until they're
+   * gone.
+   */
+  private drawBooms(session: GameSession): void {
+    if (this.booms.length === 0) return;
+    const img = this.store.get('booms');
+    const center = session.center;
+    for (const boom of this.booms) {
+      const q = boom.where.x - center.x + TER_VIEW_CENTER;
+      const row = boom.where.y - center.y + TER_VIEW_CENTER;
+      if (q < 0 || row < 0 || q >= TER_VIEW_TILES || row >= TER_VIEW_TILES) continue;
+      const pos = terrainSpotPos(q, row);
+      if (img) {
+        this.ctx.drawImage(
+          img, boom.type * TILE_W, 0, TILE_W, TILE_H,
+          pos.x, pos.y, TILE_W, TILE_H,
+        );
+      }
+      if (boom.damage <= 0) continue;
+      const text = String(boom.damage);
+      const rect: UiRect = {
+        top: pos.y + 13, left: pos.x, bottom: pos.y + 23, right: pos.x + TILE_W,
+      };
+      // White twice offset either way, then black in the middle — the C++'s
+      // cheap drop shadow.
+      const style = { size: 10, colour: Colours.WHITE };
+      drawStringCentre(
+        this.ctx, { ...rect, top: rect.top - 1, left: rect.left - 1 }, text, style);
+      drawStringCentre(
+        this.ctx, { ...rect, top: rect.top + 1, left: rect.left + 1 }, text, style);
+      drawStringCentre(this.ctx, rect, text, { ...style, colour: Colours.BLACK });
     }
   }
 

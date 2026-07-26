@@ -5,6 +5,7 @@
 
 import { shiftLoc } from './core/location';
 import { GameMode } from './game/modes';
+import { BOOM_MS, setBoomSink } from './game/booms';
 import { pickNextPc } from './game/combat';
 import { GameRng } from './core/rng';
 import { DialogHost } from './dialogs/dialog';
@@ -379,7 +380,7 @@ async function main(): Promise<void> {
   canvas.addEventListener('mousedown', wakeSound, { once: true });
 
   /** What the next direction or view click should do instead of moving. */
-  let pending: 'talk' | 'look' | 'use' | null = null;
+  let pending: 'talk' | 'look' | 'use' | 'bash' | null = null;
 
   const setStatus = (): void => {
     if (session.shop)
@@ -388,12 +389,16 @@ async function main(): Promise<void> {
     else if (pending === 'talk') status.textContent = 'Talk to whom? (pick a direction)';
     else if (pending === 'look') status.textContent = 'Look where? (pick a direction)';
     else if (pending === 'use') status.textContent = 'Use what? (pick a direction)';
+    else if (pending === 'bash') status.textContent = 'Bash which door? (pick a direction)';
+    else if (session.mode === GameMode.COMBAT)
+      status.textContent =
+        'Combat — arrows move/attack, W stand ready, D parry, X hold turn, E end fight.';
     else
       status.textContent =
         `${scen.title} — arrows to move, L look` +
         (session.inTown
-          ? ', T talk, U use, G get items, 1-6 whose pack to show.'
-          : ', U use, 1-6 whose pack to show.');
+          ? ', T talk, U use, B bash, G get, F fight, 1-6 whose pack.'
+          : ', U use, R rest, 1-6 whose pack.');
   };
 
   /** Follow a conversation choice, prompting for a topic when it's "Ask About". */
@@ -466,6 +471,16 @@ async function main(): Promise<void> {
     }
     if (what === 'look') {
       lookAt(target);
+      return;
+    }
+    if (what === 'bash') {
+      // handle_bash_pick_select: pick a square, then who does the bashing.
+      void (async () => {
+        const who = await selectPc('living', 'Who will bash?', Skill.STRENGTH);
+        if (who >= 0) session.bashDoor(target, who);
+        setStatus();
+        redraw();
+      })();
       return;
     }
     // In combat the arrow keys and clicks drive the current PC, not the party.
@@ -598,51 +613,110 @@ async function main(): Promise<void> {
         if (preset) void activateTalkWord(preset.node);
         return;
       }
-      if (key === 't' || key === 'T') {
-        if (session.inTown) pending = 'talk';
-        else univ.addStringToBuf('There is nobody to talk to out here.');
-        setStatus();
-        redraw();
-      } else if (key === 'l' || key === 'L') {
-        pending = 'look';
-        setStatus();
-      } else if (key === 'u' || key === 'U') {
-        pending = 'use';
-        setStatus();
-      } else if (key === 'r' || key === 'R') {
-        session.rest();
-        redraw();
-      } else if (key === 'c' || key === 'C') {
-        // C toggles combat: start a fight from town mode, or regroup and leave
-        // one. The original has separate Fight and Return-to-town buttons.
-        if (session.mode === GameMode.COMBAT) session.endCombat();
-        else if (session.inTown) session.startCombat(univ.party.direction);
-        setStatus();
-        redraw();
-      } else if (key === ' ' && session.mode === GameMode.COMBAT) {
-        // Pass: give up the rest of this PC's turn, and start a new round once
-        // nobody has moves left.
-        univ.currentPc.ap = 0;
-        if (pickNextPc(univ, session.combatActivePc)) session.startCombatRound();
-        session.center = { ...univ.currentPc.combatPos };
-        setStatus();
-        redraw();
-      } else if (key === 'g' || key === 'G') {
-        if (session.inTown) void getItems();
-        else univ.addStringToBuf('Get: nothing here');
-        redraw();
-      } else if (key >= '1' && key <= '6') {
-        // Switch which PC's inventory page is showing.
-        screen.itemPage = Number(key) - 1;
-        univ.curPc = screen.itemPage;
-        redraw();
-      } else if (key === 'Escape' && pending) {
+      // handle_keystroke's letters (boe.actions.cpp:2772), which are what a
+      // BoE player's fingers already know. Uppercase variants that mean
+      // something different in the original (M/P force a recast, L picks a
+      // lock, A is alchemy) are noted where they aren't built yet.
+      const inCombat = session.mode === GameMode.COMBAT;
+      switch (key) {
+        case 'f': case 'F':
+          // Toggle combat, both ways — the same key in the original.
+          if (inCombat) session.endCombat();
+          else if (session.inTown) session.startCombat(univ.party.direction);
+          else univ.addStringToBuf("Combat: can't fight out here yet.");
+          break;
+        case 'e': case 'E':
+          if (inCombat) session.endCombat();
+          break;
+        case 'w': case 'W':
+        case ' ':
+          // Wait: stand ready in combat, pause otherwise.
+          session.pause();
+          break;
+        case 'd': case 'D':
+          if (inCombat) session.parry();
+          break;
+        case 'x': case 'X':
+          session.toggleActivePc();
+          break;
+        case 't':
+          if (session.inTown) pending = 'talk';
+          else univ.addStringToBuf('There is nobody to talk to out here.');
+          break;
+        case 'l':
+          pending = 'look';
+          break;
+        case 'u': case 'U':
+          if (inCombat) univ.addStringToBuf('Use: not in combat.');
+          else if (!session.inTown) univ.addStringToBuf('Use: not outdoors');
+          else pending = 'use';
+          break;
+        case 'b': case 'B':
+          if (inCombat) univ.addStringToBuf('Bash Door: not in combat.');
+          else if (!session.inTown) univ.addStringToBuf('Bash Door: not outdoors');
+          else pending = 'bash';
+          break;
+        case 'r':
+          session.rest();
+          break;
+        case 'g': case 'G':
+          if (session.inTown) void getItems();
+          else univ.addStringToBuf('Get: nothing here');
+          break;
+        case 'a':
+          univ.addStringToBuf('(The map is not implemented yet)');
+          break;
+        case 's': case 'S':
+          univ.addStringToBuf('(Missiles need M5b)');
+          break;
+        case 'm': case 'M': case 'p': case 'P':
+          univ.addStringToBuf('(Spells need M5c)');
+          break;
+        case 'i': case 'z': case 'Z':
+          univ.addStringToBuf("(The inventory panel is always on screen; 1-6 switches whose)");
+          break;
+        case 'L':
+          univ.addStringToBuf('(Pick Lock has no standalone key yet — walk into a locked door)');
+          break;
+        case 'A':
+          univ.addStringToBuf('(Alchemy needs M6)');
+          break;
+        default:
+          if (key >= '1' && key <= '6') {
+            // Switch which PC's inventory page is showing.
+            screen.itemPage = Number(key) - 1;
+            univ.curPc = screen.itemPage;
+          }
+          break;
+      }
+      setStatus();
+      redraw();
+      if (key === 'Escape' && pending) {
         pending = null;
         setStatus();
       }
     },
   });
   router.attach();
+
+  // boom_space's animation. The C++ draws the hit and then sleeps; here each
+  // boom carries an expiry and a short rAF loop redraws until they've all gone,
+  // so nothing blocks and several hits in one turn all show.
+  let boomLoopRunning = false;
+  setBoomSink((boom) => {
+    boom.expires = performance.now() + BOOM_MS;
+    screen.booms.push(boom);
+    if (boomLoopRunning) return;
+    boomLoopRunning = true;
+    const step = (): void => {
+      const now = performance.now();
+      screen.booms = screen.booms.filter((b) => b.expires > now);
+      redraw();
+      if (screen.booms.length > 0) requestAnimationFrame(step);
+      else boomLoopRunning = false;
+    };
+    requestAnimationFrame(step);
+  });
 
   setStatus();
   redraw();
@@ -658,6 +732,9 @@ async function main(): Promise<void> {
     __screen: screen,
     __scen: scen,
     __redraw: redraw,
+    // Lets the headless verifier watch which sound files actually get played.
+    __setLivingSound: (fn: ((which: number) => void) | null) =>
+      setLivingSound(fn ?? ((which: number) => { sound.play(which); })),
     __dialogs: dialogs,
   });
 }

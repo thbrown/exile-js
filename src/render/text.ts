@@ -86,6 +86,19 @@ export function wrapLines(
   return lines;
 }
 
+/** Centre a single line inside `rect` (eTextMode::CENTRE). */
+export function drawStringCentre(
+  ctx: CanvasRenderingContext2D,
+  rect: UiRect,
+  text: string,
+  style: TextStyle = {},
+): void {
+  applyStyle(ctx, style);
+  const size = style.size ?? 12;
+  const w = ctx.measureText(text).width;
+  ctx.fillText(text, rect.left + (rect.right - rect.left - w) / 2, rect.top + size - 1);
+}
+
 /** Right-align a single line inside `rect`. */
 export function drawStringRight(
   ctx: CanvasRenderingContext2D,

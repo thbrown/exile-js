@@ -15,7 +15,7 @@ import { Item, ItemAbil, ItemType, defaultItem } from '../data/item';
 import { MonstTime } from '../data/monster';
 import { FieldType } from '../data/fields';
 import { SECTOR_SIZE } from '../data/outdoors';
-import { StepSound, Terrain, TerObstruct, TerSpec, blocksMove } from '../data/terrain';
+import { StepSound, Terrain, TerObstruct, TerSpec, TrimType, blocksMove } from '../data/terrain';
 import { TalkNodeType } from '../data/talking';
 import { Lighting } from '../data/town';
 import { Snd, SoundPlayer } from '../platform/sound';
@@ -378,6 +378,43 @@ export class GameSession {
       if (city.spec >= 0) this.startTownMode(city.spec, entryDir);
       if (this.inTown) return;
     }
+  }
+
+  /**
+   * is_blocked (boe.locutils.cpp) — can nothing stand here? Much broader than
+   * terrain: it also counts creatures, the party, force barriers and cages, and
+   * *during combat* the marked special spots and city-trim terrain (which is
+   * how the original keeps combatants off portals). This is what combat
+   * placement and monster movement have to ask; `townIsBlocked` alone let PCs
+   * materialise on top of monsters and inside walls.
+   */
+  isBlocked(where: Location): boolean {
+    const town = this.univ.town;
+    if (!town) {
+      if (!this.univ.out.isOnMap(where.x, where.y)) return true;
+      if (this.outdIsBlocked(where)) return true;
+      return locsEqual(where, this.univ.party.outLoc);
+    }
+    if (!town.isOnMap(where.x, where.y)) return true;
+    if (this.townIsBlocked(where)) return true;
+
+    const inCombat = this.mode === GameMode.COMBAT;
+    if (inCombat) {
+      // Keep combatants off marked specials and off portals.
+      if (town.isSpecialSpot(where.x, where.y)) return true;
+      if (this.univ.terrainType(town.record.terrain[where.x]![where.y]!).trimType
+        === TrimType.CITY) return true;
+    }
+
+    // The party's square, or a PC's, depending on the mode.
+    if (!inCombat && locsEqual(where, this.univ.party.townLoc)) return true;
+    if (inCombat && this.univ.party.pcs.some(
+      (pc) => pc.isAlive && locsEqual(pc.combatPos, where))) return true;
+
+    if (town.monsterAt(where)) return true;
+    if (town.hasField(where.x, where.y, FieldType.BARRIER_FORCE)) return true;
+    if (town.hasField(where.x, where.y, FieldType.BARRIER_CAGE)) return true;
+    return false;
   }
 
   townIsBlocked(where: Location): boolean {
@@ -1380,6 +1417,67 @@ export class GameSession {
   }
 
   /**
+   * char_parry (boe.combat.cpp) — spend the rest of the turn on defence. The
+   * bonus scales with the action points given up, so parrying early is worth
+   * more; `damagePc` and the to-hit rolls both read it.
+   */
+  parry(): boolean {
+    if (this.mode !== GameMode.COMBAT) return false;
+    const pc = this.univ.currentPc;
+    if (pc.ap <= 0) return false;
+    pc.parry = Math.trunc(pc.ap / 4)
+      * (2 + pc.statAdj(Skill.DEXTERITY) + pc.skill(Skill.DEFENSE));
+    pc.ap = 0;
+    this.univ.addStringToBuf('Parry.');
+    this.afterCombatAction();
+    return true;
+  }
+
+  /**
+   * handle_pause — "stand ready" in combat (parry 100, which also means the
+   * to-hit bonus caps out), or a plain pause otherwise. Either way it's a turn
+   * spent, and webs get torn at.
+   */
+  pause(): void {
+    if (this.mode === GameMode.COMBAT) {
+      const pc = this.univ.currentPc;
+      pc.parry = 100;
+      pc.ap = 0;
+      this.univ.addStringToBuf('Stand ready.');
+      if ((pc.status[Status.WEBS] ?? 0) > 0) {
+        this.univ.addStringToBuf('You clean webs.');
+        pc.status[Status.WEBS] = Math.max(0, (pc.status[Status.WEBS] ?? 0) - 2);
+      }
+      this.afterCombatAction();
+      return;
+    }
+    this.univ.addStringToBuf('Pause.');
+    for (const pc of this.univ.party.pcs) {
+      if (!pc.isAlive || (pc.status[Status.WEBS] ?? 0) <= 0) continue;
+      this.univ.addStringToBuf(`${pc.name} cleans webs.`);
+      pc.status[Status.WEBS] = Math.max(0, (pc.status[Status.WEBS] ?? 0) - 2);
+    }
+    // TODO(M6): pausing also mounts or dismounts a boat or horse.
+    this.afterPartyTurn();
+  }
+
+  /**
+   * handle_toggle_active — pin the turn to one PC so they can act repeatedly,
+   * or release it back to the whole party.
+   */
+  toggleActivePc(): void {
+    if (this.mode !== GameMode.COMBAT) return;
+    if (this.combatActivePc === NO_ONE) {
+      this.univ.addStringToBuf('This PC now active.');
+      this.combatActivePc = this.univ.curPc;
+    } else {
+      this.univ.addStringToBuf("All PC's now active.");
+      this.univ.curPc = this.combatActivePc;
+      this.combatActivePc = NO_ONE;
+    }
+  }
+
+  /**
    * The current PC swings at whatever is on `where`. Returns false when there's
    * nothing there to hit.
    */
@@ -1749,15 +1847,14 @@ export class GameSession {
       for (let j = 0; j < m.yWidth; j++) {
         const x = where.x + i;
         const y = where.y + j;
-        if (!town.isOnMap(x, y)) return false;
-        if (this.townIsBlocked(loc(x, y))) return false;
-        if (this.locOffActiveArea(loc(x, y))) return false;
-        const other = town.monsterAt(loc(x, y));
+        const at = loc(x, y);
+        if (this.locOffActiveArea(at)) return false;
+        // is_blocked already covers terrain, the party, PCs, barriers and
+        // cages; the only thing it gets wrong here is this creature itself.
+        const other = town.monsterAt(at);
         if (other && other !== m) return false;
-        // A PC blocks a monster too; swapping places is a PC-only move.
-        if (this.mode === GameMode.COMBAT
-          && this.univ.party.pcs.some((pc) => pc.isAlive
-            && pc.combatPos.x === x && pc.combatPos.y === y)) return false;
+        if (!other && this.isBlocked(at)) return false;
+        if (other === m && this.townIsBlocked(at)) return false;
       }
     return true;
   }
