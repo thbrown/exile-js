@@ -25,7 +25,7 @@
 
 ## Current state
 
-**M2 done bar two items, M3 nearly done, M4 complete, M5a (melee combat) complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable in melee**: walking into a hostile creature starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. The monsters don't fight back yet — that's M5b, and it needs the monster-ability port first.**
+**M2 done bar two items, M3 nearly done, M4 complete, M5a (melee combat) complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. What's still missing from combat is everything that needs the monster-ability port: breath weapons, missiles, spellcasting and summons (M5b), and the spells and field behaviours (M5c).**
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -98,7 +98,17 @@ Notes for M2 implementer:
   the slith pole-arm bonus, assassination, poisoned blades and martyr's shield.
   Session gains `startCombat`/`endCombat`/`combatMove`/`attackAt`; walking into
   a hostile creature starts a fight. Keys: arrows move the acting PC, **C**
-  starts or ends a fight, **Space** passes.
+  starts or ends a fight, **Space** passes. The toolbar swaps to
+  `FIGHT_BUTTONS` in combat, and SWORD / END / WAIT are wired.
+- **Monster turns and encounters (M5b, partial)**: `game/monsterTurn.ts` —
+  `doMonsters` (the town-mode half of `do_monsters`: notice the party, say
+  "Monster saw you!", drift with `rand_move` or walk over), `doMonsterTurn`
+  (action points from speed, target picking, fleeing on lost morale, melee),
+  `monsterAttack` (up to three attacks with the sanctuary miss, the difficulty
+  multiplier against PCs, and double damage to a sleeping target), and
+  `combatRunMonst` (the turn between rounds: the clock, the light, status
+  decay). `session.afterPartyTurn` runs the town-mode pair after any
+  successful move, which is what makes encounters happen at all.
 
 ## Milestones (Part 1: BoE player)
 
@@ -107,7 +117,7 @@ Notes for M2 implementer:
 - [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅, inventory panel ✅, fields overlay ✅; replay driver still open
 - [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅, shops ✅, sell/identify/recharge ✅, training ✅, inns ✅; item Use, enchanting, and full dialogxml still open
 - [x] **M4 — Specials interpreter (breadth-first)**: VM core (pointers, queueing, messages) + all seven opcode groups; triggers wired for movement, look, town entry/exit, use-space, call-special terrain and the two talk nodes. Opcodes needing combat/fields/timers/quests report themselves and wait for M5/M6.
-- [ ] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b (missiles + monster AI) and M5c (spells, patterns, fields) still open
+- [ ] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b partly done (monster turns, melee AI and town encounters ✅; missiles, breath, monster spells and outdoor wandering monsters still open, all behind the `uAbility` port); M5c (spells, patterns, field behaviours) still open
 - [ ] **M6 — Specials depth + party ops** (valleydy completable)
 - [ ] **M7 — Save/load (.exg) + startup flow**
 - [ ] **M8 — Fidelity hardening** (replay golden masters)
@@ -198,22 +208,20 @@ deliberately left at the seam — 13 markers as of now. In rough order:
    ABSORB_SPELLS, MARTYRS_SHIELD, SPLITS, DEATH_TRIGGER, radiated fields and
    every missile and breath attack. Reference: `readMonstAbilFromXml`
    (fileio_scen.cpp:1425) for the data and `boe.monster.cpp` for the uses.
-2. **`monster_attack` and `combat_run_monst`** (boe.combat.cpp:1867) — the
-   monsters' half of a round. `session.afterCombatAction` is where it hooks in;
-   right now a round simply deals fresh moves. This also brings the free
-   back-shot a monster gets when you step out of its reach, marked inside
-   `session.combatMove`.
-3. **Monster movement and targeting** (`boe.monster.cpp`) — `combat_move_monster`,
-   morale-driven fleeing, and the pathing.
-4. **Missiles**: FIRING/THROWING modes are already in the `GameMode` enum in the
+2. ~~`monster_attack` and `combat_run_monst`~~ — **done**, in
+   `game/monsterTurn.ts`, along with `do_monsters`, `seek_party`, `rand_move`
+   and morale-driven fleeing. Still missing from it: the free back-shot a
+   monster gets when you step out of its reach (marked in `session.combatMove`),
+   `monst_hate_spot`, `monst_check_special_terrain` and `monst_inflict_fields`.
+3. **Missiles**: FIRING/THROWING modes are already in the `GameMode` enum in the
    right places. `calc_spec_dam` (boe.combat.cpp:711) belongs here too — it's
    the slay-the-species damage bonus, and `pcAttackWeapon` notes where it goes.
-5. **On-hit item abilities**: exploding weapons (needs spell patterns),
+4. **On-hit item abilities**: exploding weapons (needs spell patterns),
    STATUS_WEAPON, SOULSUCKER, ANTIMAGIC_WEAPON, WEAPON_CALL_SPECIAL.
-6. **Random encounters outdoors** — the user reported this. It needs
+5. **Random encounters outdoors** — the user reported this. It needs
    `create_wand_monst` and outdoor combat terrain (`create_out_combat_terrain`,
    boe.town.cpp:817), and `Sector.wandering` is already parsed and waiting.
-7. **`place_treasure` / `place_glands`** (boe.items.cpp) — what a corpse leaves
+6. **`place_treasure` / `place_glands`** (boe.items.cpp) — what a corpse leaves
    to loot. Marked in `killMonst`. Self-contained and worth doing early, since
    it's what makes clearing a dungeon feel like anything.
 
@@ -241,11 +249,11 @@ and both are honest gaps rather than bugs:
   the explored grid over the whole window) and doesn't depend on any missing
   system — a good standalone task. Reference: `boe.graphics.cpp`'s
   `draw_map` and the `MODE_...` map handling in `boe.actions.cpp`.
-- **No random encounters outdoors.** `check_special_terrain`'s wandering-
-  monster path, `create_wand_monst` and `handle_wandering_specials`
-  (boe.specials.cpp:119) need monster AI, so this is now M5b work — melee
-  combat exists, but nothing knows how to take a monster's turn yet.
-  `Sector.wandering` is already parsed and sitting unused.
+- **No random encounters outdoors.** In *towns* encounters now work: monsters
+  notice the party and come after it. Outdoors still needs `create_wand_monst`,
+  `handle_wandering_specials` (boe.specials.cpp:119) and — the big piece —
+  `create_out_combat_terrain` (boe.town.cpp:817), which builds the arena an
+  outdoor fight happens in. `Sector.wandering` is parsed and waiting.
 
 The other five were fixed: talk-by-click, NPCs visible through unexplored
 walls, using a web to clear it, the town-exit coordinate, and the Rest
@@ -263,8 +271,9 @@ Smaller things outstanding, all independent of M5:
 
 ## Next steps
 
-1. M5b: the monsters' half of combat, following the handoff above — starting
-   with the `uAbility` port, because most of the rest depends on it.
+1. M5b continued: the `uAbility` port, because breath, missiles, monster
+   spells and summons all depend on it. Then outdoor wandering monsters,
+   which additionally need the outdoor combat arena.
 2. The **MAP overlay** is still unbuilt and depends on nothing; likewise
    `place_treasure`. Either is a good standalone chunk.
 3. M2's last leftover is the replay driver.
