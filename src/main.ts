@@ -6,6 +6,7 @@
 import { shiftLoc } from './core/location';
 import { GameMode } from './game/modes';
 import { BOOM_MS, setBoomSink } from './game/booms';
+import { MISSILE_MS, setMissileSink } from './game/missileAnim';
 import { pickNextPc } from './game/combat';
 import { GameRng } from './core/rng';
 import { DialogHost } from './dialogs/dialog';
@@ -771,6 +772,25 @@ async function main(): Promise<void> {
       redraw();
       if (screen.booms.length > 0) requestAnimationFrame(step);
       else boomLoopRunning = false;
+    };
+    requestAnimationFrame(step);
+  });
+
+  // run_a_missile's animation, on the same non-blocking arrangement: the C++
+  // steps the sprite along and sleeps, here each missile carries a launch time
+  // and a rAF loop redraws until every one has landed.
+  let missileLoopRunning = false;
+  setMissileSink((missile) => {
+    missile.started = performance.now();
+    screen.missiles.push(missile);
+    if (missileLoopRunning) return;
+    missileLoopRunning = true;
+    const step = (): void => {
+      const now = performance.now();
+      screen.missiles = screen.missiles.filter((m) => m.started + MISSILE_MS > now);
+      redraw();
+      if (screen.missiles.length > 0) requestAnimationFrame(step);
+      else missileLoopRunning = false;
     };
     requestAnimationFrame(step);
   });

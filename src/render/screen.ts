@@ -14,6 +14,7 @@ import { Lighting } from '../data/town';
 import { GameSession } from '../game/session';
 import { GameMode, isCombat } from '../game/modes';
 import { Boom } from '../game/booms';
+import { MISSILE_MS, Missile, getMissileDirection } from '../game/missileAnim';
 import { MAIN_STATUS_LABEL, MainStatus } from '../universe/skills';
 import { Colours } from './colours';
 import {
@@ -81,12 +82,15 @@ export const CHROME_SHEETS = [
   'tinyobj',
   'talkportraits',
   'booms',
+  'missiles',
   ...MAP_SHEETS,
 ];
 
 export class Screen {
   /** Hit animations still on screen; see `drawBooms`. */
   booms: Boom[] = [];
+  /** Projectiles still in flight; see `drawMissiles`. */
+  missiles: Missile[] = [];
   private buttons: PlacedButton[] = [];
   private buttonsMode: 'out' | 'town' | 'combat' | null = null;
   private trim: TrimMasks;
@@ -218,6 +222,7 @@ export class Screen {
     if (!town) this.drawOutdoorGroups(session);
     this.drawPartySymbol(session);
     this.drawBooms(session);
+    this.drawMissiles(session);
   }
 
   private drawTerrainSpot(pic: number, px: number, py: number): void {
@@ -663,6 +668,57 @@ export class Screen {
         this.ctx, { ...rect, top: rect.top + 1, left: rect.left + 1 }, text, style);
       drawStringCentre(this.ctx, rect, text, { ...style, colour: Colours.BLACK });
     }
+  }
+
+  /**
+   * do_missile_anim's drawing half (boe.newgraph.cpp:347). Each missile is
+   * parameterised from its origin to its destination and stepped by wall clock
+   * rather than by a blocking sleep; `main.ts` keeps redrawing until they land.
+   *
+   * The pixel arithmetic is the C++'s: the ends are the tile centres offset by
+   * (14,18) from the tile's top-left, the destination gets the +1 the C++ adds
+   * "to prevent infinite slope", and the 16×16 sprite is centred on the point.
+   */
+  private drawMissiles(session: GameSession): void {
+    if (this.missiles.length === 0) return;
+    const img = this.store.get('missiles');
+    if (!img) return;
+    const center = session.center;
+    const now = performance.now();
+
+    // The terrain view, which a missile flying off the edge is clipped to.
+    const viewTL = terrainSpotPos(0, 0);
+    this.ctx.save();
+    this.ctx.beginPath();
+    this.ctx.rect(
+      viewTL.x, viewTL.y, TER_VIEW_TILES * TILE_W, TER_VIEW_TILES * TILE_H);
+    this.ctx.clip();
+
+    for (const m of this.missiles) {
+      const start = terrainSpotPos(
+        m.from.x - center.x + TER_VIEW_CENTER, m.from.y - center.y + TER_VIEW_CENTER);
+      const finish = terrainSpotPos(
+        m.dest.x - center.x + TER_VIEW_CENTER, m.dest.y - center.y + TER_VIEW_CENTER);
+      const startPt = { x: start.x + 14, y: start.y + 18 };
+      const finishPt = {
+        x: finish.x + 1 + 14 + m.xAdj, y: finish.y + 1 + 18 + m.yAdj,
+      };
+      const x1 = finishPt.x - startPt.x;
+      const y1 = finishPt.y - startPt.y;
+
+      const t = Math.min(m.len, Math.trunc(((now - m.started) / MISSILE_MS) * m.len));
+      const px = startPt.x + Math.trunc((x1 * t) / m.len);
+      let py = startPt.y + Math.trunc((y1 * t) / m.len);
+      // A lobbed missile rises and falls over its flight.
+      if (m.pathType === 1) py -= Math.trunc((t * (m.len - t)) / 100);
+
+      // Types below 7 are directional: the column is the heading. From 7 up the
+      // sprite is animated and the column cycles with the step instead.
+      const col = m.type < 7 ? getMissileDirection(startPt, finishPt) : t % 8;
+      this.ctx.drawImage(
+        img, 1 + 18 * col, 1 + 18 * m.type, 16, 16, px - 7, py - 7, 16, 16);
+    }
+    this.ctx.restore();
   }
 
   private drawPartySymbol(session: GameSession): void {

@@ -12,7 +12,7 @@ import {
 } from '../src/data/monsterAbility';
 import { defaultItem } from '../src/data/item';
 import {
-  monsterBasicAbil, monsterFireMissile, monsterSummon, pickMonsterAbility,
+  monstFireMissile, monsterBasicAbil, monsterSummon, pickMonsterAbility,
 } from '../src/game/monsterAbilities';
 import { Scenario } from '../src/data/scenario';
 import { damageMonst } from '../src/game/damage';
@@ -211,7 +211,7 @@ describe('ranged monster abilities', () => {
     pc.curHealth = 400;
     pc.items.fill(defaultItem());
     pc.equip.fill(false);
-    monsterFireMissile(s, m, abil, pc);
+    monstFireMissile(s, m, MonstAbil.MISSILE, abil, pc);
     expect(pc.curHealth).toBeLessThan(400);
   });
 

@@ -4,9 +4,8 @@
  *
  * `load_missile` decides *what* the current PC would shoot with and puts the
  * game into MODE_FIRING or MODE_THROWING; `fireMissile` resolves the shot at a
- * square. As with the monsters' half, `run_a_missile` — the projectile flying
- * across the screen — isn't ported: the shot lands at once, with its sound,
- * and the damage still draws its explosion.
+ * square, with `run_a_missile` (see `missileAnim.ts`) throwing the projectile
+ * across the screen as it goes.
  */
 
 import { Location, dist } from '../core/location';
@@ -19,6 +18,7 @@ import { Player } from '../universe/player';
 import { Race, Skill, Status, Trait } from '../universe/skills';
 import { Universe } from '../universe/universe';
 import { MonstAbil } from '../data/monsterAbility';
+import { runAMissile } from './missileAnim';
 import { takeAp } from './combat';
 import { onHitItemAbility, onHitTargetSpecial } from './weaponAbilities';
 import { damageMonst, damagePc, hitChance } from './damage';
@@ -315,6 +315,10 @@ export function fireMissile(
   let r2 = univ.rng.getRan(1, 1, dam) + damBonus;
   r2 = applyAmmoDamageAbility(r2, ammo, firer);
   univ.addStringToBuf(`${firer.name} fires.`);
+
+  // The projectile itself. Note it flies at `aim` — a seeking missile visibly
+  // curves to the target it found, not the square that was clicked.
+  runAMissile(firer.combatPos, aim, ammo.missile, 1, firing ? 12 : 14, 0, 0, 100);
 
   const victim = targetThere(univ, aim);
   if (r1 > hitChance(skill)) {

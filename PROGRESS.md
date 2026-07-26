@@ -70,7 +70,7 @@ Notes for M2 implementer:
 - Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
 - scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
-- `npm test` → 331 tests green (25 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
+- `npm test` → 433 tests green (32 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
 - `node scripts/verify-screen.mjs` (needs `npx vite --port 5199` running) drives the real UI headless and screenshots it. Playwright + chromium installed as devDependency.
 - Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
@@ -150,9 +150,32 @@ Notes for M2 implementer:
   ability *before* it considers a swing, so archers shoot and drakes breathe
   instead of walking up to you. Damage, status, stun, drain-SP, kill, and the
   food and gold thieves all land; PETRIFY, DRAIN_XP and FIELD say which
-  milestone they're waiting on. Not ported: `run_a_missile`, the projectile
-  flying across the screen — the shot resolves at once with its sound, and the
-  damage still draws its explosion.
+  milestone they're waiting on. The projectile that flies while it happens is
+  `run_a_missile` — see the entry below.
+- **The projectile animation (M5b, 2026-07-26)**: `game/missileAnim.ts` ports
+  `run_a_missile` and `get_missile_direction` (boe.newgraph.cpp:297/517), and
+  `Screen.drawMissiles` ports `do_missile_anim`'s drawing half. Same
+  arrangement as `booms.ts`: the C++ blocks, stepping the sprite along and
+  sleeping, so here the request goes to a sink the renderer owns and a rAF loop
+  redraws until every missile lands. Rows 0-6 of missiles.png are directional
+  (the column is `get_missile_direction`'s heading); 7 and up are animated and
+  the column cycles with the step. `pathType` 1 lobs the missile in an arc.
+  Wired into the party's `fireMissile` and every branch of the monsters'
+  `monstFireMissile`. **A missile with a negative `pic` still plays its sound
+  but draws nothing**, and one that travels zero distance is dropped — both
+  are the C++'s own rules, and the verify script's test arrows needed a real
+  `missile` index before anything showed.
+  Not ported with it: the mid-flight camera move (`camera_dest` and the
+  `recentered` branch), which follows a missile off the edge of the view. Ours
+  clips there instead.
+- **The rest of `monst_fire_missile` (M5b, 2026-07-26)**: the port used to send
+  only MISSILE through `monsterFireMissile` and everything else straight to
+  `monsterBasicAbil`, which silently skipped the whole preamble — so a ray, a
+  gaze, a breath or a spit announced nothing, MISSILE_WEB never webbed anything
+  and RAY_HEAT did nothing at all. `monstFireMissile` is now the single entry
+  the C++ has, with all four branches: the missile itself, the thrown web (plus
+  a `web_space` port, boe.combat.cpp:5253), the heat ray and its fire-damage
+  proxy ability, and the general case with its spell note, sound and path type.
 - **Summons and touch abilities (M5b, 2026-07-26)**:
   `game/monsterPlace.ts` gains `get_summon_monster` and `summon_monster`
   (boe.monster.cpp:1152/1210), and `place_monster` now honours the
@@ -479,8 +502,8 @@ deliberately left at the seam — 13 markers as of now. In rough order:
    `monst_hate_spot`, `monst_check_special_terrain` and `monst_inflict_fields`.
 3. ~~**Missiles**~~ — **done** on both sides (2026-07-26):
    `game/monsterAbilities.ts` for the monsters, `game/missiles.ts` for the
-   party, and `calc_spec_dam` with them. Still open: `run_a_missile`, the
-   projectile animation both halves would use.
+   party, and `calc_spec_dam` with them. `run_a_missile`, the projectile
+   animation both halves use, landed 2026-07-26 in `game/missileAnim.ts`.
 4. ~~**On-hit item abilities**~~ — **done** (2026-07-26), in
    `game/weaponAbilities.ts`, along with `calc_spec_dam` in melee. Still open:
    exploding weapons, which need M5c's spell patterns.
@@ -556,10 +579,12 @@ Smaller things outstanding, all independent of M5:
 ## Next steps
 
 1. M5b is nearly done: missiles (both sides), breath, summons, the touch
-   abilities, the on-hit weapon abilities and outdoor encounters all landed
-   2026-07-26. What's left is monster spellcasting (`monst_cast_mage` /
-   `monst_cast_priest`) and `run_a_missile` — the projectile animation. After
-   that M5c: spells, spell patterns and what fields *do*.
+   abilities, the on-hit weapon abilities, outdoor encounters, the projectile
+   animation and the rest of `monst_fire_missile` all landed 2026-07-26. What's
+   left is **monster spellcasting** (`monst_cast_mage` / `monst_cast_priest`),
+   which wants M5c's spell list to cast from — so the natural order now is M5c
+   first (spells, `place_spell_pattern`, and what fields *do*), then come back
+   for the casters.
 2. (The MAP overlay and `place_treasure` both landed 2026-07-26.)
 3. M2's last leftover is the replay driver.
 4. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in

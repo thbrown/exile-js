@@ -4,13 +4,13 @@
  * (boe.combat.cpp:2865) and `monst_basic_abil` (boe.combat.cpp:3043).
  *
  * This is what makes an archer shoot instead of walking up to you, and a
- * drake breathe. The flying-missile animation itself (`run_a_missile`) isn't
- * ported: the shot resolves at once, with its sound, and the damage still
- * draws its explosion through `damagePc`/`damageMonst`.
+ * drake breathe. The projectile that flies across the screen while it happens
+ * is `run_a_missile`, in `missileAnim.ts`.
  */
 
-import { dist } from '../core/location';
+import { Location, dist } from '../core/location';
 import { DamageType } from '../data/monster';
+import { FieldType } from '../data/fields';
 import {
   Ability, MonstAbil, MonstGen, MonstMissile, MonstSummon, abilityApCost,
 } from '../data/monsterAbility';
@@ -22,6 +22,8 @@ import { Living, SpellNote, livingSound } from '../universe/living';
 import { Player } from '../universe/player';
 import { MainStatus, Status } from '../universe/skills';
 import { damageMonst, damagePc, hitChance } from './damage';
+import { runAMissile } from './missileAnim';
+import { isCombat } from './modes';
 import type { GameSession } from './session';
 
 /** The ability a monster picked this turn, and which slot it came from. */
@@ -118,19 +120,114 @@ function missileNote(type: MonstMissile): { note: SpellNote; sound: number } {
 }
 
 /**
- * monst_fire_missile's MISSILE branch. `bless` is the shooter's bless/curse
- * status, which both steadies the aim and adds to the damage.
+ * monst_fire_missile (boe.combat.cpp:2865) — everything a monster does at
+ * range. The C++ funnels all four kinds through here, and so does this: a
+ * missile, a thrown web, a heat ray, or one of the general abilities arriving
+ * as a ray, a gaze, a breath or a spit.
+ */
+export function monstFireMissile(
+  session: GameSession,
+  monst: Creature,
+  key: MonstAbil,
+  abil: Ability,
+  target: Living,
+): void {
+  if (!target.isAlive) return;
+  const targSpace = target.getLoc();
+  const source = monst.curLoc;
+
+  if (key === MonstAbil.MISSILE) {
+    monstFireMissileProper(session, monst, abil, target);
+    return;
+  }
+
+  if (key === MonstAbil.MISSILE_WEB) {
+    target.spellNote(SpellNote.THROWS_WEB);
+    runAMissile(source, targSpace, 8, 0, 14, 0, 0, 100);
+    webSpace(session, targSpace);
+    return;
+  }
+
+  if (key === MonstAbil.RAY_HEAT) {
+    target.spellNote(SpellNote.HEAT_RAY);
+    runAMissile(source, targSpace, 13, 0, 51, 0, 0, 100);
+    // The C++ builds a throwaway DAMAGE ability out of the ray's parameters and
+    // runs that, so the heat ray is fire damage of strength extra3.
+    const proxy: Ability = {
+      ...abil,
+      gen: {
+        ...abil.gen,
+        type: MonstGen.RAY,
+        strength: abil.special.extra3,
+        extra: DamageType.FIRE,
+      },
+    };
+    monsterBasicAbil(session, monst, MonstAbil.DAMAGE, proxy, target);
+    return;
+  }
+
+  // Everything else: announce how it arrives, then resolve it.
+  //
+  // TODO(M5b): DRAIN_SP's retargeting, which looks for someone who still has
+  // spell points before the attack lands.
+  let snd = 0;
+  let pathType = 0;
+  switch (abil.gen.type) {
+    case MonstGen.TOUCH: return; // never reached — a touch rides a melee swing
+    case MonstGen.RAY:
+      snd = 51;
+      target.spellNote(SpellNote.FIRES_RAY);
+      break;
+    case MonstGen.GAZE:
+      snd = 43;
+      target.spellNote(SpellNote.GAZES2);
+      break;
+    case MonstGen.BREATH:
+      snd = 44;
+      target.spellNote(SpellNote.BREATHES_ON);
+      break;
+    case MonstGen.SPIT:
+      pathType = 1;
+      snd = 64;
+      target.spellNote(SpellNote.SPITS);
+      break;
+    default:
+      break;
+  }
+  if (abil.gen.pic < 0) livingSound(snd);
+  else runAMissile(source, targSpace, abil.gen.pic, pathType, snd, 0, 0, 100);
+  monsterBasicAbil(session, monst, key, abil, target);
+}
+
+/**
+ * web_space (boe.combat.cpp:5253) — a web lands on a square, and anyone
+ * standing there is caught in it as well.
+ */
+function webSpace(session: GameSession, where: Location): void {
+  const univ = session.univ;
+  const town = univ.town;
+  if (!town) return;
+  town.setField(where.x, where.y, FieldType.FIELD_WEB, true);
+  if (isCombat(session.mode)) {
+    for (const pc of univ.party.pcs)
+      if (pc.mainStatus === MainStatus.ALIVE
+        && pc.combatPos.x === where.x && pc.combatPos.y === where.y) pc.web(3);
+  } else if (univ.party.townLoc.x === where.x && univ.party.townLoc.y === where.y) {
+    for (const pc of univ.party.pcs) pc.web(3);
+  }
+}
+
+/**
+ * monst_fire_missile's MISSILE branch — the arrow, spear or spine itself.
  *
- * TODO(M5b): `run_a_missile` — the projectile flying across the screen.
  * TODO(M5b): the target's HIT_CALL_SPECIAL item ability.
  */
-export function monsterFireMissile(
+function monstFireMissileProper(
   session: GameSession,
   monst: Creature,
   abil: Ability,
   target: Living,
 ): void {
-  if (!target.isAlive) return;
   const univ = session.univ;
   const targSpace = target.getLoc();
   const pcTarget = target instanceof Player ? target : null;
@@ -138,7 +235,9 @@ export function monsterFireMissile(
 
   const { note, sound } = missileNote(abil.missile.type);
   target.spellNote(note);
-  livingSound(sound);
+  // A missile with no picture has nothing to draw, so it only makes its noise.
+  if (abil.missile.pic < 0) livingSound(sound);
+  else runAMissile(monst.curLoc, targSpace, abil.missile.pic, 1, sound, 0, 0, 100);
 
   // Sanctuary: an unseen target is hard to hit, and the roll is indexed by the
   // *monster's level* rather than a weapon skill — a debuff, as the C++ notes.

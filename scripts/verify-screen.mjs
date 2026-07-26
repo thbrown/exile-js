@@ -917,6 +917,7 @@ const missile = await page.evaluate(async () => {
   const arrows = blank();
   arrows.variety = 5; arrows.name = 'Arrows'; arrows.itemLevel = 8;
   arrows.bonus = 30; arrows.charges = 30; arrows.ability = 0;
+  arrows.missile = 0; // the arrow sprite — -1 would fly invisibly
   pc.items[0] = bow; pc.items[1] = arrows;
   pc.equip[0] = true; pc.equip[1] = true;
   pc.skills[7] = 20; // ARCHERY
@@ -945,15 +946,55 @@ const missileFired = await page.evaluate(() => {
   const before = monst.health;
   const arrows = s.univ.party.pcs[0].items[1].charges;
   s.fireMissileAt(window.__missileTarget);
+  // run_a_missile's sink fires synchronously, so the arrow is already in the
+  // air by the time fireMissileAt returns.
+  const launched = window.__screen.missiles.map((m) => ({
+    type: m.type, path: m.pathType, from: m.from, dest: m.dest,
+  }));
   window.__redraw();
   return {
     mode: s.mode, armed: s.missile !== null,
     hurt: before - monst.health,
     spent: arrows - s.univ.party.pcs[0].items[1].charges,
+    launched,
     tail: s.univ.transcript.slice(-3),
   };
 });
 console.log('MISSILE:', JSON.stringify({ ...missile, ...missileAimed, fired: missileFired }));
+// The projectile itself, held still halfway along its path so the screenshot
+// is deterministic: pushing straight onto the screen skips the rAF loop that
+// would otherwise expire it mid-capture.
+const missileFlight = await page.evaluate(() => {
+  const s = window.__session;
+  const pc = s.univ.party.pcs[0];
+  const from = { ...pc.combatPos };
+  window.__screen.booms = []; // the last shot's explosion would sit on top
+  const shots = [
+    // Rows 0-6 of missiles.png are directional; 7 and up are animated, so
+    // these three cover both halves of the sprite lookup and both path types.
+    { type: 3, pathType: 1, dx: 4, dy: 0 }, // an arrow, lobbed, due east
+    { type: 1, pathType: 0, dx: 0, dy: -3 }, // a dart, flat, due north
+    { type: 8, pathType: 0, dx: -3, dy: 3 }, // an animated spinner, south-west
+  ];
+  window.__screen.missiles = shots.map((sh) => ({
+    from,
+    dest: { x: from.x + sh.dx, y: from.y + sh.dy },
+    type: sh.type,
+    pathType: sh.pathType,
+    xAdj: 0,
+    yAdj: 0,
+    len: 100,
+    started: performance.now() - 100, // halfway through a 200ms flight
+  }));
+  window.__redraw();
+  return { drawn: window.__screen.missiles.length };
+});
+await shot('02h-missile-flight');
+await page.evaluate(() => {
+  window.__screen.missiles = [];
+  window.__redraw();
+});
+console.log('MISSILE FLIGHT:', JSON.stringify(missileFlight));
 
 console.log('PARRY:', JSON.stringify(parryButtons));
 await shot('02c3-encounter');
@@ -1101,6 +1142,10 @@ const ok =
   (booms.skipped === true || (booms.boomCount > 0 && booms.boom.damage > 0
     && booms.played.includes(70))) &&
   reenter?.inTown === true &&
+  // run_a_missile: the shot puts exactly one projectile in the air, and the
+  // three held-still sprites all draw.
+  missileFired.launched.length === 1 &&
+  missileFlight.drawn === 3 &&
   errors.length === 0;
 console.log(ok ? 'PASS' : 'FAIL');
 process.exit(ok ? 0 : 1);

@@ -22,7 +22,7 @@ import {
 } from '../data/monsterAbility';
 import { NO_ONE } from './combat';
 import {
-  abilityCost, monsterBasicAbil, monsterFireMissile, monsterSummon, pickMonsterAbility,
+  abilityCost, monstFireMissile, monsterBasicAbil, monsterSummon, pickMonsterAbility,
 } from './monsterAbilities';
 import { GameMode } from './modes';
 import { damageMonst, damagePc, hitChance } from './damage';
@@ -699,11 +699,9 @@ export function doMonsterTurn(session: GameSession): void {
             session, monst, targSpace, monstAdjacent(monst, targSpace));
           if (picked) {
             univ.addStringToBuf(`${monst.mon.name}:`);
-            if (picked.key === MonstAbil.MISSILE) {
-              monsterFireMissile(session, monst, picked.abil, who);
-            } else {
-              monsterBasicAbil(session, monst, picked.key, picked.abil, who);
-            }
+            // Everything picked here goes through monst_fire_missile, which
+            // sorts out the four kinds of ranged attack itself.
+            monstFireMissile(session, monst, picked.key, picked.abil, who);
             // A touch costs -1 and never gets here; anything else costs its own
             // price, and 0 would spin the loop, so it still gives up a point.
             const cost = abilityCost(picked);
