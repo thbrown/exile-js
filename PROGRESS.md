@@ -168,6 +168,24 @@ Notes for M2 implementer:
   `monst_basic_abil` behind it. STATUS2 rides only the first attack, STATUS
   every one. Still open in this area: monster spellcasting, RADIATE (needs
   M5c's spell patterns) and the party's own missiles.
+- **Random encounters outdoors (M5b, 2026-07-26)**: the last of the seven
+  first-play-test complaints. `universe/outdoorCreature.ts` +
+  `party.outC[10]` port `cParty::cOutdoorCreature`: a wandering group is *not*
+  a creature on the world map, it's a whole encounter definition (seven hostile
+  types and three friendly) roaming the 96×96 window. `game/wandering.ts` ports
+  `create_wand_monst` (both halves — towns spawn real creatures near their
+  wandering points, and they *persist* across re-entry), `place_outd_wand_monst`,
+  `outdoor_move_monster`, the outdoor half of `do_monsters`, `out_enc_lev_tot`
+  and `count_walls`. `game/outCombat.ts` ports `create_out_combat_terrain`
+  (all twenty arena kinds, their terrain-odds tables, the lake/pillar/fume/camp
+  stamps, roads, crops and the extra walls) and `start_outdoor_combat`.
+  `session.afterPartyTurn` now rolls for a group every tenth outdoor turn and
+  every town turn, moves the groups, and starts the fight when one reaches the
+  party — after its `spec_on_meet` chain has had a chance to call it off, and
+  after `initiate_outdoor_combat`'s "Monsters fled!" test lets a weak encounter
+  run away. Ending an outdoor fight refuses while anything hostile still
+  stands, then puts the party back on the world map and fires `spec_on_win`.
+  The groups draw on the terrain view (draw_monsters' outdoor half).
 - **On-hit weapon abilities (M5b, 2026-07-26)**: `game/weaponAbilities.ts`
   ports `apply_weapon_status` (boe.combat.cpp:459) and the on-hit chain both
   `pc_attack_weapon` and `fire_missile` run — STATUS_WEAPON, SOULSUCKER,
@@ -224,7 +242,7 @@ Notes for M2 implementer:
 - [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅, inventory panel ✅, fields overlay ✅; replay driver still open
 - [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅, shops ✅, sell/identify/recharge ✅, training ✅, inns ✅; item Use, enchanting, and full dialogxml still open
 - [x] **M4 — Specials interpreter (breadth-first)**: VM core (pointers, queueing, messages) + all seven opcode groups; triggers wired for movement, look, town entry/exit, use-space, call-special terrain and the two talk nodes. Opcodes needing combat/fields/timers/quests report themselves and wait for M5/M6.
-- [ ] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b mostly done (monster turns, melee AI, town encounters, the `uAbility` port, missiles on both sides, breath, summons and touch abilities ✅; monster spells and outdoor wandering monsters still open); M5c (spells, patterns, field behaviours) still open
+- [ ] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b nearly done (monster turns, melee AI, town *and outdoor* encounters, the `uAbility` port, missiles on both sides, breath, summons, touch abilities and the on-hit weapon abilities ✅; monster spells still open); M5c (spells, patterns, field behaviours) still open
 - [ ] **M6 — Specials depth + party ops** (valleydy completable)
 - [ ] **M7 — Save/load (.exg) + startup flow**
 - [ ] **M8 — Fidelity hardening** (replay golden masters)
@@ -345,6 +363,19 @@ Notes for M2 implementer:
   and CALL_SPECIAL terrain didn't fire. Only the terrain source and the
   special's context differ between the two modes. Pinned by two tests in
   `test/session.test.ts`.
+- (2026-07-26) **A town's wandering monsters persist across re-entry**, because
+  `end_town_mode` saves the whole population into a save slot. Fort Talrus
+  therefore fills up over a long session — which broke `verify-screen.mjs`'s
+  town-exit walk, since its greedy "head south" walker got wedged against the
+  new arrivals. The walker now aims at the boundary square and rotates through
+  every direction when blocked. The spawn rate itself is the C++'s
+  (`get_ran(1,1,160 - difficulty) == 2`, every town turn) and is not the bug.
+- (2026-07-26) **An outdoor fight happens in a throwaway 48×48 town**, but the
+  party's `townNum` stays 200 the whole time — it is not *in* a town. So
+  `worldIsTown` is false (outdoor sight and lighting rules) while `univ.town`
+  is set (the arena's terrain, blocking and explored map). Everything that
+  reads `univ.town` works unchanged; everything that reads `worldIsTown` gets
+  the outdoor answer, which is what the C++ does.
 - (2026-07-26) **A poisoned blade ticks down twice per swing.**
   `pc_attack_weapon` decrements POISONED_WEAPON when the poison lands, and
   `pc_attack` decrements it again on the way out. That's the C++, and a test
@@ -453,9 +484,10 @@ deliberately left at the seam — 13 markers as of now. In rough order:
 4. ~~**On-hit item abilities**~~ — **done** (2026-07-26), in
    `game/weaponAbilities.ts`, along with `calc_spec_dam` in melee. Still open:
    exploding weapons, which need M5c's spell patterns.
-5. **Random encounters outdoors** — the user reported this. It needs
-   `create_wand_monst` and outdoor combat terrain (`create_out_combat_terrain`,
-   boe.town.cpp:817), and `Sector.wandering` is already parsed and waiting.
+5. ~~**Random encounters outdoors**~~ — **done** (2026-07-26), in
+   `game/wandering.ts` and `game/outCombat.ts`. Not ported with it: the arena's
+   `spec_on_flee` path (there's no fleeing from a fight yet) and
+   `notify_out_combat_began`'s roll-call of what you're facing.
 6. ~~**`place_treasure` / `place_glands`**~~ — **done** (2026-07-26), in
    `game/loot.ts`. Corpses drop things now.
 
@@ -499,17 +531,13 @@ Fidelity notes for whoever picks this up:
 
 ### Reported by the user and still open (2026-07-25)
 
-Two of the seven issues from the first real play-test are genuinely blocked,
-and both are honest gaps rather than bugs:
+Both of the two issues left open from the first real play-test are now fixed:
 
 - ~~**The MAP button does nothing.**~~ **Fixed 2026-07-26** — see the automap
   entry above. Still missing from it: DETECT_LIFE's green monster dots (the
   party status effect doesn't exist yet) and custom scenario graphics sheets.
-- **No random encounters outdoors.** In *towns* encounters now work: monsters
-  notice the party and come after it. Outdoors still needs `create_wand_monst`,
-  `handle_wandering_specials` (boe.specials.cpp:119) and — the big piece —
-  `create_out_combat_terrain` (boe.town.cpp:817), which builds the arena an
-  outdoor fight happens in. `Sector.wandering` is parsed and waiting.
+- ~~**No random encounters outdoors.**~~ **Fixed 2026-07-26** — see the
+  entry above. Both of the first play-test's open complaints are now closed.
 
 The other five were fixed: talk-by-click, NPCs visible through unexplored
 walls, using a web to clear it, the town-exit coordinate, and the Rest
@@ -527,11 +555,11 @@ Smaller things outstanding, all independent of M5:
 
 ## Next steps
 
-1. M5b continued: missiles (both sides), breath, summons, the touch abilities
-   and the on-hit weapon abilities all landed 2026-07-26, so what's left is
-   monster spellcasting (`monst_cast_mage` / `monst_cast_priest`) and
-   `run_a_missile` — the projectile animation. Then outdoor wandering monsters,
-   which additionally need the outdoor combat arena.
+1. M5b is nearly done: missiles (both sides), breath, summons, the touch
+   abilities, the on-hit weapon abilities and outdoor encounters all landed
+   2026-07-26. What's left is monster spellcasting (`monst_cast_mage` /
+   `monst_cast_priest`) and `run_a_missile` — the projectile animation. After
+   that M5c: spells, spell patterns and what fields *do*.
 2. (The MAP overlay and `place_treasure` both landed 2026-07-26.)
 3. M2's last leftover is the replay driver.
 4. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in

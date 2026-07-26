@@ -17,7 +17,8 @@ import { FieldType } from '../data/fields';
 import { SECTOR_SIZE } from '../data/outdoors';
 import { StepSound, Terrain, TerObstruct, TerSpec, TrimType, blocksMove } from '../data/terrain';
 import { TalkNodeType } from '../data/talking';
-import { Lighting } from '../data/town';
+import { Lighting, Town } from '../data/town';
+import { OutWandering } from '../data/outdoors';
 import { Snd, SoundPlayer } from '../platform/sound';
 import { Creature, CreatureStatus, assignCreature } from '../universe/creature';
 import { DamageType } from '../data/monster';
@@ -26,6 +27,10 @@ import {
   NO_ONE, endTownCombat, pcAttack, pickNextPc, setPcMoves, startTownCombat, takeAp,
 } from './combat';
 import { combatRunMonst, doMonsterTurn, doMonsters } from './monsterTurn';
+import {
+  adjacentEncounter, countWalls, createWandMonst, doOutdoorMonsters, outEncLevTot,
+} from './wandering';
+import { startOutdoorCombat } from './outCombat';
 import { LoadedMissile, fireMissile, isLoaded, loadMissile } from './missiles';
 import { CurTown } from '../universe/curTown';
 import {
@@ -116,6 +121,14 @@ export class GameSession {
   combatActivePc = NO_ONE;
   /** The armed missile while the game is in FIRING or THROWING mode. */
   missile: LoadedMissile | null = null;
+  /**
+   * The throwaway 48×48 town an outdoor fight happens in (`cCurTown::arena`).
+   * The party's `townNum` stays 200 the whole time — it is not *in* a town —
+   * but `univ.town` points at this so terrain, sight and blocking all work.
+   */
+  arena: Town | null = null;
+  /** The encounter being fought, for its on-win and on-flee specials. */
+  storeWanderingSpecial: OutWandering | null = null;
   private numOutMoves = 0;
   private numTownMoves = 0;
   /** Optional; when absent the game runs silently (as tests do). */
@@ -254,14 +267,106 @@ export class GameSession {
    * The clock is not touched here: this port folds `increase_age`'s tick into
    * the move functions themselves, which already advanced it.
    *
-   * TODO(M5b): outdoors this is where wandering monsters spawn and roam.
    * TODO(M6): increase_age's timers, hunger and autosave.
    */
   private afterPartyTurn(): void {
     if (this.mode === GameMode.TOWN) {
       doMonsters(this);
       doMonsterTurn(this);
+      // A town rolls for a new wandering group every turn, and a hard town
+      // rolls more often — the difficulty is subtracted from the divisor.
+      const difficulty = this.univ.townRecord?.difficulty ?? 0;
+      if (this.univ.rng.getRan(1, 1, Math.max(2, 160 - difficulty)) === 2) {
+        createWandMonst(this);
+      }
+      return;
     }
+    if (this.mode === GameMode.OUTDOORS) {
+      // Outdoors the groups only move every tenth turn — the C++ comment says
+      // "no monst move if party outdoors and on horse", which is what makes
+      // outrunning an encounter possible at all.
+      if (this.univ.party.age % 10 !== 0) return;
+      if (!this.univ.party.pcs.some((pc) => pc.isAlive)) return;
+      doOutdoorMonsters(this);
+      if (this.univ.rng.getRan(1, 1, 70) === 10) createWandMonst(this);
+      void this.checkOutdoorEncounter();
+    }
+  }
+
+  /**
+   * The trigger at the end of `handle_action`: a group standing next to the
+   * party (or a `forced` one anywhere) starts a fight, unless its `spec_on_meet`
+   * chain calls it off. A group in a boat or in the air is never met.
+   *
+   * `initiate_outdoor_combat` then gives the party one more out: an encounter
+   * far below its level simply runs away.
+   */
+  async checkOutdoorEncounter(): Promise<boolean> {
+    const univ = this.univ;
+    if (univ.party.inBoat >= 0) return false;
+    const which = adjacentEncounter(univ);
+    if (which < 0) return false;
+    const group = univ.party.outC[which]!;
+    const encounter = group.whatMonst;
+    group.exists = false;
+    this.storeWanderingSpecial = encounter;
+
+    if (encounter.specOnMeet >= 0) {
+      const { blocked } = await this.runSpecial(
+        SpecCtx.OUTDOOR_ENC, SpecCtxType.OUTDOOR, encounter.specOnMeet, univ.party.locInSec);
+      if (blocked) return false;
+    }
+
+    if (univ.party.getLevel() > Math.trunc((outEncLevTot(univ, encounter) * 5) / 3)
+      && outEncLevTot(univ, encounter) < 200 && !encounter.cantFlee) {
+      univ.addStringToBuf('Combat: Monsters fled!');
+      return false;
+    }
+
+    startOutdoorCombat(this, encounter, univ.party.outLoc, countWalls(univ, univ.party.outLoc));
+    this.onRedraw?.();
+    return true;
+  }
+
+  /**
+   * The outdoor half of ending a fight: the party can't leave while anything
+   * hostile is still standing, and when it does it goes back outdoors with the
+   * encounter's on-win chain fired.
+   */
+  private endOutdoorCombat(): boolean {
+    const univ = this.univ;
+    const stillAlive = (univ.town?.monsters ?? []).some((m) => m.isAlive && !m.isFriendly);
+    if (stillAlive) {
+      univ.addStringToBuf('Enemies are still alive!');
+      return false;
+    }
+    for (const pc of univ.party.pcs) {
+      if (pc.mainStatus === MainStatus.FLED) pc.mainStatus = MainStatus.ALIVE;
+      pc.status[Status.POISONED_WEAPON] = 0;
+      pc.status[Status.BLESS_CURSE] = 0;
+      pc.status[Status.HASTE_SLOW] = 0;
+      pc.parry = 0;
+      pc.combatPos = loc(-1, -1);
+      // Bonus health and spell points wear off with the fight.
+      if (pc.curSp > pc.maxSp) pc.curSp = pc.maxSp;
+      if (pc.curHealth > pc.maxHealth) pc.curHealth = pc.maxHealth;
+    }
+    this.combatActivePc = NO_ONE;
+    univ.curPc = this.storeCurrentPc;
+    if (!univ.currentPc.isAlive) univ.curPc = univ.firstActivePc();
+    univ.town = null;
+    this.arena = null;
+    this.mode = GameMode.OUTDOORS;
+    this.center = { ...univ.party.outLoc };
+    univ.addStringToBuf('End combat.');
+    this.sound?.play(93);
+    const won = this.storeWanderingSpecial;
+    this.storeWanderingSpecial = null;
+    if (won && won.specOnWin >= 0) {
+      void this.runSpecial(
+        SpecCtx.WIN_ENCOUNTER, SpecCtxType.OUTDOOR, won.specOnWin, univ.party.locInSec);
+    }
+    return true;
   }
 
   private outdIsBlocked(where: Location): boolean {
@@ -1436,6 +1541,7 @@ export class GameSession {
    */
   endCombat(): boolean {
     if (this.mode !== GameMode.COMBAT) return false;
+    if (this.whichCombatType === 0) return this.endOutdoorCombat();
     const direction = endTownCombat(this);
     if (direction === Direction.Here) return false;
     this.univ.party.direction = direction;

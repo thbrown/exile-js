@@ -418,33 +418,37 @@ const walkChunk = (goal, limit) =>
         s.move(d),
         new Promise((r) => setTimeout(() => r(STALLED), 400)),
       ]);
-      // Direction enum: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
-      const order = { south: [4, 3, 5, 2, 6], north: [0, 1, 7, 2, 6] };
-      const dirs = order[goal === 'outdoors' ? 'south' : 'north'];
+      // Direction enum: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7. Aim at the
+      // town boundary rather than just "downhill", because Fort Talrus fills up
+      // with wandering monsters and a greedy walker gets stuck against them.
+      const dirOf = (dx, dy) => {
+        const table = { '0,-1': 0, '1,-1': 1, '1,0': 2, '1,1': 3, '0,1': 4, '-1,1': 5, '-1,0': 6, '-1,-1': 7 };
+        return table[`${Math.sign(dx)},${Math.sign(dy)}`] ?? 4;
+      };
       let steps = 0;
       while (!done() && steps < limit) {
         if (window.__dialogs.active) return { steps, done: done(), waiting: true };
+        const rect = s.univ.town?.record.inTownRect;
+        const at = s.univ.party.townLoc;
+        const target = goal === 'outdoors'
+          ? { x: at.x, y: rect ? rect.bottom : at.y + 1 }
+          : { x: at.x, y: rect ? rect.top : at.y - 1 };
+        const want = dirOf(target.x - at.x, target.y - at.y);
+        // The wanted direction, then its neighbours, then everything else.
+        const order = [want, (want + 1) % 8, (want + 7) % 8, (want + 2) % 8, (want + 6) % 8,
+          (want + 3) % 8, (want + 5) % 8, (want + 4) % 8];
+        // Rotate the tail so a dead end doesn't trap the walker in a loop.
+        const tail = order.slice(3);
+        const spun = tail.slice(steps % tail.length).concat(tail.slice(0, steps % tail.length));
         let moved = false;
-        for (const d of dirs) {
+        for (const d of order.slice(0, 3).concat(spun)) {
           const result = await step(d);
           if (result === STALLED) return { steps, done: done(), waiting: true };
-          if (result) {
-            moved = true;
-            break;
-          }
+          if (result) { moved = true; break; }
           if (done()) break;
         }
         steps++;
-        if (!moved && !done()) {
-          // Fully boxed in: nudge sideways and keep trying.
-          const a = await step(2);
-          if (a === STALLED) return { steps, done: done(), waiting: true };
-          if (!a) {
-            const b = await step(6);
-            if (b === STALLED) return { steps, done: done(), waiting: true };
-            if (!b) break;
-          }
-        }
+        if (!moved && !done()) break;
       }
       window.__redraw();
       return { steps, done: done(), waiting: !!window.__dialogs.active };
@@ -954,6 +958,75 @@ console.log('MISSILE:', JSON.stringify({ ...missile, ...missileAimed, fired: mis
 console.log('PARRY:', JSON.stringify(parryButtons));
 await shot('02c3-encounter');
 
+// Random encounters outdoors: a wandering group walks up to the party on the
+// world map, and the fight happens in a generated arena.
+// Back out to the world map first: end any fight, drop scripting (the towns'
+// own chains aren't what this step is testing), then walk out.
+// Earlier steps left the party deep inside a hostile Marralis, which has no
+// short way out. Re-enter the start town — whose exit the LEFT TOWN phase
+// already walks — and leave from there, the same way a player would.
+await page.evaluate(() => {
+  const s = window.__session;
+  s.specials = null;
+  if (s.mode === 9) s.endCombat();
+  s.startTownMode(s.univ.scenario.startTown, 9);
+  for (const m of s.univ.town.monsters) m.active = 0;
+  window.__redraw();
+});
+await walkUntil('outdoors');
+const encounterOut = await page.evaluate(async () => {
+  const s = window.__session;
+  const univ = s.univ;
+  if (s.mode !== 0) return { skipped: 'still not outdoors', mode: s.mode };
+  // Step clear of the town's entrance square, or walking on the spot walks
+  // straight back inside.
+  for (let i = 0; i < 4 && s.mode === 0; i++) {
+    await s.moveTo({ x: univ.party.outLoc.x, y: univ.party.outLoc.y + 1 });
+  }
+  if (s.mode !== 0) return { skipped: 'walked back into a town', mode: s.mode };
+
+  const slot = univ.party.outC[0];
+  slot.exists = true;
+  slot.whatMonst = {
+    monst: [1, 0, 0, 0, 0, 0, 0], friendly: [0, 0, 0],
+    specOnMeet: -1, specOnWin: -1, specOnFlee: -1,
+    cantFlee: true, forced: false, endSpec1: -1, endSpec2: -1,
+  };
+  slot.mLoc = { x: univ.party.outLoc.x + 3, y: univ.party.outLoc.y };
+  window.__redraw();
+  const drawn = { ...slot.mLoc };
+
+  // Walk on the spot; the groups move every tenth turn and close in.
+  let started = false;
+  for (let i = 0; i < 120 && !started && s.mode === 0; i++) {
+    await s.moveTo({ x: univ.party.outLoc.x + 1, y: univ.party.outLoc.y });
+    await s.moveTo({ x: univ.party.outLoc.x - 1, y: univ.party.outLoc.y });
+    started = s.mode === 9;
+  }
+  window.__redraw();
+  return {
+    drawn, started, mode: s.mode, combatType: s.whichCombatType,
+    monsters: univ.town ? univ.town.monsters.filter((m) => m.isAlive).length : 0,
+    arena: s.arena ? s.arena.name : null,
+    pcPlaced: { ...univ.party.pcs[0].combatPos },
+    monstY: univ.town ? [...new Set(univ.town.monsters.filter((m) => m.isAlive)
+      .map((m) => m.curLoc.y))].sort((a, b) => a - b) : [],
+    tail: univ.transcript.slice(-3),
+  };
+});
+console.log('OUTDOOR ENCOUNTER:', JSON.stringify(encounterOut));
+await shot('02h-outdoor-arena');
+const encounterEnd = await page.evaluate(() => {
+  const s = window.__session;
+  if (s.mode !== 9) return { skipped: true };
+  const refused = s.endCombat();
+  for (const m of s.univ.town.monsters) m.active = 0;
+  const ended = s.endCombat();
+  window.__redraw();
+  return { refused, ended, mode: s.mode, townCleared: s.univ.town === null, arena: s.arena };
+});
+console.log('OUTDOOR ENCOUNTER END:', JSON.stringify(encounterEnd));
+
 console.log('ERRORS:', errors.length ? errors.join(' | ') : 'none');
 await browser.close();
 
@@ -968,6 +1041,13 @@ const ok =
   bashPrompt?.text.startsWith('Who will bash?') &&
   talkKeys.job === true &&
   bashPrompt?.rows === 6 &&
+  (encounterOut.skipped !== undefined || (
+    encounterOut.started === true &&
+    encounterOut.combatType === 0 &&
+    encounterOut.monsters >= 15 &&
+    encounterEnd.refused === false &&
+    encounterEnd.ended === true &&
+    encounterEnd.mode === 0)) &&
   missileAimed.armed === true &&
   missileAimed.mode === 11 &&
   missileFired.armed === false &&

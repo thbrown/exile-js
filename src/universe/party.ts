@@ -11,6 +11,7 @@
  */
 
 import { Direction, Location, loc } from '../core/location';
+import { OutdoorCreature } from './outdoorCreature';
 
 export const SDF_ROWS = 350;
 export const SDF_COLUMNS = 50;
@@ -45,6 +46,14 @@ export class Party {
   totalXpGained = 0;
   /** Accumulated light from spells/items; drives light_radius in dark towns. */
   lightLevel = 0;
+  /**
+   * The ten wandering encounters roaming the outdoor map (cParty::out_c). They
+   * live on the *party*, not on the outdoors, because they follow it across
+   * sector boundaries — `boe.fileio.cpp` shifts or drops them when the window
+   * slides.
+   */
+  outC: OutdoorCreature[] = Array.from({ length: 10 }, () => new OutdoorCreature());
+
   /** Special items the party has acquired, by index (cParty::spec_items). */
   specItems = new Set<number>();
   /**
@@ -136,6 +145,11 @@ export class Party {
     if (p < 100) return this.magicPtrs[p - 10] ?? 0;
     const cell = this.pointers.get(p);
     return cell ? this.getSdf(cell[0], cell[1]) : 0;
+  }
+
+  /** cParty::get_level (party.cpp:479) — the living PCs' levels added up. */
+  getLevel(): number {
+    return this.pcs.reduce((sum, pc) => sum + (pc.isAlive ? pc.level : 0), 0);
   }
 
   /** cParty::get_loc (party.cpp) — whichever of the two positions is live. */

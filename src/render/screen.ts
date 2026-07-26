@@ -215,6 +215,7 @@ export class Screen {
 
     if (town) this.drawTownItems(session);
     if (town) this.drawTownMonsters(session);
+    if (!town) this.drawOutdoorGroups(session);
     this.drawPartySymbol(session);
     this.drawBooms(session);
   }
@@ -525,6 +526,42 @@ export class Screen {
         pos.x + g.inset.x, pos.y + g.inset.y,
         TILE_W - 2 * g.inset.x, TILE_H - 2 * g.inset.y,
       );
+    }
+  }
+
+  /**
+   * draw_monsters' outdoor half (boe.graphutil.cpp:120) — the wandering
+   * encounters roaming the world map. A whole group is drawn as one creature:
+   * the first monster type in it that isn't empty.
+   */
+  private drawOutdoorGroups(session: GameSession): void {
+    const { univ } = session;
+    const centre = univ.party.outLoc;
+    for (const enc of univ.party.outC) {
+      if (!enc.exists) continue;
+      if (Math.abs(enc.mLoc.x - centre.x) > 4 || Math.abs(enc.mLoc.y - centre.y) > 4) continue;
+      if (session.canSeeLight(centre, enc.mLoc) >= 5) continue;
+      const which = enc.whatMonst.monst.find((m) => m > 0);
+      if (which === undefined) continue;
+      const pic = univ.scenario.scenMonsters[which]?.pictureNum ?? -1;
+      if (pic < 0) continue;
+      const q = enc.mLoc.x - centre.x + TER_VIEW_CENTER;
+      const row = enc.mLoc.y - centre.y + TER_VIEW_CENTER;
+      const { w, h } = monsterDims(pic);
+      for (let part = 0; part < w * h; part++) {
+        const px = q + (part % w);
+        const py = row + Math.floor(part / w);
+        if (px < 0 || py < 0 || px >= TER_VIEW_TILES || py >= TER_VIEW_TILES) continue;
+        const g = monsterGraphic(pic, enc.direction < 4 ? 0 : 1, part);
+        if (!g) continue;
+        const img = this.store.get(g.sheetName);
+        if (!img) continue;
+        const pos = terrainSpotPos(px, py);
+        this.ctx.drawImage(
+          img, g.rect.left, g.rect.top, g.rect.width, g.rect.height,
+          pos.x, pos.y, TILE_W, TILE_H,
+        );
+      }
     }
   }
 
