@@ -25,6 +25,7 @@ import { hitParty } from './damage';
 import {
   NO_ONE, endTownCombat, pcAttack, pickNextPc, setPcMoves, startTownCombat, takeAp,
 } from './combat';
+import { combatRunMonst } from './monsterTurn';
 import { CurTown } from '../universe/curTown';
 import {
   GiveStatus,
@@ -1347,10 +1348,15 @@ export class GameSession {
     return true;
   }
 
-  /** Give out a fresh round of moves and pick who acts (the top of a round). */
+  /**
+   * The turn between rounds: the monsters act, the clock ticks and statuses
+   * decay, then the party gets a fresh set of moves.
+   */
   startCombatRound(): void {
+    combatRunMonst(this);
     setPcMoves(this.univ);
     pickNextPc(this.univ, this.combatActivePc);
+    if (this.univ.currentPc.ap <= 0) pickNextPc(this.univ, this.combatActivePc);
   }
 
   /**
@@ -1369,16 +1375,14 @@ export class GameSession {
    * After anything that spends action points: hand over to the next PC, and
    * when nobody has moves left start a new round.
    *
-   * TODO(M5b): this is where combat_run_monst goes — the monsters take their
-   * turn between rounds.
+   * `combat_run_monst` is what happens between rounds — the monsters act, then
+   * everyone gets fresh moves.
    */
   private afterCombatAction(): void {
     if (this.univ.currentPc.ap > 0) return;
-    if (pickNextPc(this.univ, this.combatActivePc)) {
-      setPcMoves(this.univ);
-      pickNextPc(this.univ, this.combatActivePc);
-    }
+    if (pickNextPc(this.univ, this.combatActivePc)) this.startCombatRound();
     this.center = { ...this.univ.currentPc.combatPos };
+    this.onRedraw?.();
   }
 
   /**
@@ -1710,13 +1714,30 @@ export class GameSession {
   }
 
   private monstCanBeThere(m: Creature): boolean {
-    const town = this.univ.town!;
+    return this.monstCanBeAt(m, m.curLoc);
+  }
+
+  /**
+   * monst_can_be_there (boe.locutils.cpp) — could this creature stand with its
+   * top-left corner on `where`? Every square it covers has to be on the map and
+   * clear, and nothing else may already be standing there.
+   */
+  monstCanBeAt(m: Creature, where: Location): boolean {
+    const town = this.univ.town;
+    if (!town) return false;
     for (let i = 0; i < m.xWidth; i++)
       for (let j = 0; j < m.yWidth; j++) {
-        const x = m.curLoc.x + i;
-        const y = m.curLoc.y + j;
+        const x = where.x + i;
+        const y = where.y + j;
         if (!town.isOnMap(x, y)) return false;
         if (this.townIsBlocked(loc(x, y))) return false;
+        if (this.locOffActiveArea(loc(x, y))) return false;
+        const other = town.monsterAt(loc(x, y));
+        if (other && other !== m) return false;
+        // A PC blocks a monster too; swapping places is a PC-only move.
+        if (this.mode === GameMode.COMBAT
+          && this.univ.party.pcs.some((pc) => pc.isAlive
+            && pc.combatPos.x === x && pc.combatPos.y === y)) return false;
       }
     return true;
   }

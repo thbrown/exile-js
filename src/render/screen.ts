@@ -24,6 +24,7 @@ import {
   ITEM_ROWS,
   ITEM_ROWS_SHOP,
   SPEC_BTN_ICONS,
+  FIGHT_BUTTONS,
   OUT_BUTTONS,
   PANEL_IMAGES,
   PC_PANEL,
@@ -874,7 +875,7 @@ export class Screen {
     if (mode !== this.buttonsMode) {
       this.buttonsMode = mode;
       this.buttons = placeButtons(
-        mode === 'town' ? TOWN_BUTTONS : OUT_BUTTONS,
+        mode === 'combat' ? FIGHT_BUTTONS : mode === 'town' ? TOWN_BUTTONS : OUT_BUTTONS,
       );
     }
     const img = this.store.get('buttons');

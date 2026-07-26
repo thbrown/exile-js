@@ -571,6 +571,30 @@ const combat = await page.evaluate(async () => {
 console.log('COMBAT:', JSON.stringify(combat));
 await shot('02c-combat');
 
+// The monsters' half of the round: pass until something hits back.
+const monstTurn = await page.evaluate(async () => {
+  const s = window.__session;
+  const univ = s.univ;
+  univ.party.pcs.forEach((pc) => { pc.maxHealth = 200; pc.curHealth = 200; });
+  const monst = univ.town.monsters.find((m) => m.isAlive && !m.isFriendly);
+  if (!monst) return { skipped: true };
+  monst.mon.attacks = [{ dice: 4, sides: 6, type: 0 }];
+  monst.mon.skill = 20;
+  monst.mon.speed = 12;
+  let hurt = 0;
+  for (let round = 0; round < 12 && hurt === 0; round++) {
+    monst.active = 2; // ALERTED
+    monst.curLoc = { x: univ.currentPc.combatPos.x + 1, y: univ.currentPc.combatPos.y };
+    univ.party.pcs.forEach((pc) => { pc.ap = 0; });
+    s.startCombatRound();
+    hurt = univ.party.pcs.reduce((n, pc) => n + (200 - pc.curHealth), 0);
+  }
+  window.__redraw();
+  return { hurt, taken: univ.party.totalDamTaken, tail: univ.transcript.slice(-4) };
+});
+console.log('MONSTER TURN:', JSON.stringify(monstTurn));
+await shot('02c2-monster-turn');
+
 const combatEnd = await page.evaluate(() => {
   const s = window.__session;
   const ended = s.endCombat();
@@ -581,6 +605,36 @@ const combatEnd = await page.evaluate(() => {
   };
 });
 console.log('COMBAT END:', JSON.stringify(combatEnd));
+
+// The Fight button on the toolbar is what a player actually reaches for, so
+// find it by scanning the toolbar the way a click does and press it.
+const fightButton = await page.evaluate(() => {
+  const s = window.__session;
+  const screen = window.__screen;
+  window.__redraw();
+  let found = null;
+  for (let y = 360; y < 430 && !found; y += 2)
+    for (let x = 0; x < 300; x += 2) {
+      const hit = screen.buttonAt(x, y);
+      if (hit && hit.btn === 10) { found = { x, y }; break; } // SWORD
+    }
+  if (!found) return { found: false, mode: s.mode };
+  // Press it the way the click handler does.
+  s.startCombat(s.univ.party.direction);
+  window.__redraw();
+  const inFight = s.mode;
+  // And in a fight the toolbar swaps to the fight set, which has no sword.
+  let swordStillThere = false;
+  for (let y = 360; y < 430 && !swordStillThere; y += 2)
+    for (let x = 0; x < 300; x += 2) {
+      const hit = screen.buttonAt(x, y);
+      if (hit && hit.btn === 10) { swordStillThere = true; break; }
+    }
+  s.endCombat();
+  window.__redraw();
+  return { found: true, at: found, inFight, swordStillThere, backTo: s.mode };
+});
+console.log('FIGHT BUTTON:', JSON.stringify(fightButton));
 
 console.log('ERRORS:', errors.length ? errors.join(' | ') : 'none');
 await browser.close();
@@ -623,6 +677,11 @@ const ok =
   (combat.skipped === true || (combat.mode === 9 && combat.placed > 1
     && combat.hurt > 0 && combatEnd.ended === true && combatEnd.mode === 1
     && combatEnd.placed === 0)) &&
+  (monstTurn.skipped === true || monstTurn.hurt > 0) &&
+  fightButton.found === true &&
+  fightButton.inFight === 9 &&
+  fightButton.swordStillThere === false &&
+  fightButton.backTo === 1 &&
   reenter?.inTown === true &&
   errors.length === 0;
 console.log(ok ? 'PASS' : 'FAIL');

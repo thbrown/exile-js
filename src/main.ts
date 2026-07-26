@@ -532,6 +532,20 @@ async function main(): Promise<void> {
           pending = 'use';
         } else if (btn.btn === ToolbarButton.HAND) {
           void getItems();
+        } else if (btn.btn === ToolbarButton.SWORD) {
+          // The sword is Fight: drop into combat where the party stands.
+          if (session.inTown) session.startCombat(univ.party.direction);
+          else univ.addStringToBuf("Can't fight out here yet.");
+        } else if (btn.btn === ToolbarButton.END) {
+          // End combat and regroup.
+          session.endCombat();
+        } else if (btn.btn === ToolbarButton.WAIT) {
+          // Pass: give up the rest of this PC's turn.
+          if (session.mode === GameMode.COMBAT) {
+            univ.currentPc.ap = 0;
+            if (pickNextPc(univ, session.combatActivePc)) session.startCombatRound();
+            session.center = { ...univ.currentPc.combatPos };
+          }
         } else {
           // TODO(M3+): wire the remaining toolbar buttons to real actions.
           univ.addStringToBuf(`(${ToolbarButton[btn.btn]} is not implemented yet)`);
