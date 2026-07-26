@@ -70,7 +70,7 @@ Notes for M2 implementer:
 - Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
 - scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
-- `npm test` → 461 tests green (33 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
+- `npm test` → 474 tests green (34 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
 - `node scripts/verify-screen.mjs` (needs `npx vite --port 5199` running) drives the real UI headless and screenshots it. Playwright + chromium installed as devDependency.
 - Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
@@ -573,6 +573,38 @@ Fidelity notes for whoever picks this up:
   was refused with "Blocked: a creature is in the way." Now it raises the
   original's attack-friendly prompt and turns the town hostile, via the new
   `set_town_attitude` port. See the gotchas above.
+
+### Reported by the user and fixed (fourth play-test, 2026-07-26)
+
+- **"Swamps report poisoning and make the sound, but the effect never lands."**
+  It landed — `status[POISON]` was set correctly — but **nothing ever spent
+  it**. `increase_age`'s upkeep had never been ported, so no status effect did
+  anything over time: poison never bit, disease never rolled, acid never
+  burned, wounds never closed on the road and blessings never wore off. Now in
+  `game/increaseAge.ts` (`do_poison`, `handle_disease`, `handle_acid`, plus the
+  healing/SP/regeneration block), called from `afterPartyTurn` and again from
+  `combat_run_monst`. **The tick rates are the design**: outdoors poison bites
+  every 50 turns and you heal every 100; in town it's 20 and 50; in combat it's
+  every *other round*. They're `age % n === 0`, so the phase matters as much as
+  the rate — don't turn them into countdowns.
+- **"Spear throwing happens really fast and I only see the final effect."**
+  Right diagnosis, and the cause was worse than it looked: `do_monster_turn`
+  ran the entire monsters' turn in one synchronous burst with **no camera move
+  and no pacing**, then drew once. The C++ centres the view on each monster
+  about to act (`center = cur_monst->cur_loc; draw_terrain(0)`) and blocks
+  through `run_a_missile`, so you watch one thing at a time.
+  `game/anim.ts` is the non-blocking equivalent: a **shared timeline** that
+  animations book slots on instead of all starting "now". A missile books its
+  flight, so the next missile — and the hit's own explosion — start after it
+  lands; a camera move books a frame. `main.ts` plays the queue back in one rAF
+  loop and hands the view back to the party when it drains. Measured after the
+  fix: three spear-throwers launch 216ms apart, each hit shows after its own
+  spear arrives, and the camera visits all three.
+  Two things to know: `MONSTER_PAUSE_MS` is one frame because the original's
+  GameSpeed default is **0** — the dwell is the redraw, not an added pause, and
+  the Preferences dialog is what raises it. And `MAX_QUEUE_MS` caps the backlog
+  at 1.5s, which the C++ has no equivalent for; a crowded fight would otherwise
+  queue animations long after the turn resolved.
 
 ### Reported by the user and still open (2026-07-25)
 

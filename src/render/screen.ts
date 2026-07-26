@@ -643,7 +643,10 @@ export class Screen {
     if (this.booms.length === 0) return;
     const img = this.store.get('booms');
     const center = session.center;
+    const now = performance.now();
     for (const boom of this.booms) {
+      // Queued behind a missile still in flight — not yet.
+      if (boom.starts > now) continue;
       const q = boom.where.x - center.x + TER_VIEW_CENTER;
       const row = boom.where.y - center.y + TER_VIEW_CENTER;
       if (q < 0 || row < 0 || q >= TER_VIEW_TILES || row >= TER_VIEW_TILES) continue;
@@ -695,6 +698,8 @@ export class Screen {
     this.ctx.clip();
 
     for (const m of this.missiles) {
+      // Still waiting its turn on the timeline.
+      if (m.started > now) continue;
       const start = terrainSpotPos(
         m.from.x - center.x + TER_VIEW_CENTER, m.from.y - center.y + TER_VIEW_CENTER);
       const finish = terrainSpotPos(

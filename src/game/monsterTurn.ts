@@ -30,6 +30,8 @@ import { onHitTargetSpecial } from './weaponAbilities';
 import { ItemAbil } from '../data/item';
 import { FieldType } from '../data/fields';
 import { hasAbilEquip } from '../universe/inventory';
+import { focusOn } from './anim';
+import { doPoison, handleAcid, handleDisease } from './increaseAge';
 import { placeSpellPattern } from './spellPatterns';
 import type { GameSession } from './session';
 
@@ -674,6 +676,17 @@ export function doMonsterTurn(session: GameSession): void {
       const targSpace = !inCombat
         ? univ.party.townLoc
         : target < NO_ONE ? univ.party.pcs[target]!.combatPos : monst.curLoc;
+
+      // "Draw w. monster in center, if can see" — the view follows whichever
+      // monster is about to act, so you see where the spear comes from rather
+      // than only the damage number it leaves behind. Combat only: in town the
+      // camera stays on the party, which is where the action is anyway.
+      if (inCombat && monst.ap > 0 && monst.attitude !== Attitude.DOCILE
+        && (target !== NO_ONE || !monst.isFriendly)
+        && session.partyCanSeeMonst(monst)) {
+        focusOn(monst.curLoc);
+      }
+
       let actedYet = false;
 
       // Flee when its nerve is gone — but the unliving and the mindless never do.
@@ -796,6 +809,10 @@ export function combatRunMonst(session: GameSession): void {
       pc.status[which] = moveToZero(pc.status[which] ?? 0);
     }
   }
-  // TODO(M5b): handle_marked_damage, and the poison/disease/acid ticks that
-  // ride along with the end of a combat turn.
+  // Poison, disease and acid bite far more often in combat than they do on the
+  // road: every other round rather than every fiftieth turn.
+  if (univ.party.age % 2 === 0) doPoison(session);
+  if (univ.party.age % 3 === 0) handleDisease(session);
+  handleAcid(session);
+  // TODO(M5b): handle_marked_damage.
 }

@@ -20,6 +20,7 @@
 
 import { Location } from '../core/location';
 import { livingSound } from '../universe/living';
+import { animBook } from './anim';
 
 /**
  * How long a missile takes to cross, in ms. The C++ sleeps
@@ -43,7 +44,7 @@ export interface Missile {
   yAdj: number;
   /** `num_steps` — both the frame count and the divisor for the arc. */
   len: number;
-  /** Set by the sink: when this missile was launched. */
+  /** When this missile launches, on the shared animation timeline. */
   started: number;
 }
 
@@ -73,8 +74,12 @@ export function runAMissile(
   // "Eliminate missiles traveling 0 distance" — do_missile_anim drops any
   // missile whose destination is where it started.
   if (from.x === dest.x && from.y === dest.y) return;
+  // The C++ blocks here for the whole flight, so whatever comes next — the hit,
+  // the next monster's shot — happens after the missile lands. Booking the
+  // slot on the shared timeline is how that ordering survives without blocking.
+  const started = animBook(MISSILE_MS);
   sink?.({
-    from: { ...from }, dest: { ...dest }, type, pathType, xAdj, yAdj, len, started: 0,
+    from: { ...from }, dest: { ...dest }, type, pathType, xAdj, yAdj, len, started,
   });
 }
 

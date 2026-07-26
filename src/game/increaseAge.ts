@@ -1,0 +1,184 @@
+/**
+ * `increase_age`'s upkeep (boe.actions.cpp:3358) — everything that happens to
+ * the party *because time passed*, rather than because they did something.
+ *
+ * This is what makes a status effect an effect at all. Without it a swamp
+ * poisons you, prints that it poisoned you, and then nothing ever comes of it:
+ * `status[POISON]` sits there and no turn ever spends it. Same for disease,
+ * acid, the slow gain of health and spell points, and blessings wearing off.
+ *
+ * **The tick rates are the whole design.** Outdoors a turn is a long way, so
+ * poison bites every 50 turns and you heal every 100; in town both are much
+ * more frequent. `party.age % n === 0` is the test, so the *phase* matters as
+ * well as the rate — don't "simplify" these into counters.
+ *
+ * Not ported here (each is another milestone): hunger and eating,
+ * `special_increase_age`'s scenario timers, `push_things`, `dump_gold` and
+ * `process_fields`.
+ */
+
+import { DamageType } from '../data/monster';
+import { ItemAbil } from '../data/item';
+import { hasAbilEquip } from '../universe/inventory';
+import { Player } from '../universe/player';
+import { MainStatus, Race, Status, Trait } from '../universe/skills';
+import { damagePc } from './damage';
+import { GameMode } from './modes';
+import type { GameSession } from './session';
+
+/** move_to_zero — step a status one notch toward 0, from either side. */
+function moveToZero(pc: Player, which: Status): void {
+  const v = pc.status[which] ?? 0;
+  if (v > 0) pc.status[which] = v - 1;
+  else if (v < 0) pc.status[which] = v + 1;
+}
+
+function livePcs(session: GameSession): Player[] {
+  return session.univ.party.pcs.filter((pc) => pc.mainStatus === MainStatus.ALIVE);
+}
+
+/**
+ * do_poison (boe.combat.cpp:4365) — poison bites everyone carrying it, then
+ * usually fades by one.
+ */
+export function doPoison(session: GameSession): void {
+  const { univ } = session;
+  const poisoned = livePcs(session).filter((pc) => (pc.status[Status.POISON] ?? 0) > 0);
+  if (poisoned.length === 0) return;
+  univ.addStringToBuf('Poison:');
+  for (const pc of poisoned) {
+    const r1 = univ.rng.getRan(pc.status[Status.POISON] ?? 0, 1, 6);
+    damagePc(univ, pc, r1, DamageType.POISON, Race.UNKNOWN);
+    if (univ.rng.getRan(1, 0, 8) < 6) moveToZero(pc, Status.POISON);
+    // The C++ asks the same question twice and only the second one checks the
+    // trait, so a hardy PC shakes poison off about twice as fast. Its own
+    // comment wonders whether the two conditions were meant to be swapped;
+    // they weren't swapped, so neither are they here.
+    if (univ.rng.getRan(1, 0, 8) < 6 && pc.traits[Trait.GOOD_CONST]) {
+      moveToZero(pc, Status.POISON);
+    }
+  }
+}
+
+/**
+ * handle_disease (boe.combat.cpp:4393) — disease rolls a different misery for
+ * each sufferer every time it fires.
+ */
+export function handleDisease(session: GameSession): void {
+  const { univ } = session;
+  const sick = livePcs(session).filter((pc) => (pc.status[Status.DISEASE] ?? 0) > 0);
+  if (sick.length === 0) return;
+  univ.addStringToBuf('Disease:');
+  for (const pc of sick) {
+    const roll = univ.rng.getRan(1, 1, 10);
+    switch (roll) {
+      case 1: case 2: pc.poison(2, univ.rng); break;
+      case 3: case 4: pc.slow(2); break;
+      // TODO(M6): drain_pc costs a level, which needs the level-down path.
+      case 5: univ.addStringToBuf(`  ${pc.name} unaffected.`); break;
+      case 6: case 7: pc.curse(3); break;
+      case 8: pc.dumbfound(3, univ.rng); break;
+      default: univ.addStringToBuf(`  ${pc.name} unaffected.`); break;
+    }
+    let r1 = univ.rng.getRan(1, 0, 7);
+    if (pc.traits[Trait.GOOD_CONST]) r1 -= 2;
+    if (r1 <= 0 || hasAbilEquip(pc, ItemAbil.STATUS_PROTECTION, Status.DISEASE)) {
+      moveToZero(pc, Status.DISEASE);
+    }
+  }
+}
+
+/**
+ * handle_acid (boe.combat.cpp:4435) — acid burns every turn, not on a clock,
+ * and always fades by one afterwards.
+ */
+export function handleAcid(session: GameSession): void {
+  const { univ } = session;
+  const burning = livePcs(session).filter((pc) => (pc.status[Status.ACID] ?? 0) > 0);
+  if (burning.length === 0) return;
+  univ.addStringToBuf('Acid:');
+  for (const pc of burning) {
+    const r1 = univ.rng.getRan(pc.status[Status.ACID] ?? 0, 1, 6);
+    damagePc(univ, pc, r1, DamageType.ACID, Race.UNKNOWN);
+    moveToZero(pc, Status.ACID);
+  }
+}
+
+/**
+ * The status/healing half of increase_age, run once per party turn. `mode` is
+ * asked rather than `worldIsTown` because the rates key off MODE_OUTDOORS and
+ * MODE_TOWN specifically — during combat none of this happens, which is why a
+ * long fight doesn't heal anyone.
+ */
+export function increaseAgeEffects(session: GameSession): void {
+  const { univ } = session;
+  const { party } = univ;
+  const outdoors = session.mode === GameMode.OUTDOORS;
+  const town = session.mode === GameMode.TOWN;
+  if (!outdoors && !town) return;
+  const age = party.age;
+
+  // --- Poison, disease, acid ------------------------------------------------
+  if (party.pcs.some((pc) => (pc.status[Status.POISON] ?? 0) > 0)) {
+    if ((outdoors && age % 50 === 0) || (town && age % 20 === 0)) doPoison(session);
+  }
+  if (party.pcs.some((pc) => (pc.status[Status.DISEASE] ?? 0) > 0)) {
+    if ((outdoors && age % 100 === 0) || (town && age % 25 === 0)) handleDisease(session);
+  }
+  // Acid has no clock: it burns every single turn.
+  if (party.pcs.some((pc) => (pc.status[Status.ACID] ?? 0) > 0)) handleAcid(session);
+
+  // --- Health ---------------------------------------------------------------
+  if (outdoors) {
+    if (age % 100 === 0) for (const pc of party.pcs) pc.heal(2);
+  } else if (age % 50 === 0) {
+    // Bonus health above the maximum wears off one point at a time.
+    for (const pc of party.pcs) {
+      if (pc.mainStatus === MainStatus.ALIVE && pc.curHealth > pc.maxHealth) pc.curHealth--;
+    }
+    for (const pc of party.pcs) pc.heal(1);
+  }
+
+  // --- Spell points, and enlightenment wearing off --------------------------
+  if (outdoors) {
+    if (age % 80 === 0) {
+      for (const pc of party.pcs) pc.restoreSp(2);
+      for (const pc of party.pcs) {
+        if ((pc.status[Status.DUMB] ?? 0) < 0) pc.status[Status.DUMB]!++;
+      }
+    }
+  } else if (age % 40 === 0) {
+    for (const pc of party.pcs) {
+      if (pc.mainStatus === MainStatus.ALIVE && pc.curSp > pc.maxSp) pc.curSp--;
+      if ((pc.status[Status.DUMB] ?? 0) < 0) pc.status[Status.DUMB]!++;
+    }
+    for (const pc of party.pcs) pc.restoreSp(1);
+  }
+
+  // --- The two constitution traits ------------------------------------------
+  for (const pc of livePcs(session)) {
+    if (pc.traits[Trait.RECUPERATION] && univ.rng.getRan(1, 0, 10) === 1
+      && pc.curHealth < pc.maxHealth) pc.heal(2);
+    if (pc.traits[Trait.CHRONIC_DISEASE] && univ.rng.getRan(1, 0, 110) === 1) {
+      pc.disease(4, univ.rng);
+    }
+  }
+
+  // --- Blessing, haste and slow burning down; regeneration -------------------
+  if (age % 4 === 0) {
+    for (const pc of party.pcs) {
+      moveToZero(pc, Status.BLESS_CURSE);
+      moveToZero(pc, Status.HASTE_SLOW);
+      const item = hasAbilEquip(pc, ItemAbil.REGENERATE);
+      if (!item) continue;
+      if (pc.curHealth >= pc.maxHealth) continue;
+      // Outdoors regeneration fires rarely but heals four times as much, so it
+      // works out about the same over a journey.
+      if (outdoors && univ.rng.getRan(1, 0, 10) !== 5) continue;
+      const step = Math.trunc(item.item.abilStrength / 3);
+      let j = step === 0 ? univ.rng.getRan(1, 0, 1) : univ.rng.getRan(1, 0, step);
+      if (outdoors) j *= 4;
+      pc.heal(j);
+    }
+  }
+}

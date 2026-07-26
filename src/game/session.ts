@@ -31,6 +31,7 @@ import {
   adjacentEncounter, countWalls, createWandMonst, doOutdoorMonsters, outEncLevTot,
 } from './wandering';
 import { startOutdoorCombat } from './outCombat';
+import { increaseAgeEffects } from './increaseAge';
 import { LoadedMissile, fireMissile, isLoaded, loadMissile } from './missiles';
 import { CurTown } from '../universe/curTown';
 import {
@@ -270,6 +271,9 @@ export class GameSession {
    * TODO(M6): increase_age's timers, hunger and autosave.
    */
   private afterPartyTurn(): void {
+    // increase_age's upkeep — poison biting, wounds closing, blessings running
+    // out. Without this a status effect is only ever a line in the transcript.
+    increaseAgeEffects(this);
     if (this.mode === GameMode.TOWN) {
       doMonsters(this);
       doMonsterTurn(this);

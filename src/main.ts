@@ -6,8 +6,9 @@
 import { Location, shiftLoc } from './core/location';
 import { SpellPat } from './data/pattern';
 import { placeSpellPattern } from './game/spellPatterns';
-import { GameMode } from './game/modes';
-import { BOOM_MS, setBoomSink } from './game/booms';
+import { GameMode, isCombat } from './game/modes';
+import { setBoomSink } from './game/booms';
+import { FocusEvent, animPending, setFocusSink } from './game/anim';
 import { MISSILE_MS, setMissileSink } from './game/missileAnim';
 import { pickNextPc } from './game/combat';
 import { GameRng } from './core/rng';
@@ -759,42 +760,58 @@ async function main(): Promise<void> {
   });
   router.attach();
 
-  // boom_space's animation. The C++ draws the hit and then sleeps; here each
-  // boom carries an expiry and a short rAF loop redraws until they've all gone,
-  // so nothing blocks and several hits in one turn all show.
-  let boomLoopRunning = false;
-  setBoomSink((boom) => {
-    boom.expires = performance.now() + BOOM_MS;
-    screen.booms.push(boom);
-    if (boomLoopRunning) return;
-    boomLoopRunning = true;
-    const step = (): void => {
-      const now = performance.now();
-      screen.booms = screen.booms.filter((b) => b.expires > now);
-      redraw();
-      if (screen.booms.length > 0) requestAnimationFrame(step);
-      else boomLoopRunning = false;
-    };
-    requestAnimationFrame(step);
-  });
+  // The combat animations. The C++ blocks its way through these one at a time —
+  // centre on the monster, fly the missile, show the hit — so the whole lot is
+  // spread across a shared timeline here (`game/anim.ts`) and played back by
+  // one rAF loop. Booking a slot is what keeps a spear visible in flight
+  // instead of resolving in the same frame as the damage number.
+  const pendingFocus: FocusEvent[] = [];
+  let animLoopRunning = false;
 
-  // run_a_missile's animation, on the same non-blocking arrangement: the C++
-  // steps the sprite along and sleeps, here each missile carries a launch time
-  // and a rAF loop redraws until every one has landed.
-  let missileLoopRunning = false;
-  setMissileSink((missile) => {
-    missile.started = performance.now();
-    screen.missiles.push(missile);
-    if (missileLoopRunning) return;
-    missileLoopRunning = true;
+  const startAnimLoop = (): void => {
+    if (animLoopRunning) return;
+    animLoopRunning = true;
     const step = (): void => {
       const now = performance.now();
+      // A camera move applies the moment its slot arrives.
+      while (pendingFocus.length > 0 && pendingFocus[0]!.at <= now) {
+        session.center = { ...pendingFocus.shift()!.center };
+      }
+      screen.booms = screen.booms.filter((b) => b.expires > now);
       screen.missiles = screen.missiles.filter((m) => m.started + MISSILE_MS > now);
       redraw();
-      if (screen.missiles.length > 0) requestAnimationFrame(step);
-      else missileLoopRunning = false;
+      if (pendingFocus.length > 0 || screen.booms.length > 0
+        || screen.missiles.length > 0 || animPending() > 0) {
+        requestAnimationFrame(step);
+        return;
+      }
+      animLoopRunning = false;
+      // The queue has drained: hand the view back to whoever owns it.
+      recentreOnParty();
     };
     requestAnimationFrame(step);
+  };
+
+  /** Put the camera back where the game logic wants it after an animation. */
+  const recentreOnParty = (): void => {
+    const univ2 = session.univ;
+    session.center = isCombat(session.mode)
+      ? { ...univ2.currentPc.combatPos }
+      : { ...univ2.party.getLoc() };
+    redraw();
+  };
+
+  setBoomSink((boom) => {
+    screen.booms.push(boom);
+    startAnimLoop();
+  });
+  setMissileSink((missile) => {
+    screen.missiles.push(missile);
+    startAnimLoop();
+  });
+  setFocusSink((event) => {
+    pendingFocus.push(event);
+    startAnimLoop();
   });
 
   setStatus();

@@ -16,6 +16,7 @@
 
 import { Location } from '../core/location';
 import { livingSound } from '../universe/living';
+import { animAt } from './anim';
 
 /**
  * sound_lookup (boom_space) — sound type to sound file. A *negative* sound
@@ -38,7 +39,9 @@ export interface Boom {
   type: number;
   /** Printed over the sprite; 0 prints nothing. */
   damage: number;
-  /** Set by the sink: when this boom should stop being drawn. */
+  /** When this boom appears, on the shared animation timeline. */
+  starts: number;
+  /** When it stops being drawn. */
   expires: number;
 }
 
@@ -58,5 +61,9 @@ export function boomSpace(
   const file = soundType < 0 ? -soundType : (SOUND_LOOKUP[soundType] ?? 0);
   if (file > 0) livingSound(file);
   if (type < 0 || type > 6) return;
-  sink?.({ where: { ...where }, type, damage, expires: 0 });
+  // A hit shows at the front of the queue rather than booking its own slot:
+  // several blows in one turn land together, but a hit that follows a missile
+  // still waits for the missile to arrive.
+  const starts = animAt();
+  sink?.({ where: { ...where }, type, damage, starts, expires: starts + BOOM_MS });
 }
