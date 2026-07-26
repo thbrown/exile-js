@@ -6,9 +6,14 @@
 ## Quick orientation (read this first)
 
 - `npm run dev` → the game at http://localhost:5199. `?scenario=stealth` loads another.
-- Keys: arrows/keypad move, **L** look, **T** talk, **U** use, **G** get items, **1-6** whose pack shows.
-  In conversations: l/n/j/b/s/r/d/g/a. In shops: **a-h** buy, arrows scroll, Escape leaves.
-  In prompts: 1-6, Escape, Enter.
+- Keys follow the original's `handle_keystroke` (boe.actions.cpp:2772):
+  arrows/keypad move, **f** fight (and end a fight), **e** end combat,
+  **w**/Space wait — stand ready in combat, **d** parry, **x** hold the turn on
+  one PC, **t** talk, **l** look, **u** use, **b** bash, **g** get, **r** rest,
+  **1-6** whose pack shows. Keys for things not built yet (**a** map, **s**
+  shoot, **m**/**p** spells, **A** alchemy) say which milestone they're waiting
+  on. In conversations: l/n/j/b/s/r/d/g/a. In shops: **a-h** buy, arrows
+  scroll, Escape leaves. In prompts: 1-6, Escape, Enter.
 - `npm test` runs everything headless (no browser needed).
 - `node scripts/verify-screen.mjs` drives the real UI in Chromium and screenshots
   it — needs `npx vite --port 5199` running first. `SHOTS_DIR=...` sets where the
@@ -109,6 +114,11 @@ Notes for M2 implementer:
   `combatRunMonst` (the turn between rounds: the clock, the light, status
   decay). `session.afterPartyTurn` runs the town-mode pair after any
   successful move, which is what makes encounters happen at all.
+- **Hit animation (M5a)**: `game/booms.ts` ports `boom_space` — the explosion
+  frame from booms.png over the square with the damage printed on it, and the
+  sound. The C++ draws it and sleeps; here each boom carries an expiry and
+  `main.ts` runs a short rAF loop until they've all gone, which is the same
+  observable behaviour without blocking.
 
 ## Milestones (Part 1: BoE player)
 
@@ -194,6 +204,23 @@ Notes for M2 implementer:
   bonuses) and `cPlayer::stat_adj` (raw skill through `skill_bonus`) are
   different functions and not interchangeable. Rolls use `skill`; the training
   screen and the stat bonuses use `stat_adj`.
+- (2026-07-25) **`get_monst_sound` and `get_sound_type` return sound *types*,
+  not sound files.** They are indices into `boom_space`'s
+  `sound_lookup = {97,69,70,71,72,73,55,75,42,86,87,88,89,98,…}`, and the type
+  travels as `damage_pc`/`damage_monst`'s `sound_type` argument down to
+  `boom_space`, which does the lookup. Playing the index directly gives you a
+  cash register instead of a rat's bite. A *negative* sound skips the table and
+  is a file number.
+- (2026-07-25) **`is_blocked` (boe.locutils.cpp) is much broader than terrain.**
+  It also counts creatures, the party, other PCs, force barriers, cages and —
+  during combat only — marked special spots and city-trim terrain (to keep
+  combatants off portals). `place_party` and monster movement both depend on
+  that breadth; a terrain-only version puts PCs inside walls and on top of
+  monsters.
+- (2026-07-25) `place_party` forces index 0 through whatever the criteria say,
+  so the leading PC can legitimately stand somewhere blocked. Everyone else
+  must not. And when no surrounding spot passes, the whole party stacks on one
+  square — that's the original's behaviour in a cramped doorway, not a bug.
 - (2026-07-25) Movement, `talkTo` and `useSpace` are **async** now, because each can raise a dialog mid-action. `main.ts` keeps an `acting` flag so a held arrow key can't start a second move on top of the first — the C++ gets that for free by blocking.
 
 ## Handoff: what combat still needs (M5b and M5c)
@@ -238,6 +265,18 @@ Fidelity notes for whoever picks this up:
 - **`inTown` is false during combat** — MODE_COMBAT sits outside `is_town`'s
   range. Anything about seeing or lighting must ask `worldIsTown` instead.
     This one silently blanked the whole combat view once already.
+
+### Reported by the user and fixed (second play-test, 2026-07-25)
+
+- **The Fight (sword) button did nothing**, and the toolbar never swapped to
+  `FIGHT_BUTTONS`, so End and Wait weren't there either. All wired now.
+- **No hotkeys.** Replaced my invented set with the original's.
+- **PCs placed inside walls and on top of monsters** — `is_blocked` was
+  terrain-only. See the gotchas above.
+- **The wrong attack sound** (a cash register) — sound types were being played
+  as file numbers. See the gotchas above.
+- **No damage animation**, though the log and the HP were right: `boom_space`
+  had never been ported.
 
 ### Reported by the user and still open (2026-07-25)
 
