@@ -771,6 +771,40 @@ const booms = await page.evaluate(async () => {
 console.log('BOOMS:', JSON.stringify(booms));
 await shot('02c4-boom');
 
+// A corpse leaves loot: place_treasure runs from kill_monst, so finishing a
+// well-stocked monster off has to leave items on its square.
+const loot = await page.evaluate(async () => {
+  const s = window.__session;
+  const univ = s.univ;
+  const monst = univ.town.monsters.find((m) => m.isAlive);
+  if (!monst) return { skipped: true };
+  monst.attitude = 1;
+  monst.mon.armor = 0;
+  monst.mon.treasure = 4; // the richest class, so something is near certain
+  monst.mon.level = 20;
+  monst.curLoc = { x: univ.currentPc.combatPos.x, y: univ.currentPc.combatPos.y - 1 };
+  monst.health = 1;
+  const where = { ...monst.curLoc };
+  const before = univ.town.items.length;
+  const pc = univ.currentPc;
+  pc.skills[3] = 20; pc.skills[1] = 20;
+  pc.items[0] = { ...pc.items[0], variety: 1, name: 'sword', fullName: 'sword',
+    itemLevel: 10, weapType: 3, ability: 0 };
+  pc.equip[0] = true;
+  for (let i = 0; i < 30 && monst.isAlive; i++) {
+    pc.ap = 4;
+    s.attackAt(where);
+  }
+  const dropped = univ.town.items.filter((it) => it.itemLoc.x === where.x && it.itemLoc.y === where.y);
+  window.__redraw();
+  return {
+    dead: !monst.isAlive, before, after: univ.town.items.length,
+    dropped: dropped.map((it) => it.fullName || it.name),
+  };
+});
+console.log('LOOT:', JSON.stringify(loot));
+await shot('02c5-loot');
+
 // Attacking someone peaceful: the prompt has to come up, and going through
 // with it has to turn the whole town on the party.
 const attackFriendly = await page.evaluate(async () => {
@@ -896,6 +930,7 @@ const ok =
   fightButton.swordStillThere === false &&
   fightButton.backTo === 1 &&
   (encounter.skipped !== undefined || (encounter.noticed === true && encounter.hurt > 0)) &&
+  (loot.skipped === true || (loot.dead === true && loot.dropped.length > 0)) &&
   placement.worst === null &&
   // sound_lookup[2] = 70 is the heavy-blade hit. Before the fix this played the
   // *sound type* (2) as a file number, which is the cash-register noise.

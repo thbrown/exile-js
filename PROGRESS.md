@@ -125,6 +125,13 @@ Notes for M2 implementer:
   swings *and* turns the town. `CurTown.monstHostile` is the `cPopulation::hostile`
   flag, and `do_monsters` reads it so nobody drifts idly once it's set.
   `session.combatMove` is **async** now because of that prompt.
+- **Loot (2026-07-26)**: `game/loot.ts` ports `place_item`, `reset_item_max`,
+  `item_val`, `place_glands` and `place_treasure` (boe.items.cpp:168-841) —
+  the five treasure tables verbatim and, more importantly, `place_treasure`'s
+  whole `get_ran` sequence. `killMonst` calls both: glands hang off the
+  experience check (nothing party-summoned leaves a body part), treasure off
+  its own `summonTime === 0`. Kill a guard and it drops gold, a necklace and
+  the armour it was wearing.
 - **The automap (2026-07-26)**: `render/mapScreen.ts` ports `draw_map`
   (boe.town.cpp:1317) and `display_map`/`close_map`. **A** or the MAP toolbar
   button toggles it; Escape closes it. The original opens a second 296×277 OS
@@ -252,6 +259,16 @@ Notes for M2 implementer:
   Despite the name, `MAKE_TOWN_HOSTILE` is the group version and takes
   `set_town_attitude(ex1a, ex1b, ex2a)`: a *slot range*, not a monster type.
   Both were ported wrong first time round.
+- (2026-07-26) `place_treasure`'s forced mode (`mode == 1`) loops
+  `do … while(no item || too expensive)` with **no exit** — a scenario whose
+  treasure class holds nothing cheap enough would hang the game. The port caps
+  it at 100 tries and leaves nothing; that's the one deliberate divergence in
+  the function, and it can only differ from the C++ in a case where the C++
+  never returns.
+- (2026-07-26) `place_treasure` rolls the identify chance **once per living
+  PC**, and keeps rolling after one has already succeeded. The extra draws
+  change nothing visible but they move the RNG on, so a port that breaks out of
+  the loop early desynchronises every later roll.
 - (2026-07-26) `draw_map`'s small-icon branch is indexed by the terrain's
   **full-size `picture`**, not by the `map_pic` it just tested — `map_pic` only
   decides *which* branch runs (termap cell vs. a shrunken terrain tile). It
@@ -287,9 +304,8 @@ deliberately left at the seam — 13 markers as of now. In rough order:
 5. **Random encounters outdoors** — the user reported this. It needs
    `create_wand_monst` and outdoor combat terrain (`create_out_combat_terrain`,
    boe.town.cpp:817), and `Sector.wandering` is already parsed and waiting.
-6. **`place_treasure` / `place_glands`** (boe.items.cpp) — what a corpse leaves
-   to loot. Marked in `killMonst`. Self-contained and worth doing early, since
-   it's what makes clearing a dungeon feel like anything.
+6. ~~**`place_treasure` / `place_glands`**~~ — **done** (2026-07-26), in
+   `game/loot.ts`. Corpses drop things now.
 
 Then M5c: spells, spell patterns (`place_spell_pattern`), and the field
 *behaviours* — damage on entry, quickfire spreading, webs slowing. The field
@@ -362,8 +378,7 @@ Smaller things outstanding, all independent of M5:
 1. M5b continued: the `uAbility` port, because breath, missiles, monster
    spells and summons all depend on it. Then outdoor wandering monsters,
    which additionally need the outdoor combat arena.
-2. `place_treasure` — what a corpse leaves to loot — is still a good
-   standalone chunk. (The MAP overlay landed 2026-07-26.)
+2. (The MAP overlay and `place_treasure` both landed 2026-07-26.)
 3. M2's last leftover is the replay driver.
 4. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in
    parallel at any time.

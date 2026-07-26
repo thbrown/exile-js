@@ -16,11 +16,12 @@ import { Location } from '../core/location';
 import { FieldType } from '../data/fields';
 import { ItemAbil, ItemType } from '../data/item';
 import { variety } from '../data/itemVariety';
-import { DamageType } from '../data/monster';
+import { DamageType, Monster } from '../data/monster';
 import { Creature, CreatureStatus } from '../universe/creature';
 import { getProtLevel, hasAbilEquip, takeItem } from '../universe/inventory';
 import { SpellNote, livingSound } from '../universe/living';
 import { boomSpace } from './booms';
+import { placeGlands, placeTreasure } from './loot';
 import { NUM_INVEN_SLOTS, Player } from '../universe/player';
 import { MainStatus, Race, Skill, Status, Trait } from '../universe/skills';
 import { Universe } from '../universe/universe';
@@ -382,10 +383,8 @@ export function damageMonst(
 
 /**
  * kill_monst (boe.specials.cpp:1599) — the death rattle, the SDF a scenario
- * watches for, the kill special, the experience, and the mess left on the
- * floor. `spec1` is zeroed so a specially-summoned monster can't come back.
- *
- * TODO(M5b): place_treasure and place_glands — what the corpse leaves to loot.
+ * watches for, the kill special, the experience, the loot and the mess left on
+ * the floor. `spec1` is zeroed so a specially-summoned monster can't come back.
  */
 export function killMonst(
   univ: Universe,
@@ -417,6 +416,14 @@ export function killMonst(
       univ.party.totalMKilled++;
       awardPartyXp(univ, Math.max(Math.trunc(xp / 6), 1));
     }
+    // Glands hang off the experience check, so something the party summoned
+    // leaves no body part either.
+    placeGlands(univ, monst.curLoc, monsterDef(univ, monst));
+  }
+  // Treasure has its own condition: a summoned creature carries nothing,
+  // whoever called it up.
+  if (monst.summonTime === 0) {
+    placeTreasure(univ, monst.curLoc, Math.trunc(monst.mon.level / 2), monst.mon.treasure, 0);
   }
 
   const town = univ.town;
@@ -431,6 +438,24 @@ export function killMonst(
 
   monst.spec1 = 0;
   monst.active = CreatureStatus.DEAD;
+}
+
+/**
+ * place_glands looks its monster up by number (`scen_monsters[m_type]`, or
+ * `party.summons` for a summoned one) rather than using the creature in hand.
+ * A Creature here owns a copy of that same record, so the copy is the fallback
+ * — but the scenario's original is preferred, since `set_town_attitude` and the
+ * like mutate the copy.
+ *
+ * TODO(M5b): numbers >= 10000 index `party.summons`, which arrives with the
+ * summoning abilities.
+ */
+function monsterDef(univ: Universe, monst: Creature): Monster {
+  if (monst.number < 10000) {
+    const def = univ.scenario.scenMonsters[monst.number];
+    if (def) return def;
+  }
+  return monst.mon;
 }
 
 /** The dying sound, which depends on what kind of thing it was. */
