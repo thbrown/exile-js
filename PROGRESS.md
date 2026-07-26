@@ -127,6 +127,10 @@ Notes for M2 implementer:
 - (2026-07-25) A `CANT_ENTER` node with `ex2a > 0` runs even on a square whose terrain blocks movement, and its `b` return forces the party through. That's how a scenario walks you through a wall.
 - (2026-07-25) Special-node fields default to **-1**, which is truthy in both C++ and JS. Nodes that test a field as a boolean (`if(spec.pic)`) therefore behave as "set" unless the scenario writes 0.
 - (2026-07-25) `day_reached(day, event)` tests the day the event *happened* (`key_times[event] >= day`), not elapsed time since it. Easy to get backwards.
+- (2026-07-25) `handle_talk` takes the clicked square as given and only checks line of sight — **you can talk to anyone you can see, at any distance**, and its gate compares against 4, not SIGHT_BLOCKED. A UI that reduces the click to one step toward the target is wrong.
+- (2026-07-25) `end_town_mode` **returns** the outdoor square to walk out onto, and `handle_action` assigns it straight over the move's destination (boe.actions.cpp:770). A town with no defined exits (Fort Talrus has none) falls back to "one step from where you entered", so the party leaves from wherever it was standing outdoors.
+- (2026-07-25) `use_space` checks webs and pushable crates/barrels/blocks **before** the terrain specials, so a port that starts with terrain can never reach them.
+- (2026-07-25) Drawing creatures needs `party_can_see_monst`, or they show through unexplored walls and darkness — a big creature counts as visible if any one of its squares is.
 - (2026-07-25) Movement, `talkTo` and `useSpace` are **async** now, because each can raise a dialog mid-action. `main.ts` keeps an `acting` flag so a held arrow key can't start a second move on top of the first — the C++ gets that for free by blocking.
 
 ## Handoff: how to build combat (the next chunk)
@@ -164,6 +168,25 @@ Suggested order:
 Once combat exists, these open up almost for free: the specials VM's DAMAGE /
 AFFECT_MONST / spell-pattern opcodes, `ONCE_TRAP` and the encounter nodes,
 item Use, and the enchanting service (which just needs `eEnchant`).
+
+### Reported by the user and still open (2026-07-25)
+
+Two of the seven issues from the first real play-test are genuinely blocked,
+and both are honest gaps rather than bugs:
+
+- **The MAP button does nothing.** `draw_map` / the town-and-outdoor map
+  overlay was never built. It's self-contained UI work (a scaled-down view of
+  the explored grid over the whole window) and doesn't depend on any missing
+  system — a good standalone task. Reference: `boe.graphics.cpp`'s
+  `draw_map` and the `MODE_...` map handling in `boe.actions.cpp`.
+- **No random encounters outdoors.** `check_special_terrain`'s wandering-
+  monster path, `create_wand_monst` and `handle_wandering_specials`
+  (boe.specials.cpp:119) all need combat to have anywhere to go, so this is
+  M5b work. `Sector.wandering` is already parsed and sitting unused.
+
+The other five were fixed: talk-by-click, NPCs visible through unexplored
+walls, using a web to clear it, the town-exit coordinate, and the Rest
+command with its sound. Swamps poison again.
 
 Smaller things outstanding, all independent of M5:
 - **The replay driver** is M2's last leftover (`test/replays` in exile-wasm).
