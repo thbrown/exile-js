@@ -6,15 +6,20 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { GameRng } from '../src/core/rng';
-import { DamageType } from '../src/data/monster';
-import { MonstAbil, MonstGen, MonstMissile } from '../src/data/monsterAbility';
+import { Attitude, DamageType } from '../src/data/monster';
+import {
+  MonstAbil, MonstGen, MonstMissile, MonstSummon,
+} from '../src/data/monsterAbility';
 import { defaultItem } from '../src/data/item';
 import {
-  monsterBasicAbil, monsterFireMissile, pickMonsterAbility,
+  monsterBasicAbil, monsterFireMissile, monsterSummon, pickMonsterAbility,
 } from '../src/game/monsterAbilities';
 import { Scenario } from '../src/data/scenario';
 import { damageMonst } from '../src/game/damage';
-import { findClearSpot, placeMonster } from '../src/game/monsterPlace';
+import {
+  findClearSpot, getSummonMonster, placeMonster, summonMonster,
+} from '../src/game/monsterPlace';
+import { doMonsterTurn, monsterAttack } from '../src/game/monsterTurn';
 import { GameSession } from '../src/game/session';
 import { loadScenario } from '../src/fileio/loadScenario';
 import { FsSource } from '../src/fileio/source';
@@ -236,5 +241,105 @@ describe('ranged monster abilities', () => {
     s.univ.party.gold = 1000;
     monsterBasicAbil(s, m, MonstAbil.STEAL_GOLD, abil, s.univ.party.pcs[0]!);
     expect(s.univ.party.gold).toBeLessThan(1000);
+  });
+});
+
+describe('summoning', () => {
+  it('places the creature the ability names and marks it as a summon', () => {
+    const s = inTown();
+    const m = aLiveMonster(s);
+    const abil = m.mon.abil[MonstAbil.SUMMON]!;
+    abil.active = true;
+    abil.summon.chance = 100; // always
+    abil.summon.type = MonstSummon.TYPE;
+    abil.summon.what = 3;
+    abil.summon.min = 1;
+    abil.summon.max = 1;
+    abil.summon.len = 10;
+    const before = s.univ.town!.monsters.filter((c) => c.isAlive).length;
+    monsterSummon(s, m);
+    const alive = s.univ.town!.monsters.filter((c) => c.isAlive);
+    expect(alive.length).toBe(before + 1);
+    const summoned = alive.find((c) => c.summonTime === 10);
+    expect(summoned).toBeDefined();
+    expect(summoned!.number).toBe(3);
+  });
+
+  it('does nothing when the odds roll fails', () => {
+    const s = inTown();
+    const m = aLiveMonster(s);
+    const abil = m.mon.abil[MonstAbil.SUMMON]!;
+    abil.active = true;
+    abil.summon.chance = 0; // get_ran(1,1,100) is never below 0
+    abil.summon.type = MonstSummon.TYPE;
+    abil.summon.what = 3;
+    abil.summon.min = 1;
+    abil.summon.max = 1;
+    const before = s.univ.town!.monsters.filter((c) => c.isAlive).length;
+    monsterSummon(s, m);
+    expect(s.univ.town!.monsters.filter((c) => c.isAlive).length).toBe(before);
+  });
+
+  it('get_summon_monster finds a monster of the class asked for', () => {
+    const s = inTown();
+    const cls = s.univ.scenario.scenMonsters.find((mon) => mon.summonType > 0)?.summonType;
+    if (cls === undefined) return; // no summonable monster in this scenario
+    const which = getSummonMonster(s, cls);
+    expect(s.univ.scenario.scenMonsters[which]!.summonType).toBe(cls);
+  });
+
+  it('a summon expires and the creature disappears', () => {
+    const s = inTown();
+    const m = aLiveMonster(s);
+    expect(summonMonster(s, 3, m.curLoc, 1, Attitude.HOSTILE_A, false, true)).toBe(true);
+    const summoned = s.univ.town!.monsters.find((c) => c.summonTime === 1)!;
+    doMonsterTurn(s);
+    expect(summoned.isAlive).toBe(false);
+  });
+});
+
+describe('touch abilities on a landed blow', () => {
+  it('a burning touch damages the PC that was hit', () => {
+    const s = inTown();
+    const m = aLiveMonster(s);
+    // One heavy attack, from something willing to throw it.
+    m.attitude = Attitude.HOSTILE_A;
+    m.mon.attacks = [{ type: 0, dice: 20, sides: 10 }];
+    m.mon.skill = 20;
+    const abil = m.mon.abil[MonstAbil.DAMAGE]!;
+    abil.active = true;
+    abil.gen.type = MonstGen.TOUCH;
+    abil.gen.odds = 0; // see the note: 0 odds means it always fires
+    abil.gen.strength = 8;
+    abil.gen.extra = DamageType.FIRE;
+    const pc = s.univ.party.pcs[0]!;
+    pc.maxHealth = 40000;
+    pc.curHealth = 40000;
+    pc.items.fill(defaultItem());
+    pc.equip.fill(false);
+    // The swing can still miss, so give it several rounds.
+    for (let i = 0; i < 20; i++) monsterAttack(s, m, pc);
+    expect(s.univ.transcript.join('\n')).toContain('Burning touch!');
+  });
+
+  it('odds above zero suppress the touch when the roll comes in under them', () => {
+    const s = inTown();
+    const m = aLiveMonster(s);
+    m.attitude = Attitude.HOSTILE_A;
+    m.mon.attacks = [{ type: 0, dice: 20, sides: 10 }];
+    m.mon.skill = 20;
+    const abil = m.mon.abil[MonstAbil.DAMAGE]!;
+    abil.active = true;
+    abil.gen.type = MonstGen.TOUCH;
+    abil.gen.odds = 1000; // every roll is <= 1000, so it never fires
+    abil.gen.strength = 8;
+    abil.gen.extra = DamageType.FIRE;
+    const pc = s.univ.party.pcs[0]!;
+    pc.maxHealth = 40000;
+    pc.curHealth = 40000;
+    pc.items.fill(defaultItem());
+    pc.equip.fill(false);
+    for (let i = 0; i < 20; i++) monsterAttack(s, m, pc);
+    expect(s.univ.transcript.join('\n')).not.toContain('Burning touch!');
   });
 });

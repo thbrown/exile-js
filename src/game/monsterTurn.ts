@@ -5,9 +5,8 @@
  *
  * This is the M5b slice that makes a fight a fight: monsters notice the party,
  * get action points, pick a target, close on it and hit it. What it does *not*
- * do yet is anything that needs the `uAbility` port — breath weapons, missiles,
- * spellcasting, summoning, touch effects — and each of those is marked where it
- * belongs so the rest can be dropped in without rearranging this.
+ * do yet is monster spellcasting; missiles, breath, summoning and the touch
+ * effects are all here, and the remaining gaps are marked where they belong.
  */
 
 import { Location, dist, loc, locsEqual } from '../core/location';
@@ -18,10 +17,12 @@ import { MonstMelee } from '../data/monster';
 import { Player } from '../universe/player';
 import { MainStatus, Race, Skill, Status } from '../universe/skills';
 import { Universe } from '../universe/universe';
-import { MonstAbil } from '../data/monsterAbility';
+import {
+  MonstAbil, MonstAbilCat, MonstGen, abilityCategory,
+} from '../data/monsterAbility';
 import { NO_ONE } from './combat';
 import {
-  abilityCost, monsterBasicAbil, monsterFireMissile, pickMonsterAbility,
+  abilityCost, monsterBasicAbil, monsterFireMissile, monsterSummon, pickMonsterAbility,
 } from './monsterAbilities';
 import { GameMode } from './modes';
 import { damageMonst, damagePc, hitChance } from './damage';
@@ -454,6 +455,118 @@ export function monsterAttack(
       target.poison(monst.status[Status.POISONED_WEAPON] ?? 0, univ.rng);
       monst.status[Status.POISONED_WEAPON] = moveToZero(monst.status[Status.POISONED_WEAPON] ?? 0);
     }
+
+    // Touch abilities fire off a blow that landed — the burning touch, the
+    // paralysing touch, the pickpocket.
+    monsterTouches(session, monst, target, i);
+  }
+}
+
+/**
+ * The `for(auto& abil : attacker->abil)` tail of monster_attack: every active
+ * GENERAL ability whose delivery is TOUCH announces itself and then runs
+ * `monst_basic_abil` on the target it just hit.
+ *
+ * The odds test is kept verbatim and is **backwards**: the C++ skips the
+ * ability when the roll comes in *at or under* its odds, so a 1000-in-1000
+ * touch never fires and a 0-odds one always does (0 fails the `> 0` guard).
+ * It looks like a slip, but a "fix" would change how hard several monsters
+ * hit, so it stays with a test pinning it.
+ */
+function monsterTouches(
+  session: GameSession, monst: Creature, target: Living, attackIndex: number,
+): void {
+  const univ = session.univ;
+  const pcTarget = target instanceof Player ? target : null;
+
+  for (let key = MonstAbil.MISSILE; key <= MonstAbil.SUMMON; key++) {
+    const abil = monst.mon.abil[key];
+    if (!abil?.active) continue;
+    if (abilityCategory(key) !== MonstAbilCat.GENERAL) continue;
+    if (abil.gen.type !== MonstGen.TOUCH) continue;
+    if (abil.gen.odds > 0 && univ.rng.getRan(1, 1, 1000) <= abil.gen.odds) continue;
+
+    let sound = 0;
+    switch (key) {
+      case MonstAbil.STUN: univ.addStringToBuf('  Stuns!'); break;
+      case MonstAbil.PETRIFY: univ.addStringToBuf('  Petrifying touch!'); break;
+      case MonstAbil.DRAIN_SP: univ.addStringToBuf('  Drains magic!'); break;
+      case MonstAbil.DRAIN_XP: univ.addStringToBuf('  Drains life!'); break;
+      case MonstAbil.KILL: univ.addStringToBuf('  Killing touch!'); break;
+      case MonstAbil.STEAL_FOOD:
+        // Nothing to steal from another monster.
+        if (!pcTarget) continue;
+        univ.addStringToBuf('  Steals food!');
+        sound = 26;
+        break;
+      case MonstAbil.STEAL_GOLD:
+        if (!pcTarget) continue;
+        univ.addStringToBuf('  Steals gold!');
+        break;
+      case MonstAbil.FIELD: break;
+      case MonstAbil.DAMAGE:
+      case MonstAbil.DAMAGE2:
+        univ.addStringToBuf(damageTouchMsg(abil.gen.extra as DamageType));
+        break;
+      case MonstAbil.STATUS2:
+      case MonstAbil.STATUS: {
+        // STATUS2 rides only the first attack; STATUS rides every one.
+        if (key === MonstAbil.STATUS2 && attackIndex > 0) continue;
+        const msg = statusTouchMsg(abil.gen.extra as Status);
+        if (msg === null) continue;
+        // Charming something that isn't a creature is meaningless.
+        if (abil.gen.extra === Status.CHARM && !(target instanceof Creature)) continue;
+        univ.addStringToBuf(msg);
+        break;
+      }
+      default:
+        // Everything else isn't a touch at all.
+        continue;
+    }
+    if (sound > 0) livingSound(sound);
+    monsterBasicAbil(session, monst, key, abil, target);
+  }
+}
+
+/** The DAMAGE/DAMAGE2 half of monster_attack's touch messages. */
+function damageTouchMsg(dmg: DamageType): string {
+  switch (dmg) {
+    case DamageType.FIRE: return '  Burning touch!';
+    case DamageType.COLD: return '  Freezing touch!';
+    case DamageType.ACID: return '  Acid touch!';
+    case DamageType.MAGIC: return '  Shocking touch!';
+    case DamageType.SPECIAL:
+    case DamageType.UNBLOCKABLE: return '  Eerie touch!';
+    case DamageType.POISON: return '  Slimy touch!';
+    case DamageType.WEAPON: return '  Drains stamina!';
+    case DamageType.UNDEAD: return '  Chilling touch!';
+    case DamageType.DEMON: return '  Unholy touch!';
+    // MARKED is invalid here, and the C++ prints nothing for it.
+    default: return '';
+  }
+}
+
+/** The STATUS/STATUS2 half. `null` means the ability is skipped entirely. */
+function statusTouchMsg(stat: Status): string | null {
+  switch (stat) {
+    case Status.POISON: return '  Poisonous!';
+    case Status.DISEASE: return '  Causes disease!';
+    case Status.DUMB: return '  Dumbfounds!';
+    case Status.WEBS: return '  Webs!';
+    case Status.ASLEEP: return '  Sleeps!';
+    case Status.PARALYZED: return '  Paralysis touch!';
+    case Status.ACID: return '  Acid touch!';
+    case Status.HASTE_SLOW: return '  Slowing touch!';
+    case Status.BLESS_CURSE: return '  Cursing touch!';
+    case Status.CHARM: return '  Charming touch!';
+    case Status.FORCECAGE: return '  Entrapping touch!';
+    case Status.INVISIBLE: return '  Revealing touch!';
+    case Status.INVULNERABLE: return '  Piercing touch!';
+    case Status.MAGIC_RESISTANCE: return '  Overwhelming touch!';
+    case Status.MARTYRS_SHIELD: return "  Anti-martyr's touch!";
+    case Status.POISONED_WEAPON: return '  Poison-draining touch!';
+    // MAIN is invalid.
+    default: return null;
   }
 }
 
@@ -604,6 +717,14 @@ export function doMonsterTurn(session: GameSession): void {
         }
         monst.ap = Math.max(0, monst.ap - 1);
         actedYet = true;
+      }
+
+      // Summoning rides along with the action rather than costing one, and it
+      // happens once per action the monster takes — the C++ puts it at the
+      // bottom of the same loop, gated on the monster actually seeing its foe.
+      // TODO(M5c): the RADIATE half of this block needs place_spell_pattern.
+      if (target !== NO_ONE && session.canSeeLight(monst.curLoc, targSpace) < 5) {
+        monsterSummon(session, monst);
       }
 
       if (!actedYet) monst.ap = 0;

@@ -9,6 +9,7 @@ import { Attitude } from '../data/monster';
 import { defaultTownperson } from '../data/town';
 import { FieldType } from '../data/fields';
 import { Creature, CreatureStatus, assignCreature } from '../universe/creature';
+import { SpellNote } from '../universe/living';
 import { GameMode } from './modes';
 import type { GameSession } from './session';
 
@@ -72,9 +73,10 @@ export function placeMonster(
   while (i < town.monsters.length
     && (town.monsters[i]!.isAlive || town.monsters[i]!.specEncCode > 0)) i++;
 
-  // TODO(M5b): `which >= 10000` reads party.summons, which arrives with the
-  // summoning abilities.
-  const template = univ.scenario.scenMonsters[which];
+  // "10000 or more means an exported summon saved with the party."
+  const template = which >= 10000
+    ? univ.party.summons[which - 10000]
+    : univ.scenario.scenMonsters[which];
   if (!template) return town.monsters.length;
 
   const preset = defaultTownperson();
@@ -100,4 +102,75 @@ export function placeMonster(
   town.setField(where.x, where.y, FieldType.OBJECT_BARREL, false);
   town.setField(where.x, where.y, FieldType.OBJECT_BLOCK, false);
   return i;
+}
+
+/**
+ * get_summon_monster (boe.monster.cpp:1210) — pick a random scenario monster
+ * whose `summonType` matches the class asked for. Two hundred blind draws, so
+ * a scenario with no monster of that class costs 200 RNG calls and then says
+ * so; keep the count, since every later roll depends on it.
+ */
+export function getSummonMonster(session: GameSession, summonClass: number): number {
+  const univ = session.univ;
+  const monsters = univ.scenario.scenMonsters;
+  for (let i = 0; i < 200; i++) {
+    const j = univ.rng.getRan(1, 0, monsters.length - 1);
+    if (monsters[j]?.summonType === summonClass) return j;
+  }
+  univ.addStringToBuf('  Summon failed.');
+  return 0;
+}
+
+/**
+ * summon_monster (boe.monster.cpp:1152) — put a summoned creature next to
+ * `where` and give it an expiry.
+ *
+ * `where` means two different things, exactly as in the C++: in town, or while
+ * the monsters are taking their turn, it is the *caster's* square and the
+ * creature appears in a clear spot near it; in combat, when the party summons,
+ * it is the square to use, and only a PC standing there sends it looking
+ * elsewhere.
+ */
+export function summonMonster(
+  session: GameSession,
+  which: number,
+  where: Location,
+  duration: number,
+  givenAttitude: Attitude,
+  byParty: boolean,
+  monstersGoing = false,
+): boolean {
+  const univ = session.univ;
+  const town = univ.town;
+  if (which <= 0 || !town) return false;
+
+  let dest: Location;
+  if (session.inTown || monstersGoing) {
+    dest = findClearSpot(session, where, 0);
+    if (dest.x === 0) return false;
+  } else {
+    let target = where;
+    if (univ.party.pcs.some((pc) => pc.isAlive && locsEqual(pc.combatPos, target))) {
+      target = findClearSpot(session, target, 0);
+      if (target.x === 0) return false;
+    }
+    if (town.hasField(target.x, target.y, FieldType.OBJECT_BARREL)
+      || town.hasField(target.x, target.y, FieldType.OBJECT_CRATE)
+      || town.hasField(target.x, target.y, FieldType.OBJECT_BLOCK)) return false;
+    dest = target;
+  }
+
+  const spot = placeMonster(session, which, dest);
+  if (spot >= town.monsters.length) {
+    // A long-lived summon complains about the crowd; a brief one goes quietly.
+    if (duration < 100) univ.addStringToBuf('  Too many monsters.');
+    return false;
+  }
+
+  const c = town.monsters[spot]!;
+  c.attitude = givenAttitude;
+  c.summonTime = duration;
+  c.partySummoned = byParty;
+  c.spellNote(SpellNote.SUMMONED);
+  return true;
 }

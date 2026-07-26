@@ -30,7 +30,7 @@
 
 ## Current state
 
-**M2 done bar two items, M3 nearly done, M4 complete, M5a (melee combat) complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; what's still missing from combat is breath weapons, missiles, spellcasting and summons (M5b), and the spells and field behaviours (M5c).**
+**M2 done bar two items, M3 nearly done, M4 complete, M5a (melee combat) complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; what's still missing from combat is monster spellcasting and the party's own missiles (M5b), and the spells and field behaviours (M5c).**
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -152,6 +152,21 @@ Notes for M2 implementer:
   milestone they're waiting on. Not ported: `run_a_missile`, the projectile
   flying across the screen — the shot resolves at once with its sound, and the
   damage still draws its explosion.
+- **Summons and touch abilities (M5b, 2026-07-26)**:
+  `game/monsterPlace.ts` gains `get_summon_monster` and `summon_monster`
+  (boe.monster.cpp:1152/1210), and `place_monster` now honours the
+  `which >= 10000` arm that reads `party.summons` (a new, normally empty list
+  on `Party`). `monsterAbilities.ts`'s `monsterSummon` ports the SUMMON half of
+  do_monster_turn's trailing block: it runs once per action the monster takes,
+  costs nothing, and only fires when the summoner can actually see its foe.
+  The three summon kinds all work — a named monster, a summon *class* drawn
+  through `get_summon_monster`, and a random monster of a given race.
+  `monsterTurn.ts`'s `monsterAttack` now runs the **touch abilities** off a
+  blow that landed: the burning/freezing/paralysing touch, the killing touch,
+  the food and gold thieves, each with the original's message and
+  `monst_basic_abil` behind it. STATUS2 rides only the first attack, STATUS
+  every one. Still open in this area: monster spellcasting, RADIATE (needs
+  M5c's spell patterns) and the party's own missiles.
 - **Loot (2026-07-26)**: `game/loot.ts` ports `place_item`, `reset_item_max`,
   `item_val`, `place_glands` and `place_treasure` (boe.items.cpp:168-841) —
   the five treasure tables verbatim and, more importantly, `place_treasure`'s
@@ -182,7 +197,7 @@ Notes for M2 implementer:
 - [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅, inventory panel ✅, fields overlay ✅; replay driver still open
 - [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅, shops ✅, sell/identify/recharge ✅, training ✅, inns ✅; item Use, enchanting, and full dialogxml still open
 - [x] **M4 — Specials interpreter (breadth-first)**: VM core (pointers, queueing, messages) + all seven opcode groups; triggers wired for movement, look, town entry/exit, use-space, call-special terrain and the two talk nodes. Opcodes needing combat/fields/timers/quests report themselves and wait for M5/M6.
-- [ ] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b partly done (monster turns, melee AI, town encounters, the `uAbility` port with MARTYRS_SHIELD/ABSORB_SPELLS/SPLITS/DEATH_TRIGGER, and place_monster ✅; missiles, breath, monster spells, summons and outdoor wandering monsters still open); M5c (spells, patterns, field behaviours) still open
+- [ ] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b mostly done (monster turns, melee AI, town encounters, the `uAbility` port, missiles, breath, summons and touch abilities ✅; monster spells and outdoor wandering monsters still open); M5c (spells, patterns, field behaviours) still open
 - [ ] **M6 — Specials depth + party ops** (valleydy completable)
 - [ ] **M7 — Save/load (.exg) + startup flow**
 - [ ] **M8 — Fidelity hardening** (replay golden masters)
@@ -342,6 +357,23 @@ Notes for M2 implementer:
   decides *which* branch runs (termap cell vs. a shrunken terrain tile). It
   reads like a slip, but every scenario's map is drawn against it, so the port
   keeps it with a comment.
+- (2026-07-26) **A touch ability's odds test is backwards in CBoE.**
+  `monster_attack` skips the ability when `get_ran(1,1,1000) <= gen.odds`, so a
+  1000-in-1000 touch *never* fires and a 0-odds one always does (0 fails the
+  `odds > 0` guard first). Kept verbatim, with two tests pinning both ends.
+- (2026-07-26) `summon_monster`'s repeat loop is
+  `while(--r1 && !failed) failed = summon_monster(...)` — `failed` takes the
+  return value, which is **true on success**, so the loop stops as soon as one
+  more creature lands and keeps trying only while summoning *fails*. A max of
+  five therefore places two monsters, not five. Kept.
+- (2026-07-26) A summon ability's `chance` is a **plain percentage**
+  (`get_ran(1,1,100) < chance`), unlike every other ability's tenths — which is
+  why `readMonstAbilFromXml` leaves it un-multiplied.
+- (2026-07-26) `summon_monster` reads `where` two ways: in town, or while the
+  monsters are taking their turn, it's the *caster's* square and the creature
+  appears in a clear spot near it; in combat, when the party summons, it's the
+  destination itself. The port passes a `monstersGoing` flag for the second
+  half of that condition, since there's no global here.
 - (2026-07-26) `set_town_attitude` returns early in an arena fight
   (`is_combat() && which_combat_type == 0`) — there's no town population there
   to turn, and running `spec_on_hostile` would be worse than useless.
@@ -354,14 +386,14 @@ the melee attack. `grep -rn "TODO(M5b" src/` is the honest list of what M5a
 deliberately left at the seam — 13 markers as of now. In rough order:
 
 1. ~~**Monster abilities (`uAbility`).**~~ **Done** (2026-07-26) — the data
-   model, the parser and the four self-contained consumers all landed; see the
-   entry above. What still reads from it and isn't built: **missiles and
-   breath** (`monst_fire_missile`), **monster spells**, **summons**
-   (`summon_monster`, and `party.summons` for ability numbers >= 10000) and
-   **radiated fields** (which need the spell patterns from M5c).
+   model, the parser, missiles and breath, summons and the touch abilities all
+   landed; see the entries above. What still reads from it and isn't built:
+   **monster spells** and **radiated fields** (which need the spell patterns
+   from M5c).
 2. ~~`monster_attack` and `combat_run_monst`~~ — **done**, in
-   `game/monsterTurn.ts`, along with `do_monsters`, `seek_party`, `rand_move`
-   and morale-driven fleeing. Still missing from it: the free back-shot a
+   `game/monsterTurn.ts`, along with `do_monsters`, `seek_party`, `rand_move`,
+   morale-driven fleeing and the on-hit touch abilities. Still missing from it:
+   the free back-shot a
    monster gets when you step out of its reach (marked in `session.combatMove`),
    `monst_hate_spot`, `monst_check_special_terrain` and `monst_inflict_fields`.
 3. **Missiles**: the *monsters'* half is done (`game/monsterAbilities.ts`).
@@ -446,11 +478,11 @@ Smaller things outstanding, all independent of M5:
 
 ## Next steps
 
-1. M5b continued: monster missiles and breath landed 2026-07-26, so what's
-   left is monster spellcasting, `summon_monster` (with `party.summons` for
-   ability numbers >= 10000), the party's own missiles, and `run_a_missile`
-   for all of them. Then outdoor wandering monsters, which additionally need
-   the outdoor combat arena.
+1. M5b continued: missiles, breath, summons and the touch abilities all landed
+   2026-07-26, so what's left is monster spellcasting (`monst_cast_mage` /
+   `monst_cast_priest`), the party's own missiles, and `run_a_missile` for all
+   of them. Then outdoor wandering monsters, which additionally need the
+   outdoor combat arena.
 2. (The MAP overlay and `place_treasure` both landed 2026-07-26.)
 3. M2's last leftover is the replay driver.
 4. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in

@@ -12,8 +12,9 @@
 import { dist } from '../core/location';
 import { DamageType } from '../data/monster';
 import {
-  Ability, MonstAbil, MonstGen, MonstMissile, abilityApCost,
+  Ability, MonstAbil, MonstGen, MonstMissile, MonstSummon, abilityApCost,
 } from '../data/monsterAbility';
+import { getSummonMonster, summonMonster } from './monsterPlace';
 import { ItemAbil } from '../data/item';
 import { Creature } from '../universe/creature';
 import { hasAbilEquip } from '../universe/inventory';
@@ -35,8 +36,11 @@ export interface PickedAbility {
  * better served by a melee swing, and passes its odds roll. Odds are in
  * thousandths, and the comparison is `get_ran(1,1,1000) >= odds` to *reject*.
  *
+ * SUMMON and SPECIAL aren't here because the C++ handles them outside this
+ * loop — see `monsterSummon` below.
+ *
  * TODO(M5b): DRAIN_SP's search for someone worth draining, which can retarget
- * the whole attack; SUMMON and SPECIAL, which the C++ handles outside this loop.
+ * the whole attack.
  */
 export function pickMonsterAbility(
   session: GameSession,
@@ -303,6 +307,67 @@ function applyGeneralStatus(
     case Status.POISONED_WEAPON:
     default:
       break;
+  }
+}
+
+/**
+ * The SUMMON half of do_monster_turn's trailing "place fields for monsters
+ * that create them" block (boe.combat.cpp:2496). It runs *after* the monster
+ * has spent its action points, costs nothing, and only when the monster can
+ * see its target — a summoner that hasn't noticed anyone stays quiet.
+ *
+ * Note the chance here is read as a **plain percentage** (`get_ran(1,1,100) <
+ * chance`), which is why `readMonstAbilFromXml` leaves the summon chance
+ * un-multiplied while everything else goes to tenths.
+ */
+export function monsterSummon(session: GameSession, monst: Creature): void {
+  const univ = session.univ;
+  const abil = monst.mon.abil[MonstAbil.SUMMON];
+  if (!abil?.active) return;
+  if (univ.rng.getRan(1, 1, 100) >= abil.summon.chance) return;
+
+  let whatSummon = 0;
+  switch (abil.summon.type) {
+    case MonstSummon.TYPE:
+      whatSummon = abil.summon.what;
+      break;
+    case MonstSummon.LEVEL:
+      whatSummon = getSummonMonster(session, Math.min(4, Math.max(0, abil.summon.what)));
+      break;
+    case MonstSummon.SPECIES: {
+      const monsters = univ.scenario.scenMonsters;
+      for (let k = 0; k < 200; k++) {
+        const j = univ.rng.getRan(1, 0, monsters.length - 1);
+        if (monsters[j]?.race === abil.summon.what) {
+          whatSummon = j;
+          break;
+        }
+      }
+      if (!whatSummon) univ.addStringToBuf('  Summon failed.');
+      break;
+    }
+    default:
+      break;
+  }
+
+  let count = whatSummon ? univ.rng.getRan(1, abil.summon.min, abil.summon.max) : 0;
+  if (!count) return;
+  const attitude = monst.attitude;
+  const byParty = monst.isFriendly;
+  if (!summonMonster(
+    session, whatSummon, monst.curLoc, abil.summon.len, attitude, byParty, true)) return;
+
+  monst.spellNote(SpellNote.SUMMONS);
+  livingSound(61);
+  // `while(--r1 && !failed) failed = summon_monster(...)`: `failed` is assigned
+  // the return value, which is **true on success**, so the loop stops after one
+  // more creature lands and keeps going only while summoning *fails*. It reads
+  // like a sign slip in CBoE, but a max of 5 really does place two monsters, so
+  // the port keeps it.
+  let failed = false;
+  while (--count && !failed) {
+    failed = summonMonster(
+      session, whatSummon, monst.curLoc, abil.summon.len, attitude, byParty, true);
   }
 }
 

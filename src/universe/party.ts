@@ -47,6 +47,13 @@ export class Party {
   lightLevel = 0;
   /** Special items the party has acquired, by index (cParty::spec_items). */
   specItems = new Set<number>();
+  /**
+   * Monsters the party's own items can summon that don't come from this
+   * scenario (cParty::summons). A monster number >= 10000 indexes this list
+   * with 10000 subtracted; it stays empty until a save file or an item fills
+   * it, which is why `placeMonster` can find nothing there and give up.
+   */
+  summons: import('../data/monster').Monster[] = [];
   /** Alchemy recipes the party knows (cParty::alchemy). */
   alchemy: boolean[] = new Array<boolean>(20).fill(false);
   /**
