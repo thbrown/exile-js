@@ -276,6 +276,13 @@ Notes for M2 implementer:
   Despite the name, `MAKE_TOWN_HOSTILE` is the group version and takes
   `set_town_attitude(ex1a, ex1b, ex2a)`: a *slot range*, not a monster type.
   Both were ported wrong first time round.
+- (2026-07-26) **`check_special_terrain` runs on outdoor moves too** —
+  `outd_move_party` calls it first thing (boe.actions.cpp:3950) with
+  `eSpecCtx::OUT_MOVE`. This port's version began `if (!town) return true`, so
+  *nothing* outdoors ever hurt anyone: swamps didn't poison, lava didn't burn
+  and CALL_SPECIAL terrain didn't fire. Only the terrain source and the
+  special's context differ between the two modes. Pinned by two tests in
+  `test/session.test.ts`.
 - (2026-07-26) `uAbility` is a **real C union**: `missile`, `gen`, `summon`,
   `radiate` and `special` share storage, and which one is live follows from the
   *key* the ability is filed under, via `getMonstAbilCategory`. The port gives

@@ -275,6 +275,10 @@ export class GameSession {
     const { party, out, scenario } = this.univ;
     if (!out.isOnMap(destination.x, destination.y)) return false;
 
+    // check_special_terrain for OUT_MOVE runs first (boe.actions.cpp:3950) —
+    // this is what poisons you in a swamp and burns you in lava out here.
+    if (!this.checkSpecialTerrain(destination)) return false;
+
     // A special on the destination square can block the step outright.
     const special = this.specialAt(destination);
     if (special >= 0) {
@@ -917,34 +921,45 @@ export class GameSession {
   }
 
   /**
-   * The subset of check_special_terrain (boe.specials.cpp:152) that town
-   * movement needs and that doesn't require the specials VM. Returns false
-   * when the move is cancelled.
+   * The subset of check_special_terrain (boe.specials.cpp:152) that movement
+   * needs and that doesn't require the specials VM. Returns false when the
+   * move is cancelled.
    *
-   * TODO(M5): conveyors, force barriers, webs and pushable crates/barrels.
+   * It runs **outdoors as well as in town** — the C++ calls it first thing in
+   * `outd_move_party` (boe.actions.cpp:3950) with `eSpecCtx::OUT_MOVE`, which
+   * is what makes a swamp poison you and a lava field burn you on the world
+   * map. Only the terrain source and the special's context differ.
+   *
+   * TODO(M5): conveyors, webs and pushable crates/barrels.
    */
   private checkSpecialTerrain(where: Location): boolean {
     const town = this.univ.town;
-    if (!town) return true;
 
-    // Barriers stop the party before terrain is even consulted.
-    if (town.hasField(where.x, where.y, FieldType.BARRIER_FORCE)) {
-      this.univ.addStringToBuf('  Magic barrier!');
-      return false;
-    }
-    if (town.hasField(where.x, where.y, FieldType.BARRIER_CAGE)) {
-      this.univ.addStringToBuf('  Force cage!');
-      return false;
-    }
+    // Barriers stop the party before terrain is even consulted. They live on
+    // the town's field grid, so there are none outdoors.
+    if (town) {
+      if (town.hasField(where.x, where.y, FieldType.BARRIER_FORCE)) {
+        this.univ.addStringToBuf('  Magic barrier!');
+        return false;
+      }
+      if (town.hasField(where.x, where.y, FieldType.BARRIER_CAGE)) {
+        this.univ.addStringToBuf('  Force cage!');
+        return false;
+      }
+      if (!town.isOnMap(where.x, where.y)) return true;
+    } else if (!this.univ.out.isOnMap(where.x, where.y)) return true;
 
-    const ter = town.record.terrain[where.x]![where.y]!;
+    const ter = town
+      ? town.record.terrain[where.x]![where.y]!
+      : this.univ.out.at(where.x, where.y);
     const spec = this.univ.terrainType(ter);
 
     switch (spec.special) {
       case TerSpec.CHANGE_WHEN_STEP_ON: {
         // An unlocked door: walking into it swaps the terrain for flag1, and
         // if the old terrain blocked movement the party doesn't enter yet.
-        town.record.terrain[where.x]![where.y] = spec.flag1;
+        if (town) town.record.terrain[where.x]![where.y] = spec.flag1;
+        else this.univ.out.set(where.x, where.y, spec.flag1);
         if (spec.flag2 >= 0) this.sound?.play(spec.flag2);
         return !blocksMove(spec);
       }
@@ -954,11 +969,13 @@ export class GameSession {
         this.onLockedDoor?.(where, ter);
         return false;
       case TerSpec.CALL_SPECIAL:
-        // The terrain itself names a node; flag1 is which one.
+        // The terrain itself names a node; flag1 is which one. Outdoors the
+        // chain is passed *sector-local* coordinates, as everywhere else.
         void this.runSpecial(
-          SpecCtx.TOWN_MOVE,
-          this.univ.town ? SpecCtxType.TOWN : SpecCtxType.OUTDOOR,
-          spec.flag1, where);
+          town ? SpecCtx.TOWN_MOVE : SpecCtx.OUT_MOVE,
+          town ? SpecCtxType.TOWN : SpecCtxType.OUTDOOR,
+          spec.flag1,
+          town ? where : this.univ.party.globalToLocal(where));
         return true;
       case TerSpec.DANGEROUS:
         this.dangerousTerrain(spec);

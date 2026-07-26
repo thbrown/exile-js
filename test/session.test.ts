@@ -14,6 +14,7 @@ import { buildOpcodeTable } from '../src/fileio/specialParse';
 import { OUT_HALF_DIM } from '../src/universe/curOut';
 import { TOWN_NUM_OUTDOORS } from '../src/universe/party';
 import { PartyPreset } from '../src/universe/player';
+import { Status } from '../src/universe/skills';
 import { Universe } from '../src/universe/universe';
 
 const opcodes = buildOpcodeTable(
@@ -283,5 +284,62 @@ describe('outdoor movement', () => {
     await session.moveTo({ x: at.x, y: at.y });
     expect(session.inTown).toBe(true);
     expect(univ.party.townNum).toBe(at.town);
+  });
+});
+
+/**
+ * check_special_terrain runs on outdoor moves too (boe.actions.cpp:3950), which
+ * is what makes a swamp poison the party on the world map. It used to bail out
+ * whenever there was no town, so nothing outdoors ever hurt anyone.
+ */
+describe('outdoor terrain specials', () => {
+  function outdoors(): GameSession {
+    const s = newSession();
+    s.startNewGame();
+    // Walk straight out of the start town, dismissing nothing: endTownMode
+    // returns the outdoor square, and the mode flips with it.
+    s.endTownMode(s.univ.party.townLoc);
+    return s;
+  }
+
+  it('poisons the party in a swamp', async () => {
+    const s = outdoors();
+    expect(s.inTown).toBe(false);
+    // Find (or borrow) a DANGEROUS terrain that inflicts poison at 100%.
+    const idx = scen.terTypes.findIndex((t) => t.special === TerSpec.DANGEROUS);
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const ter = { ...scen.terTypes[idx]! };
+    const saved = scen.terTypes[idx]!;
+    scen.terTypes[idx] = {
+      ...ter, flag1: 4, flag2: 100, flag3: Status.POISON, blockage: 0,
+    };
+    try {
+      const from = s.univ.party.outLoc;
+      const to = { x: from.x + 1, y: from.y };
+      s.univ.out.set(to.x, to.y, idx);
+      const before = s.univ.party.pcs[0]!.status[Status.POISON] ?? 0;
+      await s.moveTo(to);
+      expect(s.univ.party.pcs[0]!.status[Status.POISON] ?? 0).toBeGreaterThan(before);
+    } finally {
+      scen.terTypes[idx] = saved;
+    }
+  });
+
+  it('hurts the party on damaging terrain', async () => {
+    const s = outdoors();
+    const idx = scen.terTypes.findIndex((t) => t.special === TerSpec.DAMAGING);
+    if (idx < 0) return; // no such terrain in this scenario
+    const saved = scen.terTypes[idx]!;
+    scen.terTypes[idx] = { ...saved, flag1: 6, flag2: 2, flag3: 0, blockage: 0 };
+    try {
+      const from = s.univ.party.outLoc;
+      const to = { x: from.x, y: from.y + 1 };
+      s.univ.out.set(to.x, to.y, idx);
+      const before = s.univ.party.pcs[0]!.curHealth;
+      await s.moveTo(to);
+      expect(s.univ.party.pcs[0]!.curHealth).toBeLessThan(before);
+    } finally {
+      scen.terTypes[idx] = saved;
+    }
   });
 });
