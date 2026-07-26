@@ -507,6 +507,8 @@ async function main(): Promise<void> {
           pending = 'talk';
         } else if (btn.btn === ToolbarButton.LOOK) {
           pending = 'look';
+        } else if (btn.btn === ToolbarButton.CAMP) {
+          session.rest();
         } else if (btn.btn === ToolbarButton.USE) {
           pending = 'use';
         } else if (btn.btn === ToolbarButton.HAND) {
@@ -572,6 +574,9 @@ async function main(): Promise<void> {
       } else if (key === 'u' || key === 'U') {
         pending = 'use';
         setStatus();
+      } else if (key === 'r' || key === 'R') {
+        session.rest();
+        redraw();
       } else if (key === 'g' || key === 'G') {
         if (session.inTown) void getItems();
         else univ.addStringToBuf('Get: nothing here');

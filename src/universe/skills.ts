@@ -91,6 +91,23 @@ export enum Status {
 
 export const NUM_STATUSES = 16;
 
+/**
+ * status_bounds (damage.cpp:52) — how far a status can be pushed. Most run
+ * 0..8; a few go negative (bless/curse, haste/slow), and paralysis and
+ * forcecage are measured in turns rather than levels.
+ */
+export function statusBounds(which: Status): [number, number] {
+  const allowNegative = new Set([
+    Status.BLESS_CURSE, Status.HASTE_SLOW, Status.POISONED_WEAPON,
+    Status.POISON, Status.ASLEEP, Status.MAGIC_RESISTANCE, Status.DUMB,
+  ]);
+  let hi = 8;
+  if (which === Status.MARTYRS_SHIELD) hi = 10;
+  else if (which === Status.PARALYZED) hi = 5000;
+  else if (which === Status.FORCECAGE) hi = 1000;
+  return [allowNegative.has(which) ? -hi : 0, hi];
+}
+
 export enum MainStatus {
   ABSENT = 0,
   ALIVE = 1,

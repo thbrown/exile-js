@@ -15,7 +15,7 @@ import { Item, ItemAbil, ItemType, defaultItem } from '../data/item';
 import { MonstTime } from '../data/monster';
 import { FieldType } from '../data/fields';
 import { SECTOR_SIZE } from '../data/outdoors';
-import { StepSound, TerObstruct, TerSpec, blocksMove } from '../data/terrain';
+import { StepSound, Terrain, TerObstruct, TerSpec, blocksMove } from '../data/terrain';
 import { TalkNodeType } from '../data/talking';
 import { Lighting } from '../data/town';
 import { Snd, SoundPlayer } from '../platform/sound';
@@ -29,11 +29,12 @@ import {
   takeItemFrom,
   unequipItem,
 } from '../universe/inventory';
-import { MainStatus, Skill } from '../universe/skills';
+import { MainStatus, Skill, Status } from '../universe/skills';
+import { applyStatus, diseasePc, poisonPc } from '../universe/statuses';
 import { ShopItemType } from '../data/shop';
 import { ShopState, handleSale } from './shop';
 import { ItemShopMode, ItemShopState, handleItemShopAction } from './itemShop';
-import { doRest } from './rest';
+import { doRest, handleRest } from './rest';
 import { OUT_HALF_DIM, OUT_MAX_DIM } from '../universe/curOut';
 import { TOWN_NUM_OUTDOORS } from '../universe/party';
 import { Universe } from '../universe/universe';
@@ -408,6 +409,20 @@ export class GameSession {
     town.makeExplored(destination.x, destination.y);
     this.updateExplored(this.univ.party.townLoc);
     return true;
+  }
+
+  /**
+   * The Rest command (handle_rest). Returns false with a reason in the
+   * transcript when the party can't.
+   */
+  rest(): boolean {
+    const where = this.inTown ? this.univ.party.townLoc : this.univ.party.outLoc;
+    const ter = this.inTown
+      ? this.univ.town?.record.terrain[where.x]?.[where.y]
+      : this.univ.out.at(where.x, where.y);
+    const special = ter === undefined ? TerSpec.NONE : this.univ.terrainType(ter).special;
+    const dangerous = special === TerSpec.DAMAGING || special === TerSpec.DANGEROUS;
+    return handleRest(this.univ, this.isOutdoors, dangerous, this.sound);
   }
 
   // -------------------------------------------------------------------- use
@@ -829,13 +844,50 @@ export class GameSession {
           this.univ.town ? SpecCtxType.TOWN : SpecCtxType.OUTDOOR,
           spec.flag1, where);
         return true;
-      case TerSpec.DAMAGING:
       case TerSpec.DANGEROUS:
-        // TODO(M5): terrain damage needs damage_pc and the status system.
+        this.dangerousTerrain(spec);
+        return true;
+      case TerSpec.DAMAGING:
+        // TODO(M5): terrain damage needs damage_pc's resistance pipeline.
         this.univ.addStringToBuf('  It looks dangerous.');
         return true;
       default:
         return true;
+    }
+  }
+
+  /**
+   * The DANGEROUS terrain branch of check_special_terrain
+   * (boe.specials.cpp:390) — swamps, briar patches and the like. flag2 is a
+   * per-PC percentage chance, flag3 names the status, flag1 its strength.
+   *
+   * TODO(M5): the party can't be harmed while flying or in a boat, which
+   * needs those systems.
+   */
+  private dangerousTerrain(spec: Terrain): void {
+    for (const pc of this.univ.party.pcs) {
+      if (pc.mainStatus !== MainStatus.ALIVE) continue;
+      if (this.univ.rng.getRan(1, 1, 100) > spec.flag2) continue;
+      const which = spec.flag3 as Status;
+      let message: string | null = null;
+      switch (which) {
+        case Status.POISON:
+          message = poisonPc(pc, spec.flag1, () => this.univ.rng.getRan(1, 0, 1));
+          if (message) this.sound?.play(17);
+          break;
+        case Status.DISEASE:
+          message = diseasePc(pc, spec.flag1);
+          break;
+        case Status.POISONED_WEAPON:
+          // The original has nothing here but an atmospheric line.
+          if (this.univ.rng.getRan(1, 1, 100) > 60)
+            this.univ.addStringToBuf("It's eerie here...");
+          break;
+        default:
+          applyStatus(pc, which, spec.flag1);
+          break;
+      }
+      if (message) this.univ.addStringToBuf(message);
     }
   }
 

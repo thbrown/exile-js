@@ -7,7 +7,7 @@
 import { ItemAbil } from '../data/item';
 import { hasAbilEquip } from '../universe/inventory';
 import { Player } from '../universe/player';
-import { MainStatus, Trait } from '../universe/skills';
+import { MainStatus, Status, Trait } from '../universe/skills';
 import { Universe } from '../universe/universe';
 
 /** cPlayer::heal (pc.cpp:128) — never past max, never below zero. */
@@ -72,4 +72,46 @@ export function doRest(
     if (pc.curSp > pc.maxSp) pc.curSp = pc.maxSp;
     if (pc.curHealth > pc.maxHealth) pc.curHealth = pc.maxHealth;
   }
+}
+
+/**
+ * handle_rest (boe.actions.cpp:556) — the outdoor Rest command, which is what
+ * the CAMP toolbar button does. It refuses in a boat, when someone's poisoned,
+ * on dangerous ground, or with too little food, then passes 1200 ticks and
+ * restores the party.
+ *
+ * TODO(M5): the original also runs 50 ticks of monster movement while you
+ * sleep, can spawn a wandering monster, and aborts if one wanders close.
+ */
+export function handleRest(
+  univ: Universe,
+  isOutdoors: boolean,
+  dangerousHere: boolean,
+  sound?: { play(which: number): void } | null,
+): boolean {
+  const say = (line: string) => univ.addStringToBuf(line);
+  if (univ.party.inBoat >= 0) {
+    say('Rest:  Not in boat.');
+    return false;
+  }
+  if (univ.party.pcs.some((pc) =>
+    pc.mainStatus === MainStatus.ALIVE && (pc.status[Status.POISON] ?? 0) > 0)) {
+    say('Rest: Someone poisoned.');
+    return false;
+  }
+  if (univ.party.food <= 12) {
+    say('Rest: Not enough food.');
+    return false;
+  }
+  if (dangerousHere) {
+    say("Rest: It's dangerous here.");
+    return false;
+  }
+  say('Resting...');
+  // Sound 20, asynchronously — the negative is the C++'s "don't block" flag.
+  sound?.play(-20);
+  univ.party.food -= 6;
+  doRest(univ, 1200, univ.rng.getRan(5, 1, 10), 50, isOutdoors);
+  say('  Rest successful.');
+  return true;
 }

@@ -133,6 +133,40 @@ describe('training', () => {
   });
 });
 
+describe('the Rest command', () => {
+  it('rests, costs food, and plays its sound', () => {
+    const { univ, session } = newGame();
+    const sounds: number[] = [];
+    session.sound = { play: (n: number) => sounds.push(n) } as never;
+    univ.party.food = 100;
+    univ.party.pcs.forEach((pc) => { pc.curHealth = 1; });
+    const ageBefore = univ.party.age;
+
+    expect(session.rest()).toBe(true);
+    expect(univ.party.food).toBe(94);
+    expect(univ.party.age).toBe(ageBefore + 1200);
+    expect(univ.party.pcs[0]!.curHealth).toBeGreaterThan(1);
+    // Sound 20, negative meaning "asynchronously".
+    expect(sounds).toContain(-20);
+    expect(univ.transcript).toContain('Resting...');
+    expect(univ.transcript.at(-1)).toBe('  Rest successful.');
+  });
+
+  it('refuses when poisoned, hungry, or in a boat', () => {
+    const cases: [string, (u: Universe) => void, string][] = [
+      ['poison', (u) => { u.party.pcs[0]!.status[Status.POISON] = 3; }, 'Someone poisoned'],
+      ['food', (u) => { u.party.food = 5; }, 'Not enough food'],
+      ['boat', (u) => { u.party.inBoat = 0; }, 'Not in boat'],
+    ];
+    for (const [, setup, expected] of cases) {
+      const { univ, session } = newGame();
+      setup(univ);
+      expect(session.rest()).toBe(false);
+      expect(univ.transcript.at(-1)).toContain(expected);
+    }
+  });
+});
+
 describe('resting', () => {
   it('heals and restores, capped at the maximum', () => {
     const { univ } = newGame();
