@@ -516,6 +516,9 @@ export class Screen {
     const center = session.center;
     for (const monst of town.monsters) {
       if (!monst.isAlive) continue;
+      // Creatures in the dark or behind unexplored walls stay hidden
+      // (party_can_see_monst, boe.locutils.cpp:366).
+      if (!session.partyCanSeeMonst(monst)) continue;
       const q = monst.curLoc.x - center.x + TER_VIEW_CENTER;
       const row = monst.curLoc.y - center.y + TER_VIEW_CENTER;
       const { w, h } = monsterDims(monst.pictureNum);

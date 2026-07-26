@@ -69,6 +69,15 @@ const DIR_NAMES = ['north', 'northeast', 'east', 'southeast', 'south', 'southwes
  */
 export const FORCED_ENTRY = 9;
 
+/**
+ * point_onscreen (boe.locutils.cpp:88) — the terrain view is 9x9, so anything
+ * within four squares of its centre is on screen. This is game logic in the
+ * original too, which is why the constant lives here and not in `render/`.
+ */
+export function pointOnScreen(center: Location, check: Location): boolean {
+  return Math.abs(center.x - check.x) <= 4 && Math.abs(center.y - check.y) <= 4;
+}
+
 /** One row of a select_pc prompt. */
 export interface PcChoice {
   index: number;
@@ -161,9 +170,17 @@ export class GameSession {
     return this.moveTo(destination);
   }
 
+  /**
+   * Where an outdoor move should head after leaving a town — end_town_mode's
+   * return value, which handle_action assigns straight over `destination`
+   * (boe.actions.cpp:770).
+   */
+  private pendingOutDest: Location | null = null;
+
   /** handle_action's movement branch (boe.actions.cpp:740-815). */
   async moveTo(destination: Location): Promise<boolean> {
     let moved = false;
+    this.pendingOutDest = null;
     if (this.inTown) {
       moved = await this.townMoveParty(destination);
       if (this.inTown && moved) this.center = { ...this.univ.party.townLoc };
@@ -171,7 +188,9 @@ export class GameSession {
     // A town move that leaves the map switches us to outdoors mid-action, and
     // the outdoor move then runs in the same keypress — same as the original.
     if (this.mode === GameMode.OUTDOORS) {
-      if (await this.outdMoveParty(destination)) {
+      const outDest = this.pendingOutDest ?? destination;
+      this.pendingOutDest = null;
+      if (await this.outdMoveParty(outDest)) {
         moved = true;
         this.center = { ...this.univ.party.outLoc };
         this.updateExplored(this.univ.party.outLoc);
@@ -324,7 +343,9 @@ export class GameSession {
       destination.y <= rect.top ||
       destination.y >= rect.bottom
     ) {
-      this.endTownMode(destination);
+      // The outdoor square to walk out onto; moveTo picks this up, because
+      // the town coordinate that triggered the exit is meaningless out there.
+      this.pendingOutDest = this.endTownMode(destination);
       return false;
     }
 
@@ -407,6 +428,42 @@ export class GameSession {
       : this.univ.out.at(where.x, where.y);
     if (ter === undefined) return false;
     const info = this.univ.terrainType(ter);
+    const town = this.univ.town;
+    this.univ.addStringToBuf('Use...');
+
+    // Webs and pushable objects come before the terrain checks: they're what's
+    // *in* the space rather than the space itself (boe.specials.cpp:1220).
+    if (town) {
+      if (town.hasField(where.x, where.y, FieldType.FIELD_WEB)) {
+        this.univ.addStringToBuf('  You clear the webs.');
+        town.setField(where.x, where.y, FieldType.FIELD_WEB, false);
+        return true;
+      }
+      const pushables: [FieldType, string][] = [
+        [FieldType.OBJECT_CRATE, 'crate'],
+        [FieldType.OBJECT_BARREL, 'barrel'],
+        [FieldType.OBJECT_BLOCK, 'block'],
+      ];
+      for (const [field, name] of pushables) {
+        if (!town.hasField(where.x, where.y, field)) continue;
+        const to = this.pushLoc(from, where);
+        if (to.x === from.x && to.y === from.y) {
+          this.univ.addStringToBuf(`  Can't push ${name}.`);
+          return false;
+        }
+        this.univ.addStringToBuf(`  You push the ${name}.`);
+        town.setField(where.x, where.y, field, false);
+        // x 0 is push_loc's "it fell in the water" sentinel: the thing is gone.
+        if (to.x !== 0) town.setField(to.x, to.y, field, true);
+        // Whatever was inside a crate or barrel travels with it.
+        if (field !== FieldType.OBJECT_BLOCK)
+          for (const item of town.items)
+            if (item.variety !== ItemType.NO_ITEM && item.contained && item.held
+              && item.itemLoc.x === where.x && item.itemLoc.y === where.y)
+              item.itemLoc = { ...to };
+        return true;
+      }
+    }
 
     if (info.special === TerSpec.CHANGE_WHEN_USED) {
       if (where.x === from.x && where.y === from.y) {
@@ -428,6 +485,26 @@ export class GameSession {
     }
     this.univ.addStringToBuf('  Nothing to use.');
     return false;
+  }
+
+  /**
+   * push_loc (boe.locutils.cpp:547) — where a pushed object ends up: one more
+   * step along the push, unless something's in the way, in which case it swaps
+   * places with the pusher. An object pushed into water or a pit is destroyed,
+   * which the original signals by returning x = 0.
+   */
+  private pushLoc(from: Location, to: Location): Location {
+    const target = loc(to.x + (to.x - from.x), to.y + (to.y - from.y));
+    const town = this.univ.town;
+    if (!town || !town.isOnMap(target.x, target.y)) return { ...from };
+    const ter = town.record.terrain[target.x]![target.y]!;
+    const info = this.univ.terrainType(ter);
+    // Terrain 90 is the pit; boat_over means water.
+    if (ter === 90 || info.boatOver) return loc(0, target.y);
+    if (this.sightObscurity(target.x, target.y) > 0) return { ...from };
+    if (info.blockage !== TerObstruct.CLEAR) return { ...from };
+    if (town.monsterAt(target)) return { ...from };
+    return target;
   }
 
   // ------------------------------------------------------------------- look
@@ -841,6 +918,13 @@ export class GameSession {
   async talkTo(destination: Location): Promise<boolean> {
     const town = this.univ.town;
     if (!town) return false;
+    // handle_talk's own visibility gate, which is stricter than sight alone:
+    // note it compares against 4, not SIGHT_BLOCKED.
+    if (!town.isOnMap(destination.x, destination.y)
+      || this.canSeeLight(this.center, destination) >= 4) {
+      this.univ.addStringToBuf("  Can't see space.");
+      return false;
+    }
     const monst = town.monsterAt(destination);
     if (!monst) {
       this.univ.addStringToBuf('  Nobody there');
@@ -1191,6 +1275,35 @@ export class GameSession {
     return store;
   };
 
+  /**
+   * party_can_see (boe.locutils.cpp:519) — whether a space is visible at all:
+   * on screen, lit, and with an unobstructed line to it. Returns the C++'s
+   * 1-or-6, where 6 means "no".
+   */
+  partyCanSee(where: Location): number {
+    const from = this.inTown ? this.univ.party.townLoc : this.univ.party.outLoc;
+    if (!pointOnScreen(this.center, where)) return 6;
+    if (this.inTown) {
+      // Unexplored squares hide what's on them, which is what makes a dungeon
+      // a dungeon; the original folds this into pt_in_light.
+      const town = this.univ.town;
+      if (town && !town.isExplored(where.x, where.y)) return 6;
+      if (!this.ptInLight(from, where)) return 6;
+    }
+    return this.canSeeLight(from, where) < SIGHT_BLOCKED ? 1 : 6;
+  }
+
+  /**
+   * party_can_see_monst (boe.locutils.cpp:366) — a big creature is visible if
+   * any one of the squares it stands on is.
+   */
+  partyCanSeeMonst(monst: Creature): boolean {
+    for (let i = 0; i < monst.xWidth; i++)
+      for (let j = 0; j < monst.yWidth; j++)
+        if (this.partyCanSee({ x: monst.curLoc.x + i, y: monst.curLoc.y + j }) < 6) return true;
+    return false;
+  }
+
   /** can_see_light (boe.locutils.cpp:173). */
   canSeeLight(from: Location, to: Location): number {
     if (this.inTown && !this.ptInLight(from, to)) return SIGHT_BLOCKED + 1;
@@ -1307,7 +1420,7 @@ export class GameSession {
    * the outdoor exit; a town with no explicit exit for that side just steps
    * the party one tile further out.
    */
-  endTownMode(destination: Location): void {
+  endTownMode(destination: Location): Location {
     const { party } = this.univ;
     const town = this.univ.town!;
     const rect = town.record.inTownRect;
@@ -1341,11 +1454,16 @@ export class GameSession {
     this.univ.addStringToBuf(`You leave ${town.record.name}.`);
     this.univ.town = null;
     party.townNum = TOWN_NUM_OUTDOORS;
-    party.outLoc = clampToWindow(toReturn);
+    // applyExit has already put the party one step *inside* the exit square;
+    // the caller then walks it out onto `toReturn`, which is what makes the
+    // party appear at the town's gate rather than wherever it happened to be
+    // standing on the world map (boe.town.cpp:608).
+    party.outLoc = clampToWindow(party.outLoc);
     party.iwc = { x: party.outLoc.x > 47 ? 1 : 0, y: party.outLoc.y > 47 ? 1 : 0 };
     party.locInSec = party.globalToLocal(party.outLoc);
     this.center = { ...party.outLoc };
     this.updateExplored(party.outLoc);
+    return clampToWindow(toReturn);
   }
 
   // ------------------------------------------------------------------ maps

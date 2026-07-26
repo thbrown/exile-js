@@ -521,16 +521,19 @@ async function main(): Promise<void> {
       }
       const cell = screen.terrainCellAt(x, y);
       if (cell) {
-        const dx = Math.sign(cell.q - 4);
-        const dy = Math.sign(cell.r - 4);
-        if (dx === 0 && dy === 0) return;
         const from = session.inTown ? univ.party.townLoc : univ.party.outLoc;
-        // Looking can reach anywhere in view; moving is one step at a time.
-        const target =
-          pending === 'look'
-            ? { x: from.x + cell.q - 4, y: from.y + cell.r - 4 }
-            : { x: from.x + dx, y: from.y + dy };
-        actOn(target);
+        const clicked = { x: from.x + cell.q - 4, y: from.y + cell.r - 4 };
+        // Look, Talk and Use all act on the square you clicked — handle_talk
+        // (boe.actions.cpp:818) takes the destination as given and only needs
+        // line of sight. Moving is the one that steps once toward it.
+        if (pending === null) {
+          const dx = Math.sign(cell.q - 4);
+          const dy = Math.sign(cell.r - 4);
+          if (dx === 0 && dy === 0) return;
+          actOn({ x: from.x + dx, y: from.y + dy });
+        } else {
+          actOn(clicked);
+        }
         setStatus();
         redraw();
       }
