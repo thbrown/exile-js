@@ -636,6 +636,45 @@ const fightButton = await page.evaluate(() => {
 });
 console.log('FIGHT BUTTON:', JSON.stringify(fightButton));
 
+// An encounter: a hostile monster notices the party in *town* mode, walks over
+// and attacks, without the player entering combat mode at all.
+const encounter = await page.evaluate(async () => {
+  const s = window.__session;
+  const univ = s.univ;
+  if (s.mode !== 1) return { skipped: 'not in town' };
+  const monst = univ.town.monsters.find((m) => m.isAlive && !m.isFriendly)
+    ?? univ.town.monsters.find((m) => m.isAlive);
+  if (!monst) return { skipped: 'no monsters' };
+  monst.attitude = 1; // HOSTILE_A
+  monst.active = 1; // IDLE, so it has to notice us
+  monst.mobile = true;
+  monst.mon.attacks = [{ dice: 4, sides: 6, type: 0 }];
+  monst.mon.skill = 20;
+  monst.mon.speed = 12;
+  monst.curLoc = { x: univ.party.townLoc.x + 3, y: univ.party.townLoc.y };
+  univ.party.pcs.forEach((pc) => { pc.maxHealth = 300; pc.curHealth = 300; });
+  const startedAt = { ...monst.curLoc };
+
+  // Stand still: each attempted step is a party action, so the monsters move.
+  let noticed = false;
+  let hurt = 0;
+  for (let i = 0; i < 40 && hurt === 0; i++) {
+    await s.moveTo({ x: univ.party.townLoc.x, y: univ.party.townLoc.y - 1 });
+    await s.moveTo({ x: univ.party.townLoc.x, y: univ.party.townLoc.y + 1 });
+    noticed = noticed || univ.transcript.includes('Monster saw you!');
+    hurt = univ.party.pcs.reduce((n, pc) => n + (300 - pc.curHealth), 0);
+  }
+  window.__redraw();
+  return {
+    noticed, hurt, startedAt, endedAt: { ...monst.curLoc },
+    closed: Math.abs(startedAt.x - univ.party.townLoc.x)
+      - Math.abs(monst.curLoc.x - univ.party.townLoc.x),
+    tail: univ.transcript.slice(-4),
+  };
+});
+console.log('ENCOUNTER:', JSON.stringify(encounter));
+await shot('02c3-encounter');
+
 console.log('ERRORS:', errors.length ? errors.join(' | ') : 'none');
 await browser.close();
 
@@ -682,6 +721,7 @@ const ok =
   fightButton.inFight === 9 &&
   fightButton.swordStillThere === false &&
   fightButton.backTo === 1 &&
+  (encounter.skipped !== undefined || (encounter.noticed === true && encounter.hurt > 0)) &&
   reenter?.inTown === true &&
   errors.length === 0;
 console.log(ok ? 'PASS' : 'FAIL');

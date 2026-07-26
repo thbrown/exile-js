@@ -10,7 +10,7 @@
  * belongs so the rest can be dropped in without rearranging this.
  */
 
-import { Location, dist, loc } from '../core/location';
+import { Location, dist, loc, locsEqual } from '../core/location';
 import { Attack, Attitude, DamageType } from '../data/monster';
 import { Creature, CreatureStatus } from '../universe/creature';
 import { Living, SpellNote, livingSound } from '../universe/living';
@@ -18,6 +18,7 @@ import { Player } from '../universe/player';
 import { MainStatus, Race, Skill, Status } from '../universe/skills';
 import { Universe } from '../universe/universe';
 import { NO_ONE } from './combat';
+import { GameMode } from './modes';
 import { damageMonst, damagePc, hitChance } from './damage';
 import type { GameSession } from './session';
 
@@ -179,6 +180,122 @@ function seekParty(session: GameSession, monst: Creature, target: Location): boo
   const m = session.univ.rng.getRan(1, 0, 2) - 1;
   const n = session.univ.rng.getRan(1, 0, 2) - 1;
   return combatMoveMonster(session, monst, loc(from.x + m, from.y + n));
+}
+
+/**
+ * rand_move (boe.monster.cpp) — idle wandering. A monster keeps a `targLoc` it
+ * is drifting toward and picks a new one when it arrives or gets stuck; the
+ * town's own wandering_locs are among the candidates.
+ */
+function randMove(session: GameSession, monst: Creature): boolean {
+  const univ = session.univ;
+  if (locsEqual(monst.targLoc, monst.curLoc)) monst.targLoc = loc(0, monst.targLoc.y);
+
+  let actedYet = false;
+  if (monst.targLoc.x > 0) actedYet = seekParty(session, monst, monst.targLoc);
+  if (actedYet) return true;
+
+  monst.targLoc = loc(0, monst.targLoc.y);
+  for (let j = 0; j < 3; j++) {
+    const spot = loc(
+      monst.curLoc.x + univ.rng.getRan(1, 0, 24) - 12,
+      monst.curLoc.y + univ.rng.getRan(1, 0, 24) - 12);
+    if (!session.locOffActiveArea(spot) && session.canSeeLight(monst.curLoc, spot) < 5) {
+      monst.targLoc = spot;
+      break;
+    }
+  }
+
+  if (monst.targLoc.x === 0) {
+    const wandering = univ.townRecord?.wanderingLocs ?? [];
+    if (wandering.length > 0) {
+      const spot = wandering[univ.rng.getRan(1, 0, wandering.length - 1)]!;
+      if (!session.locOffActiveArea(spot) && univ.rng.getRan(1, 0, 1) === 1) {
+        monst.targLoc = { ...spot };
+      }
+    }
+    if (monst.targLoc.x === 0) {
+      const spot = loc(
+        monst.curLoc.x + univ.rng.getRan(1, 0, 20) - 10,
+        monst.curLoc.y + univ.rng.getRan(1, 0, 20) - 10);
+      if (!session.locOffActiveArea(spot)) monst.targLoc = spot;
+    }
+  }
+  if (monst.targLoc.x > 0) actedYet = seekParty(session, monst, monst.targLoc);
+  return actedYet;
+}
+
+/** select_active_pc — a living PC at random, for a town-mode attack. */
+function selectActivePc(univ: Universe): number {
+  let r1 = univ.rng.getRan(1, 0, 5);
+  let tries = 0;
+  while (!univ.party.pcs[r1]?.isAlive && tries++ < 50) r1 = univ.rng.getRan(1, 0, 5);
+  return r1;
+}
+
+/**
+ * do_monsters (boe.monster.cpp:193), the town-mode half — this is what makes an
+ * encounter happen at all: hostile monsters notice the party from up to eight
+ * squares away, say so, and walk over. It runs after **every** party action,
+ * not only in combat.
+ */
+export function doMonsters(session: GameSession): void {
+  const univ = session.univ;
+  const town = univ.town;
+  if (!town) return;
+  const partyLoc = univ.party.townLoc;
+
+  for (const monst of town.monsters) {
+    if (!monst.isAlive) continue;
+    if ((monst.status[Status.ASLEEP] ?? 0) > 0 || (monst.status[Status.PARALYZED] ?? 0) > 0) {
+      continue;
+    }
+
+    // Pick a target: in town it's the party as a whole, and only when close.
+    let target = NO_ONE;
+    if (monst.active !== CreatureStatus.IDLE && !monst.isFriendly) {
+      if (dist(monst.curLoc, partyLoc) <= 8) target = 0;
+    }
+    monst.target = target;
+
+    if (monst.active === CreatureStatus.ALERTED || monst.isFriendly) {
+      let actedYet = false;
+      // Nothing to chase: drift, or drift *toward* the party if it's nasty.
+      if ((monst.attitude === Attitude.DOCILE || target === NO_ONE) && monst.mobile) {
+        if (monst.isFriendly || univ.rng.getRan(1, 0, 1) === 0) actedYet = randMove(session, monst);
+        else actedYet = seekParty(session, monst, partyLoc);
+      }
+      if (!actedYet && monst.attitude !== Attitude.DOCILE && monst.mobile && target !== NO_ONE) {
+        const canFlee = !monst.mon.mindless && monst.mon.race !== Race.UNDEAD
+          && monst.mon.race !== Race.SKELETAL;
+        if (monst.morale < 0 && canFlee) {
+          fleeParty(session, monst, partyLoc);
+          if (univ.rng.getRan(1, 0, 10) < 6) monst.morale++;
+        } else if (monst.mon.mu === 0 || session.canSeeLight(monst.curLoc, partyLoc) > 3) {
+          // A spellcaster keeps its distance unless it can't see you anyway.
+          seekParty(session, monst, partyLoc);
+        }
+      }
+    }
+
+    // Notice the party — and tell the player, which is the cue to fight or run.
+    if (monst.active === CreatureStatus.IDLE && !monst.isFriendly
+      && dist(monst.curLoc, partyLoc) <= 8) {
+      const r1 = univ.rng.getRan(1, 1, 100)
+        + session.canSeeLight(monst.curLoc, partyLoc) * 10;
+      if (r1 < 50) {
+        monst.active = CreatureStatus.ALERTED;
+        univ.addStringToBuf('Monster saw you!');
+        livingSound(monst.mon.race === Race.GIANT || monst.mon.race <= Race.VAHNATAI
+          || monst.mon.race === Race.HUMANOID || monst.mon.race === Race.GOBLIN ? 18 : 46);
+      }
+      for (const other of town.monsters) {
+        if (other.active === CreatureStatus.ALERTED && dist(monst.curLoc, other.curLoc) <= 5) {
+          monst.active = CreatureStatus.ALERTED;
+        }
+      }
+    }
+  }
 }
 
 /** flee_party — the mirror image of seekParty, moving away instead. */
@@ -375,11 +492,14 @@ export function doMonsterTurn(session: GameSession): void {
     // cases this port hasn't filled in yet.
     let guard = 40;
     while (monst.ap > 0 && monst.isAlive && guard-- > 0) {
-      const target = monstPickTarget(session, monst);
+      // In combat a monster picks a PC; in town the target is the party as a
+      // whole, standing on one square, and do_monsters has already chosen it.
+      const inCombat = session.mode === GameMode.COMBAT;
+      const target = inCombat ? monstPickTarget(session, monst) : monst.target;
       monst.target = target;
-      const targSpace = target < NO_ONE
-        ? univ.party.pcs[target]!.combatPos
-        : monst.curLoc;
+      const targSpace = !inCombat
+        ? univ.party.townLoc
+        : target < NO_ONE ? univ.party.pcs[target]!.combatPos : monst.curLoc;
       let actedYet = false;
 
       // Flee when its nerve is gone — but the unliving and the mindless never do.
@@ -397,7 +517,9 @@ export function doMonsterTurn(session: GameSession): void {
 
       // Melee, if it can reach.
       if (!actedYet && target !== NO_ONE && monst.attitude !== Attitude.DOCILE) {
-        const who: Living | null = target < NO_ONE ? univ.party.pcs[target]! : null;
+        // In town, whoever the blow lands on is picked at random.
+        const victim = inCombat ? target : selectActivePc(univ);
+        const who: Living | null = target < NO_ONE ? univ.party.pcs[victim]! : null;
         if (who && who.isAlive && monstAdjacent(monst, targSpace) && !monst.isFriendly) {
           monsterAttack(session, monst, who);
           monst.ap = Math.max(0, monst.ap - 4);
@@ -405,8 +527,9 @@ export function doMonsterTurn(session: GameSession): void {
         }
       }
 
-      // Otherwise close the distance.
-      if (!actedYet && monst.mobile) {
+      // Otherwise close the distance — but only in combat; town-mode movement
+      // is do_monsters' job and has already happened.
+      if (!actedYet && monst.mobile && inCombat) {
         const moveTarget = target !== NO_ONE ? target : closestPc(univ, monst.curLoc);
         if (!monst.isFriendly && moveTarget < NO_ONE) {
           const pc = univ.party.pcs[moveTarget]!;

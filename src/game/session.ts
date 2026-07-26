@@ -25,7 +25,7 @@ import { hitParty } from './damage';
 import {
   NO_ONE, endTownCombat, pcAttack, pickNextPc, setPcMoves, startTownCombat, takeAp,
 } from './combat';
-import { combatRunMonst } from './monsterTurn';
+import { combatRunMonst, doMonsterTurn, doMonsters } from './monsterTurn';
 import { CurTown } from '../universe/curTown';
 import {
   GiveStatus,
@@ -237,7 +237,27 @@ export class GameSession {
       }
       this.checkTownEntrance();
     }
+    if (moved) this.afterPartyTurn();
     return moved;
+  }
+
+  /**
+   * The tail of handle_action (boe.actions.cpp:1959): after the party acts, the
+   * clock moves on and the monsters get their go. In town that's `do_monsters`
+   * (they notice you and walk over) followed by `do_monster_turn` (they hit
+   * you), which is why you can be attacked without ever entering combat mode.
+   *
+   * The clock is not touched here: this port folds `increase_age`'s tick into
+   * the move functions themselves, which already advanced it.
+   *
+   * TODO(M5b): outdoors this is where wandering monsters spawn and roam.
+   * TODO(M6): increase_age's timers, hunger and autosave.
+   */
+  private afterPartyTurn(): void {
+    if (this.mode === GameMode.TOWN) {
+      doMonsters(this);
+      doMonsterTurn(this);
+    }
   }
 
   private outdIsBlocked(where: Location): boolean {

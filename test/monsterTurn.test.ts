@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { loc } from '../src/core/location';
+import { dist, loc } from '../src/core/location';
 import { GameRng } from '../src/core/rng';
 import { Attitude } from '../src/data/monster';
 import { Scenario } from '../src/data/scenario';
 import { NO_ONE } from '../src/game/combat';
 import {
-  closestPc, combatRunMonst, doMonsterTurn, monstAdjacent, monsterAttack,
+  closestPc, combatRunMonst, doMonsterTurn, doMonsters, monstAdjacent, monsterAttack,
 } from '../src/game/monsterTurn';
 import { FORCED_ENTRY, GameSession } from '../src/game/session';
 import { loadScenario } from '../src/fileio/loadScenario';
@@ -207,6 +207,101 @@ describe('a monster taking its turn', () => {
     expect(near).toBe(1);
     univ.party.pcs.forEach((pc) => { pc.mainStatus = MainStatus.DEAD; });
     expect(closestPc(univ, loc(0, 0))).toBe(NO_ONE);
+  });
+});
+
+describe('encounters in town mode', () => {
+  /** A town-mode game with one hostile monster a few squares off. */
+  function townWithOne(): { univ: Universe; session: GameSession; monst: Creature } {
+    const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
+    const session = new GameSession(univ);
+    session.startTownMode(0, FORCED_ENTRY);
+    univ.town!.monsters.length = 0;
+    const template = { ...scen.scenMonsters[1]!, resist: [...scen.scenMonsters[1]!.resist] };
+    template.attacks = [{ dice: 3, sides: 6, type: 0 }];
+    template.skill = 20;
+    template.speed = 12;
+    template.armor = 0;
+    const monst = assignCreature(0, {
+      number: 1, startAttitude: Attitude.HOSTILE_A,
+      startLoc: loc(univ.party.townLoc.x + 3, univ.party.townLoc.y),
+      mobility: 1, timeFlag: 0, timeCode: 0, monsterTime: 0, spec1: -1, spec2: -1,
+      specEncCode: 0, personality: -1, facialPic: -1, specialOnTalk: -1, specialOnKill: -1,
+    } as never, template);
+    monst.health = monst.maxHealth = 500;
+    univ.town!.monsters.push(monst);
+    univ.party.pcs.forEach((pc) => {
+      pc.items.forEach((_, s2) => { pc.equip[s2] = false; });
+      pc.maxHealth = 300;
+      pc.curHealth = 300;
+    });
+    return { univ, session, monst };
+  }
+
+  it('a hostile monster notices the party and says so', () => {
+    const { univ, session, monst } = townWithOne();
+    monst.active = CreatureStatus.IDLE;
+    for (let i = 0; i < 30 && monst.active === CreatureStatus.IDLE; i++) doMonsters(session);
+    expect(monst.active).toBe(CreatureStatus.ALERTED);
+    expect(univ.transcript).toContain('Monster saw you!');
+  });
+
+  it('and then walks over to the party', () => {
+    const { univ, session, monst } = townWithOne();
+    monst.active = CreatureStatus.ALERTED;
+    const before = Math.abs(monst.curLoc.x - univ.party.townLoc.x);
+    for (let i = 0; i < 5; i++) doMonsters(session);
+    const after = Math.abs(monst.curLoc.x - univ.party.townLoc.x);
+    expect(after).toBeLessThan(before);
+  });
+
+  it('attacks a PC in town mode, without any combat mode', () => {
+    const { univ, session, monst } = townWithOne();
+    monst.active = CreatureStatus.ALERTED;
+    let hurt = false;
+    for (let i = 0; i < 30 && !hurt; i++) {
+      doMonsters(session);
+      doMonsterTurn(session);
+      hurt = univ.party.pcs.some((pc) => pc.curHealth < 300);
+    }
+    expect(hurt).toBe(true);
+    expect(univ.party.pcs.some((pc) => pc.combatPos.x >= 0)).toBe(false);
+  });
+
+  it('walking about is what gives the monsters their turn', async () => {
+    const { univ, session, monst } = townWithOne();
+    monst.active = CreatureStatus.ALERTED;
+    const home = { ...univ.party.townLoc };
+    // Find a neighbour the party can actually step onto and still be in town:
+    // a *blocked* move costs no turn, and Fort Talrus's entrance is close
+    // enough to the boundary that a step the wrong way leaves the town.
+    const free = [
+      loc(home.x, home.y - 1), loc(home.x, home.y + 1),
+      loc(home.x - 1, home.y), loc(home.x + 1, home.y),
+    ].find((c) => !session.townIsBlocked(c) && !univ.town!.monsterAt(c)
+      && !session.locOffActiveArea(c));
+    expect(free).toBeDefined();
+
+    const startedAt = { ...monst.curLoc };
+    let moves = 0;
+    for (let i = 0; i < 6; i++) {
+      if (await session.moveTo(free!)) moves++;
+      if (await session.moveTo(home)) moves++;
+    }
+    expect(moves).toBeGreaterThan(0);
+    // The monster had a turn of its own, which it spent coming after us.
+    expect(monst.curLoc).not.toEqual(startedAt);
+    expect(dist(monst.curLoc, univ.party.townLoc))
+      .toBeLessThanOrEqual(dist(startedAt, home));
+  });
+
+  it('a sleeping monster stays put', () => {
+    const { session, monst } = townWithOne();
+    monst.active = CreatureStatus.ALERTED;
+    monst.status[Status.ASLEEP] = 6;
+    const before = { ...monst.curLoc };
+    for (let i = 0; i < 5; i++) doMonsters(session);
+    expect(monst.curLoc).toEqual(before);
   });
 });
 
