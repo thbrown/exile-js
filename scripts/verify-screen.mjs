@@ -898,6 +898,59 @@ const parryButtons = await page.evaluate(() => {
   window.__redraw();
   return out;
 });
+// Missiles: 's' arms the current PC's bow and the next square clicked is the
+// shot. Drive it through the real key handler so the mode change is exercised.
+const missile = await page.evaluate(async () => {
+  const s = window.__session;
+  const univ = s.univ;
+  if (s.mode !== 9) s.startCombat(univ.party.direction);
+  univ.curPc = 0;
+  const pc = univ.party.pcs[0];
+  pc.ap = 10;
+  // A bow and thirty arrows, both equipped in the first two slots.
+  const blank = () => JSON.parse(JSON.stringify(pc.items[0]));
+  const bow = blank(); bow.variety = 4; bow.name = 'Bow'; bow.bonus = 20; bow.charges = 1;
+  const arrows = blank();
+  arrows.variety = 5; arrows.name = 'Arrows'; arrows.itemLevel = 8;
+  arrows.bonus = 30; arrows.charges = 30; arrows.ability = 0;
+  pc.items[0] = bow; pc.items[1] = arrows;
+  pc.equip[0] = true; pc.equip[1] = true;
+  pc.skills[7] = 20; // ARCHERY
+  const monst = univ.town.monsters.find((m) => m.isAlive);
+  monst.attitude = 1;
+  monst.curLoc = { x: pc.combatPos.x + 2, y: pc.combatPos.y };
+  monst.maxHealth = 400; monst.health = 400;
+  window.__missileTarget = { ...monst.curLoc };
+  window.__missileMonst = monst;
+  return { armedBefore: s.missile !== null };
+});
+await page.keyboard.press('s');
+await page.waitForTimeout(100);
+const missileAimed = await page.evaluate(() => {
+  const s = window.__session;
+  window.__redraw();
+  return {
+    mode: s.mode, armed: s.missile !== null,
+    tail: s.univ.transcript.slice(-2),
+  };
+});
+await shot('02g-aiming');
+const missileFired = await page.evaluate(() => {
+  const s = window.__session;
+  const monst = window.__missileMonst;
+  const before = monst.health;
+  const arrows = s.univ.party.pcs[0].items[1].charges;
+  s.fireMissileAt(window.__missileTarget);
+  window.__redraw();
+  return {
+    mode: s.mode, armed: s.missile !== null,
+    hurt: before - monst.health,
+    spent: arrows - s.univ.party.pcs[0].items[1].charges,
+    tail: s.univ.transcript.slice(-3),
+  };
+});
+console.log('MISSILE:', JSON.stringify({ ...missile, ...missileAimed, fired: missileFired }));
+
 console.log('PARRY:', JSON.stringify(parryButtons));
 await shot('02c3-encounter');
 
@@ -915,6 +968,11 @@ const ok =
   bashPrompt?.text.startsWith('Who will bash?') &&
   talkKeys.job === true &&
   bashPrompt?.rows === 6 &&
+  missileAimed.armed === true &&
+  missileAimed.mode === 11 &&
+  missileFired.armed === false &&
+  missileFired.mode === 9 &&
+  missileFired.spent === 1 &&
   shopOpened?.rows > 0 &&
   shopOpened.inTown === true &&
   map.visible === true &&

@@ -404,9 +404,12 @@ async function main(): Promise<void> {
     else if (pending === 'look') status.textContent = 'Look where? (pick a direction)';
     else if (pending === 'use') status.textContent = 'Use what? (pick a direction)';
     else if (pending === 'bash') status.textContent = 'Bash which door? (pick a direction)';
+    else if (session.missile !== null)
+      status.textContent =
+        'Aim: click a square (or pick a direction). S or Esc cancels.';
     else if (session.mode === GameMode.COMBAT)
       status.textContent =
-        'Combat — arrows move/attack, W stand ready, D parry, X hold turn, E end fight.';
+        'Combat — arrows move/attack, S shoot, W stand ready, D parry, X hold turn, E end fight.';
     else
       status.textContent =
         `${scen.title} — arrows to move, L look` +
@@ -497,6 +500,13 @@ async function main(): Promise<void> {
       })();
       return;
     }
+    // Targeting a missile: the click (or arrow key) is the shot, not a move.
+    if (session.missile !== null) {
+      session.fireMissileAt(target);
+      setStatus();
+      redraw();
+      return;
+    }
     if (acting) return;
     acting = true;
     const done = (): void => {
@@ -531,7 +541,7 @@ async function main(): Promise<void> {
   const router = new InputRouter(canvas, {
     onMove: (dir) => {
       if (dialogs.active || session.talk || session.shop || acting) return;
-      const from = session.mode === GameMode.COMBAT
+      const from = session.mode === GameMode.COMBAT || session.missile !== null
         ? univ.currentPc.combatPos
         : session.inTown ? univ.party.townLoc : univ.party.outLoc;
       actOn(shiftLoc(from, dir));
@@ -604,14 +614,15 @@ async function main(): Promise<void> {
       }
       const cell = screen.terrainCellAt(x, y);
       if (cell) {
-        const from = session.mode === GameMode.COMBAT
+        const from = session.mode === GameMode.COMBAT || session.missile !== null
           ? univ.currentPc.combatPos
           : session.inTown ? univ.party.townLoc : univ.party.outLoc;
         const clicked = { x: from.x + cell.q - 4, y: from.y + cell.r - 4 };
         // Look, Talk and Use all act on the square you clicked — handle_talk
         // (boe.actions.cpp:818) takes the destination as given and only needs
-        // line of sight. Moving is the one that steps once toward it.
-        if (pending === null) {
+        // line of sight. Moving is the one that steps once toward it. A missile
+        // is aimed at the square clicked, at whatever range it will reach.
+        if (pending === null && session.missile === null) {
           const dx = Math.sign(cell.q - 4);
           const dy = Math.sign(cell.r - 4);
           if (dx === 0 && dy === 0) return;
@@ -706,7 +717,9 @@ async function main(): Promise<void> {
           toggleMap();
           break;
         case 's': case 'S':
-          univ.addStringToBuf('(Missiles need M5b)');
+          // 's' arms a missile and 's' again cancels, as in the original.
+          if (session.missile !== null) session.cancelMissile();
+          else session.startMissile();
           break;
         case 'm': case 'M': case 'p': case 'P':
           univ.addStringToBuf('(Spells need M5c)');
@@ -733,6 +746,11 @@ async function main(): Promise<void> {
       if (key === 'Escape' && pending) {
         pending = null;
         setStatus();
+      }
+      if (key === 'Escape' && session.missile !== null) {
+        session.cancelMissile();
+        setStatus();
+        redraw();
       }
     },
   });

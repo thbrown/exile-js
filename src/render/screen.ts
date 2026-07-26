@@ -12,7 +12,7 @@ import { groundFromTer, terFromGround } from '../data/scenario';
 import { TerSpec, TrimType, blocksMove } from '../data/terrain';
 import { Lighting } from '../data/town';
 import { GameSession } from '../game/session';
-import { GameMode } from '../game/modes';
+import { GameMode, isCombat } from '../game/modes';
 import { Boom } from '../game/booms';
 import { MAIN_STATUS_LABEL, MainStatus } from '../universe/skills';
 import { Colours } from './colours';
@@ -630,7 +630,9 @@ export class Screen {
 
   private drawPartySymbol(session: GameSession): void {
     const { univ } = session;
-    if (session.mode === GameMode.COMBAT) {
+    // Targeting modes (FIRING/THROWING) are combat modes too — the party is
+    // still six figures on the map, so this asks `isCombat`, not `== COMBAT`.
+    if (isCombat(session.mode)) {
       this.drawCombatParty(session);
       return;
     }
@@ -925,7 +927,7 @@ export class Screen {
   /** cToolbar::draw (boe.ui.cpp:193). */
   private drawToolbar(session: GameSession): void {
     const mode: 'out' | 'town' | 'combat' =
-      session.mode === GameMode.COMBAT ? 'combat' : session.inTown ? 'town' : 'out';
+      isCombat(session.mode) ? 'combat' : session.inTown ? 'town' : 'out';
     if (mode !== this.buttonsMode) {
       this.buttonsMode = mode;
       this.buttons = placeButtons(

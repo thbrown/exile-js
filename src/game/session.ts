@@ -26,6 +26,7 @@ import {
   NO_ONE, endTownCombat, pcAttack, pickNextPc, setPcMoves, startTownCombat, takeAp,
 } from './combat';
 import { combatRunMonst, doMonsterTurn, doMonsters } from './monsterTurn';
+import { LoadedMissile, fireMissile, isLoaded, loadMissile } from './missiles';
 import { CurTown } from '../universe/curTown';
 import {
   GiveStatus,
@@ -44,7 +45,7 @@ import { makeTownHostile } from './townAttitude';
 import { OUT_HALF_DIM, OUT_MAX_DIM } from '../universe/curOut';
 import { TOWN_NUM_OUTDOORS } from '../universe/party';
 import { Universe } from '../universe/universe';
-import { GameMode, PreModes, isOut, isTown } from './modes';
+import { GameMode, PreModes, isCombat, isOut, isTown } from './modes';
 import { bashDoor as bashDoorAt, pickLock as pickLockAt } from './doors';
 import { TalkAction, TalkState } from './talk';
 import { SpecType } from '../data/special';
@@ -113,6 +114,8 @@ export class GameSession {
    * casting). 6 means nobody, and then everyone acts in turn as normal.
    */
   combatActivePc = NO_ONE;
+  /** The armed missile while the game is in FIRING or THROWING mode. */
+  missile: LoadedMissile | null = null;
   private numOutMoves = 0;
   private numTownMoves = 0;
   /** Optional; when absent the game runs silently (as tests do). */
@@ -172,7 +175,7 @@ export class GameSession {
 
   /** get_location (boe.text.cpp:1248) — the left half of the status bar. */
   locationName(): string {
-    if (this.mode === GameMode.COMBAT) {
+    if (isCombat(this.mode)) {
       // The original puts the acting PC and their remaining moves in the text
       // bar during combat (draw_text_bar's combat half).
       const pc = this.univ.currentPc;
@@ -403,7 +406,7 @@ export class GameSession {
     if (!town.isOnMap(where.x, where.y)) return true;
     if (this.townIsBlocked(where)) return true;
 
-    const inCombat = this.mode === GameMode.COMBAT;
+    const inCombat = isCombat(this.mode);
     if (inCombat) {
       // Keep combatants off marked specials and off portals.
       if (town.isSpecialSpot(where.x, where.y)) return true;
@@ -1512,6 +1515,52 @@ export class GameSession {
       this.univ.curPc = this.combatActivePc;
       this.combatActivePc = NO_ONE;
     }
+  }
+
+  /**
+   * handle_missile / load_missile — arm the current PC's missile and switch to
+   * FIRING or THROWING, which is a targeting mode: the next click on the
+   * terrain is the shot. Returns false (with the refusal in the transcript)
+   * when there's nothing to shoot with.
+   */
+  startMissile(): boolean {
+    if (this.mode !== GameMode.COMBAT) {
+      this.univ.addStringToBuf('Shoot: Only in combat.');
+      return false;
+    }
+    const loaded = loadMissile(this.univ);
+    if (!isLoaded(loaded)) {
+      this.univ.addStringToBuf(loaded.message);
+      return false;
+    }
+    this.missile = loaded;
+    this.mode = loaded.mode;
+    this.univ.addStringToBuf(
+      loaded.mode === GameMode.THROWING ? 'Throw: Select a target.' : 'Fire: Select a target.');
+    this.univ.addStringToBuf("  (Hit 's' to cancel.)");
+    return true;
+  }
+
+  /** Back out of targeting without spending the turn. */
+  cancelMissile(): void {
+    if (this.missile === null) return;
+    this.missile = null;
+    this.mode = GameMode.COMBAT;
+  }
+
+  /**
+   * Loose the armed missile at `where`. The mode goes back to COMBAT either
+   * way — a shot that was out of range or out of sight has still been aimed,
+   * which is what the C++ does when `fire_missile` returns.
+   */
+  fireMissileAt(where: Location): boolean {
+    const loaded = this.missile;
+    if (loaded === null) return false;
+    this.missile = null;
+    this.mode = GameMode.COMBAT;
+    fireMissile(this, loaded, where);
+    this.afterCombatAction();
+    return true;
   }
 
   /**
