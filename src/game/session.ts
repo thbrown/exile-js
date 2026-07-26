@@ -22,6 +22,9 @@ import { Snd, SoundPlayer } from '../platform/sound';
 import { Creature, CreatureStatus, assignCreature } from '../universe/creature';
 import { DamageType } from '../data/monster';
 import { hitParty } from './damage';
+import {
+  NO_ONE, endTownCombat, pcAttack, pickNextPc, setPcMoves, startTownCombat,
+} from './combat';
 import { CurTown } from '../universe/curTown';
 import {
   GiveStatus,
@@ -91,6 +94,18 @@ export class GameSession {
   mode: GameMode = GameMode.OUTDOORS;
   /** The tile the view is centered on; equals the party position in town. */
   center: Location = loc(0, 0);
+  /**
+   * Whose turn it was before combat started, so leaving combat hands control
+   * back to the same PC (store_current_pc in boe.combat.cpp).
+   */
+  storeCurrentPc = 0;
+  /** which_combat_type: 1 for a fight in a town, 0 for an outdoor arena. */
+  whichCombatType = 0;
+  /**
+   * combat_active_pc — the PC in the middle of a multi-step action (firing,
+   * casting). 6 means nobody, and then everyone acts in turn as normal.
+   */
+  combatActivePc = NO_ONE;
   private numOutMoves = 0;
   private numTownMoves = 0;
   /** Optional; when absent the game runs silently (as tests do). */
@@ -322,7 +337,7 @@ export class GameSession {
     }
   }
 
-  private townIsBlocked(where: Location): boolean {
+  townIsBlocked(where: Location): boolean {
     const town = this.univ.town!;
     const ter = this.univ.terrainType(town.record.terrain[where.x]![where.y]!);
     return (
@@ -353,9 +368,14 @@ export class GameSession {
 
     if (!town.isOnMap(destination.x, destination.y)) return false;
 
-    // TODO(M5): bumping a hostile monster starts combat instead of moving.
+    // Walking into something hostile starts a fight rather than bouncing off.
     const blocker = town.monsterAt(destination);
     if (blocker) {
+      if (!blocker.isFriendly) {
+        party.direction = setDirection(party.townLoc, destination);
+        this.startCombat(party.direction);
+        return false;
+      }
       this.univ.addStringToBuf('Blocked: a creature is in the way.');
       return false;
     }
@@ -1273,6 +1293,53 @@ export class GameSession {
    * `entryDir` indexes start_locs; 9 means "use the forced location", which
    * for now resolves to the first usable start location.
    */
+  /**
+   * Enter town combat, facing `direction` — the C++'s `start_town_combat` plus
+   * the mode change `handle_action` does around it. `whichCombatType` is 1 for a
+   * fight inside a town, which is all this port supports so far.
+   */
+  startCombat(direction: Direction): void {
+    if (!this.univ.town) return;
+    startTownCombat(this, direction);
+    this.whichCombatType = 1;
+    this.mode = GameMode.COMBAT;
+    this.combatActivePc = NO_ONE;
+    this.center = { ...this.univ.currentPc.combatPos };
+  }
+
+  /**
+   * Leave combat and regroup. Returns false when the party can't — someone
+   * caged apart from the rest — with the refusal already in the transcript.
+   */
+  endCombat(): boolean {
+    if (this.mode !== GameMode.COMBAT) return false;
+    const direction = endTownCombat(this);
+    if (direction === Direction.Here) return false;
+    this.univ.party.direction = direction;
+    this.mode = GameMode.TOWN;
+    this.center = { ...this.univ.party.townLoc };
+    this.updateExplored(this.univ.party.townLoc);
+    return true;
+  }
+
+  /** Give out a fresh round of moves and pick who acts (the top of a round). */
+  startCombatRound(): void {
+    setPcMoves(this.univ);
+    pickNextPc(this.univ, this.combatActivePc);
+  }
+
+  /**
+   * The current PC swings at whatever is on `where`. Returns false when there's
+   * nothing there to hit.
+   */
+  attackAt(where: Location): boolean {
+    const target = this.univ.town?.monsterAt(where) ?? null;
+    if (!target) return false;
+    pcAttack(this.univ, this.univ.curPc, target, this);
+    if (this.univ.currentPc.ap <= 0) pickNextPc(this.univ, this.combatActivePc);
+    return true;
+  }
+
   startTownMode(townNum: number, entryDir: number): void {
     const record = this.univ.scenario.towns[townNum];
     if (!record) {
@@ -1378,7 +1445,7 @@ export class GameSession {
   }
 
   /** sight_obscurity (boe.locutils.cpp:179). */
-  private sightObscurity = (x: number, y: number): number => {
+  sightObscurity = (x: number, y: number): number => {
     let store = this.getBlockage(this.coordToTer(x, y));
     const town = this.univ.town;
     if (!town) return store;
@@ -1592,6 +1659,17 @@ export class GameSession {
    * update_explored (boe.locutils.cpp:230) — reveal what the party can see
    * from `where`: the 9x9 block around it, minus anything sight-blocked.
    */
+  /**
+   * loc_off_act_area — outside the town's playable rectangle. Note the
+   * comparisons are strict, so the border row and column count as off it.
+   */
+  locOffActiveArea(where: Location): boolean {
+    const rect = this.univ.town?.record.inTownRect;
+    if (!rect) return false;
+    return !(where.x > rect.left && where.x < rect.right
+      && where.y > rect.top && where.y < rect.bottom);
+  }
+
   updateExplored(where: Location): void {
     const { out } = this.univ;
     const town = this.univ.town;

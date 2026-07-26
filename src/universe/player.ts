@@ -92,6 +92,13 @@ export class Player extends Living {
    * Set by the combat Parry action and spent by `damagePc`.
    */
   parry = 0;
+  /**
+   * Who this PC last swung at, so the Attack command can repeat without
+   * re-targeting (cPlayer::last_attacked).
+   */
+  lastAttacked: Living | null = null;
+  /** The weapon carrying the poison from the Poison Weapon skill, if any. */
+  weapPoisoned: Item | null = null;
 
   get isAlive(): boolean {
     return this.mainStatus === MainStatus.ALIVE;
