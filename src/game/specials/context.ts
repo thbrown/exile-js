@@ -8,6 +8,7 @@
 
 import { Location } from '../../core/location';
 import { SpecType, SpecialNode } from '../../data/special';
+import type { GameSession } from '../session';
 
 /** eSpecCtx (special.hpp:135) — what caused this chain to run. */
 export enum SpecCtx {
@@ -109,6 +110,12 @@ export interface SpecialCtx {
    */
   curTarget: number | null;
   host: SpecialHost;
+  /**
+   * The running game. The C++ reaches for the `univ` global plus a handful of
+   * free functions (`set_town_attitude`, `start_town_combat`…); those live on
+   * GameSession here, so a node that needs one gets at it through this.
+   */
+  session: GameSession;
 }
 
 /** A chain waiting for the current one to finish (special_queue). */

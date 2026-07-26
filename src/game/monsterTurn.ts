@@ -260,13 +260,18 @@ export function doMonsters(session: GameSession): void {
     monst.target = target;
 
     if (monst.active === CreatureStatus.ALERTED || monst.isFriendly) {
-      let actedYet = false;
       // Nothing to chase: drift, or drift *toward* the party if it's nasty.
-      if ((monst.attitude === Attitude.DOCILE || target === NO_ONE) && monst.mobile) {
-        if (monst.isFriendly || univ.rng.getRan(1, 0, 1) === 0) actedYet = randMove(session, monst);
-        else actedYet = seekParty(session, monst, partyLoc);
+      // Once the town has turned hostile nobody drifts idly any more.
+      if ((monst.attitude === Attitude.DOCILE || target === NO_ONE) && !town.monstHostile
+        && monst.mobile) {
+        if (monst.isFriendly || univ.rng.getRan(1, 0, 1) === 0) randMove(session, monst);
+        else seekParty(session, monst, partyLoc);
       }
-      if (!actedYet && monst.attitude !== Attitude.DOCILE && monst.mobile && target !== NO_ONE) {
+      // The C++ doesn't gate this second block on the first having done
+      // nothing, and the only way to reach it having already drifted is a
+      // docile creature in a hostile town — which then really does get both.
+      if ((monst.attitude !== Attitude.DOCILE || town.monstHostile)
+        && monst.mobile && target !== NO_ONE) {
         const canFlee = !monst.mon.mindless && monst.mon.race !== Race.UNDEAD
           && monst.mon.race !== Race.SKELETAL;
         if (monst.morale < 0 && canFlee) {

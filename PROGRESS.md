@@ -69,7 +69,7 @@ Notes for M2 implementer:
 - Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
 - scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
-- `npm test` → 198 tests green (19 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
+- `npm test` → 331 tests green (25 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
 - `node scripts/verify-screen.mjs` (needs `npx vite --port 5199` running) drives the real UI headless and screenshots it. Playwright + chromium installed as devDependency.
 - Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
@@ -114,6 +114,17 @@ Notes for M2 implementer:
   `combatRunMonst` (the turn between rounds: the clock, the light, status
   decay). `session.afterPartyTurn` runs the town-mode pair after any
   successful move, which is what makes encounters happen at all.
+- **Turning a town hostile (2026-07-26)**: `game/townAttitude.ts` ports
+  `set_town_attitude` / `make_town_hostile` (boe.items.cpp:304) — the slot
+  range with its Python-style negative indices, the summoned-creature
+  exemption, the guard power-up (triple health, haste, bless, alerted) and the
+  town's `spec_on_hostile` chain. Every caller now goes through it: the
+  MAKE_TOWN_HOSTILE special, talk's END_ALARM, being caught stealing, and
+  **attacking someone peaceful**. In combat, moving into a friendly raises
+  `attack-friendly.xml` ("This creature isn't hostile. Attack anyway?"); Attack
+  swings *and* turns the town. `CurTown.monstHostile` is the `cPopulation::hostile`
+  flag, and `do_monsters` reads it so nobody drifts idly once it's set.
+  `session.combatMove` is **async** now because of that prompt.
 - **Hit animation (M5a)**: `game/booms.ts` ports `boom_space` — the explosion
   frame from booms.png over the square with the damage printed on it, and the
   sound. The C++ draws it and sleeps; here each boom carries an expiry and
@@ -221,6 +232,19 @@ Notes for M2 implementer:
   so the leading PC can legitimately stand somewhere blocked. Everyone else
   must not. And when no surrounding spot passes, the whole party stacks on one
   square — that's the original's behaviour in a cramped doorway, not a bug.
+- (2026-07-26) **Parry is the SHIELD toolbar button**, not a button called
+  Parry — `TOOLBAR_SHIELD` → `handle_parry`, and `TOOLBAR_WAIT` →
+  `handle_stand_ready` (which is `parry = 100`, not just "spend the turn").
+  Three fight-toolbar buttons were drawn but dead; a WAIT that only zeroed AP
+  silently cost the player the stand-ready defence bonus.
+- (2026-07-26) `TOWN_SET_ATTITUDE` names its creature by **slot in `ex1a`**
+  with the attitude in `ex1b` — not by the trigger location, and not `ex2a`.
+  Despite the name, `MAKE_TOWN_HOSTILE` is the group version and takes
+  `set_town_attitude(ex1a, ex1b, ex2a)`: a *slot range*, not a monster type.
+  Both were ported wrong first time round.
+- (2026-07-26) `set_town_attitude` returns early in an arena fight
+  (`is_combat() && which_combat_type == 0`) — there's no town population there
+  to turn, and running `spec_on_hostile` would be worse than useless.
 - (2026-07-25) Movement, `talkTo` and `useSpace` are **async** now, because each can raise a dialog mid-action. `main.ts` keeps an `acting` flag so a held arrow key can't start a second move on top of the first — the C++ gets that for free by blocking.
 
 ## Handoff: what combat still needs (M5b and M5c)
@@ -277,6 +301,18 @@ Fidelity notes for whoever picks this up:
   as file numbers. See the gotchas above.
 - **No damage animation**, though the log and the HP were right: `boom_space`
   had never been ported.
+
+### Reported by the user and fixed (third play-test, 2026-07-26)
+
+- **"Is parry/shield implemented?"** The rules were (`char_parry`,
+  `char_stand_ready`, the `parry` term in `damage_pc`, shields as armour in the
+  per-piece defence roll), but the **SHIELD, WAIT and ACT toolbar buttons were
+  dead** — parry was keyboard-only, and clicking Wait zeroed AP without setting
+  `parry = 100`. All three are wired now.
+- **"Shouldn't I be able to attack peaceful NPCs?"** You couldn't: the swing
+  was refused with "Blocked: a creature is in the way." Now it raises the
+  original's attack-friendly prompt and turns the town hostile, via the new
+  `set_town_attitude` port. See the gotchas above.
 
 ### Reported by the user and still open (2026-07-25)
 

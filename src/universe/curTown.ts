@@ -15,6 +15,12 @@ export class CurTown {
   items: Item[] = [];
   /** How many of this town's monsters the party has killed (cTown::m_killed). */
   monstersKilled = 0;
+  /**
+   * `cPopulation::hostile` — the whole town has turned on the party. Set by
+   * `setTownAttitude` and cleared on town entry (boe.town.cpp:158). `do_monsters`
+   * reads it to stop even docile townsfolk from wandering idly.
+   */
+  monstHostile = false;
   /** Explored flags for the current town, [x][y]. */
   explored: Uint8Array[];
   /** Permanently lit tiles (braziers, bonfires…), cTown::lighting. */

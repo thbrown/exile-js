@@ -40,6 +40,7 @@ import { ShopItemType } from '../data/shop';
 import { ShopState, handleSale } from './shop';
 import { ItemShopMode, ItemShopState, handleItemShopAction } from './itemShop';
 import { doRest, handleRest } from './rest';
+import { makeTownHostile } from './townAttitude';
 import { OUT_HALF_DIM, OUT_MAX_DIM } from '../universe/curOut';
 import { TOWN_NUM_OUTDOORS } from '../universe/party';
 import { Universe } from '../universe/universe';
@@ -796,6 +797,17 @@ export class GameSession {
     // Remember that a preset item has been taken, so it doesn't come back.
     if (item.isSpecial > 0) town.record.itemTaken[item.isSpecial - 1] = true;
     this.univ.addStringToBuf(result.message);
+    // get_item (boe.items.cpp:286) — taking something that isn't yours in
+    // sight of anyone friendly turns the whole town on the party.
+    if (item.property) {
+      for (const monst of town.monsters) {
+        if (!monst.isAlive || !monst.isFriendly) continue;
+        if (this.canSeeLight(item.itemLoc, monst.curLoc) >= SIGHT_BLOCKED) continue;
+        makeTownHostile(this);
+        this.univ.addStringToBuf('Your crime was seen!');
+        break;
+      }
+    }
     return result.message;
   }
 
@@ -857,7 +869,7 @@ export class GameSession {
   specials: SpecialsEngine | null = null;
 
   attachSpecials(host: SpecialHost): void {
-    this.specials = new SpecialsEngine(this.univ, host);
+    this.specials = new SpecialsEngine(this.univ, host, this);
   }
 
   /**
@@ -1071,6 +1083,13 @@ export class GameSession {
   onTrain: (() => void) | null = null;
 
   /**
+   * Set by the host: the "This creature isn't hostile. Attack anyway?" prompt
+   * (`attack-friendly.xml`). Without a handler the swing is simply refused,
+   * which is what Cancel does.
+   */
+  onConfirmAttackFriendly: (() => Promise<boolean>) | null = null;
+
+  /**
    * force_town_enter — pin where the party lands before start_town_mode runs,
    * which is how a staircase drops you at a specific square.
    */
@@ -1188,6 +1207,7 @@ export class GameSession {
       this.startShopMode(shopNum, costAdj, name) || this.startShopModeAnyPc(shopNum, costAdj, name);
     this.talk.onItemShop = (mode, a, b, c) => this.startItemShop(mode, a, b, c);
     this.talk.onTrain = () => this.onTrain?.();
+    this.talk.onMakeTownHostile = () => makeTownHostile(this);
     this.talk.onCallSpecial = (node, scenario) => {
       const type = scenario ? SpecCtxType.SCEN : SpecCtxType.TOWN;
       void this.runSpecialRaw(SpecCtx.TALK, type, node, this.univ.party.townLoc).then((r) => {
@@ -1511,7 +1531,7 @@ export class GameSession {
    * TODO(M5b): monsters adjacent to the square you're leaving get a free
    * back-shot, which needs monster_attack.
    */
-  combatMove(destination: Location): boolean {
+  async combatMove(destination: Location): Promise<boolean> {
     const town = this.univ.town;
     const pc = this.univ.currentPc;
     if (this.mode !== GameMode.COMBAT || !town) return false;
@@ -1533,14 +1553,17 @@ export class GameSession {
     }
 
     if (monstHit) {
-      // TODO(M5b): attacking a friendly should ask first, then turn the town.
-      if (!monstHit.isFriendly) {
+      // Swinging at someone who isn't hostile asks first (the "attack-friendly"
+      // dialog), and going through with it turns the whole town on you.
+      let doAttack = !monstHit.isFriendly;
+      if (!doAttack) doAttack = (await this.onConfirmAttackFriendly?.()) ?? false;
+      if (doAttack) {
+        if (monstHit.isFriendly) makeTownHostile(this);
         pc.lastAttacked = monstHit;
         pcAttack(this.univ, this.univ.curPc, monstHit, this);
         this.afterCombatAction();
         return true;
       }
-      this.univ.addStringToBuf('Blocked: a creature is in the way.');
       return false;
     }
 

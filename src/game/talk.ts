@@ -95,6 +95,8 @@ export class TalkState {
    * the host redraws either way, so the difference isn't visible.
    */
   onCallSpecial: ((node: number, scenario: boolean) => void) | null = null;
+  /** How END_ALARM calls make_town_hostile; set by the session. */
+  onMakeTownHostile: (() => void) | null = null;
   /** How a TRAINING node opens the spend-skill-points dialog. */
   onTrain: (() => void) | null = null;
   /** How an INN node rests the party and moves it to the bed it paid for. */
@@ -450,9 +452,7 @@ export class TalkState {
         break;
       }
       case TalkNodeType.END_ALARM:
-        // make_town_hostile: everything friendly in town turns on the party.
-        for (const monst of this.univ.town?.monsters ?? [])
-          if (monst.isFriendly) monst.attitude = Attitude.HOSTILE_A;
+        this.onMakeTownHostile?.();
         this.endForced = true;
         break;
       case TalkNodeType.END_DIE: {

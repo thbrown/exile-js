@@ -142,6 +142,19 @@ async function main(): Promise<void> {
     return Number.isInteger(index) && options[index]?.canPick ? index : -1;
   };
 
+  /** attack-friendly.xml — swinging at someone who hasn't done anything yet. */
+  session.onConfirmAttackFriendly = async () => {
+    const choice = await dialogs.run({
+      text: "This creature isn't hostile.\nAttack anyway?",
+      escapeButton: 'cancel',
+      buttons: [
+        { name: 'cancel', label: 'Cancel', key: 'c' },
+        { name: 'attack', label: 'Attack', key: 'a' },
+      ],
+    });
+    return choice === 'attack';
+  };
+
   /**
    * A locked door: ask what to do and who does it, then act. This is the async
    * replacement for the C++ blocking cChoiceDlog + select_pc pair.
@@ -483,16 +496,6 @@ async function main(): Promise<void> {
       })();
       return;
     }
-    // In combat the arrow keys and clicks drive the current PC, not the party.
-    if (session.mode === GameMode.COMBAT) {
-      if (what === 'use') void session.useSpace(target).then(() => { setStatus(); redraw(); });
-      else {
-        session.combatMove(target);
-        setStatus();
-        redraw();
-      }
-      return;
-    }
     if (acting) return;
     acting = true;
     const done = (): void => {
@@ -500,6 +503,13 @@ async function main(): Promise<void> {
       setStatus();
       redraw();
     };
+    // In combat the arrow keys and clicks drive the current PC, not the party.
+    // The move is async because attacking a friendly raises a prompt first.
+    if (session.mode === GameMode.COMBAT) {
+      if (what === 'use') void session.useSpace(target).then(done, done);
+      else void session.combatMove(target).then(done, done);
+      return;
+    }
     if (what === 'use') void session.useSpace(target).then(done, done);
     else void session.moveTo(target).then(done, done);
   };
@@ -555,12 +565,14 @@ async function main(): Promise<void> {
           // End combat and regroup.
           session.endCombat();
         } else if (btn.btn === ToolbarButton.WAIT) {
-          // Pass: give up the rest of this PC's turn.
-          if (session.mode === GameMode.COMBAT) {
-            univ.currentPc.ap = 0;
-            if (pickNextPc(univ, session.combatActivePc)) session.startCombatRound();
-            session.center = { ...univ.currentPc.combatPos };
-          }
+          // handle_stand_ready — give up the turn *on guard*, not just idle.
+          if (session.mode === GameMode.COMBAT) session.pause();
+        } else if (btn.btn === ToolbarButton.SHIELD) {
+          // handle_parry — spend what's left of the turn on defence.
+          if (session.mode === GameMode.COMBAT) session.parry();
+        } else if (btn.btn === ToolbarButton.ACT) {
+          // handle_toggle_active — pin the turn to this PC, or release it.
+          if (session.mode === GameMode.COMBAT) session.toggleActivePc();
         } else {
           // TODO(M3+): wire the remaining toolbar buttons to real actions.
           univ.addStringToBuf(`(${ToolbarButton[btn.btn]} is not implemented yet)`);

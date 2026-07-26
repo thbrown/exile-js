@@ -703,6 +703,7 @@ const placement = await page.evaluate(() => {
 });
 console.log('PLACEMENT:', JSON.stringify(placement));
 
+
 // Hit animation + the right sound type for a bite.
 const booms = await page.evaluate(async () => {
   const s = window.__session;
@@ -734,6 +735,77 @@ const booms = await page.evaluate(async () => {
 });
 console.log('BOOMS:', JSON.stringify(booms));
 await shot('02c4-boom');
+
+// Attacking someone peaceful: the prompt has to come up, and going through
+// with it has to turn the whole town on the party.
+const attackFriendly = await page.evaluate(async () => {
+  const s = window.__session;
+  const univ = s.univ;
+  if (s.mode === 9) s.endCombat();
+  const monst = univ.town.monsters.find((m) => m.isAlive);
+  if (!monst) return { skipped: 'no monsters' };
+  monst.attitude = 0; // DOCILE — peaceful
+  univ.town.monstHostile = false;
+  monst.curLoc = { x: univ.party.townLoc.x + 1, y: univ.party.townLoc.y };
+  s.startCombat(univ.party.direction);
+  const pc = univ.currentPc;
+  pc.combatPos = { x: monst.curLoc.x, y: monst.curLoc.y + 1 };
+  pc.ap = 4;
+  // Don't await: the move parks on the dialog until it's answered.
+  const pending = s.combatMove({ ...monst.curLoc });
+  await new Promise((r) => setTimeout(r, 150));
+  return {
+    promptUp: !!window.__dialogs.active,
+    stillFriendly: monst.isFriendly,
+    finish: (window.__pendingAttack = pending) && true,
+  };
+});
+await shot('02f-attack-friendly');
+await page.keyboard.press('a'); // the Attack button's def-key
+await page.waitForTimeout(200);
+const attackFriendlyDone = await page.evaluate(async () => {
+  const s = window.__session;
+  const univ = s.univ;
+  const swung = await window.__pendingAttack;
+  const monst = univ.town.monsters.find((m) => !m.isFriendly);
+  window.__redraw();
+  return {
+    swung, townHostile: univ.town.monstHostile, someoneTurned: !!monst,
+    dialogGone: !window.__dialogs.active, tail: univ.transcript.slice(-2),
+  };
+});
+console.log('ATTACK FRIENDLY:', JSON.stringify({ ...attackFriendly, ...attackFriendlyDone }));
+
+// The Parry and Stand Ready buttons on the fight toolbar.
+const parryButtons = await page.evaluate(() => {
+  const s = window.__session;
+  const screen = window.__screen;
+  if (s.mode !== 9) s.startCombat(s.univ.party.direction);
+  window.__redraw();
+  const find = (which) => {
+    for (let y = 360; y < 430; y += 2)
+      for (let x = 0; x < 300; x += 2) {
+        const hit = screen.buttonAt(x, y);
+        if (hit && hit.btn === which) return { x, y };
+      }
+    return null;
+  };
+  const out = { shieldAt: find(6), waitAt: find(12) }; // SHIELD, WAIT
+  const pc = s.univ.currentPc;
+  pc.skills[2] = 8; // DEFENSE
+  pc.ap = 8;
+  s.parry();
+  out.parry = { value: pc.parry, ap: pc.ap };
+  // Spending the turn hands over to the next PC, so re-read who's acting.
+  const next = s.univ.currentPc;
+  next.ap = 4;
+  s.pause();
+  out.standReady = { value: next.parry, ap: next.ap };
+  s.endCombat();
+  window.__redraw();
+  return out;
+});
+console.log('PARRY:', JSON.stringify(parryButtons));
 await shot('02c3-encounter');
 
 console.log('ERRORS:', errors.length ? errors.join(' | ') : 'none');

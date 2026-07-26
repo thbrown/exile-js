@@ -33,6 +33,7 @@ import { townSpec } from './town';
 import { rectSpec } from './rect';
 import { outdoorSpec } from './outdoor';
 import { affectSpec } from './affect';
+import type { GameSession } from '../session';
 
 /** What a chain hands back to whatever triggered it. */
 export interface SpecialResult {
@@ -54,6 +55,7 @@ export class SpecialsEngine {
   constructor(
     private univ: Universe,
     private host: SpecialHost,
+    private session: GameSession,
   ) {}
 
   /** get_node (boe.specials.cpp:2178) — fetch by number from the right list. */
@@ -133,6 +135,7 @@ export class SpecialsEngine {
       redraw: false,
       curTarget: null,
       host: this.host,
+      session: this.session,
     };
     this.inProgress = true;
 

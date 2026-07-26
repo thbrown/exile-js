@@ -16,6 +16,7 @@ import { Status } from '../../universe/skills';
 import { Universe } from '../../universe/universe';
 import { SpecCtx, SpecialCtx } from './context';
 import { alterSpace, reportUnsupported } from './general';
+import { setTownAttitude } from '../townAttitude';
 import { handleMessage } from './vm';
 import { BASIC_BUTTONS } from './oneshot';
 
@@ -66,13 +67,9 @@ export async function townSpec(univ: Universe, ctx: SpecialCtx): Promise<void> {
         univ.addStringToBuf('Invalid attitude (0-3).');
         break;
       }
-      // ex1a/ex1b name a creature group, or -1 for everyone.
-      for (const monst of town?.monsters ?? []) {
-        if (spec.ex1a >= 0 && monst.number !== spec.ex1a) continue;
-        monst.attitude = spec.ex2a as Attitude;
-        if (spec.ex2a === Attitude.HOSTILE_A || spec.ex2a === Attitude.HOSTILE_B)
-          monst.mobile = true;
-      }
+      // ex1a/ex1b are the slot range set_town_attitude works over; 0/-1 (the
+      // default pair for "everyone") is what make_town_hostile passes.
+      setTownAttitude(ctx.session, spec.ex1a, spec.ex1b, spec.ex2a as Attitude);
       ctx.redraw = true;
       break;
     }
@@ -128,8 +125,19 @@ export async function townSpec(univ: Universe, ctx: SpecialCtx): Promise<void> {
       break;
 
     case SpecType.TOWN_SET_ATTITUDE: {
-      const monst = town?.monsterAt(at);
-      if (monst && spec.ex2a >= 0 && spec.ex2a <= 3) monst.attitude = spec.ex2a as Attitude;
+      // One creature only, named by its **slot** in ex1a with the attitude in
+      // ex1b — despite the name, MAKE_TOWN_HOSTILE is the group version.
+      const monsters = town?.monsters ?? [];
+      if (spec.ex1a < 0 || spec.ex1a >= monsters.length) {
+        univ.addStringToBuf(
+          `Tried to change the attitude of nonexistent monster ${spec.ex1a} of 0...${monsters.length}`);
+        break;
+      }
+      if (spec.ex1b < 0 || spec.ex1b > 3) {
+        univ.addStringToBuf('Invalid attitude (0-3).');
+        break;
+      }
+      monsters[spec.ex1a]!.attitude = spec.ex1b as Attitude;
       ctx.redraw = true;
       break;
     }
