@@ -19,6 +19,7 @@ import { InputRouter } from './platform/input';
 import { Snd, SoundPlayer } from './platform/sound';
 import { setLivingSound } from './universe/living';
 import { BOE_HEIGHT, BOE_WIDTH, ToolbarButton } from './render/layout';
+import { MAP_WINDOW } from './render/mapScreen';
 import { CHROME_SHEETS, Screen } from './render/screen';
 import { ShopHit, shopItemInfo } from './render/shopScreen';
 import { SheetStore } from './render/sheets';
@@ -514,6 +515,19 @@ async function main(): Promise<void> {
     else void session.moveTo(target).then(done, done);
   };
 
+  /**
+   * display_map / close_map (boe.town.cpp:1594) — the automap is a toggle, and
+   * it refuses to open mid-action ("prime_time"; here that's the `acting` flag
+   * a pending async move sets).
+   */
+  const toggleMap = (): void => {
+    if (!screen.mapVisible && acting) {
+      univ.addStringToBuf('Map: Finish what you are doing first.');
+      return;
+    }
+    screen.mapVisible = !screen.mapVisible;
+  };
+
   const router = new InputRouter(canvas, {
     onMove: (dir) => {
       if (dialogs.active || session.talk || session.shop || acting) return;
@@ -526,6 +540,11 @@ async function main(): Promise<void> {
     },
     onClick: (x, y) => {
       if (dialogs.handleClick(x, y)) return;
+      // The map is a separate window in the original, so a click that lands on
+      // it never reaches the game screen underneath.
+      if (screen.mapVisible
+        && x >= MAP_WINDOW.left && x < MAP_WINDOW.right
+        && y >= MAP_WINDOW.top && y < MAP_WINDOW.bottom) return;
       if (session.shop) {
         const hit = screen.shopScreen.hit(session.shop, x, y);
         if (hit) handleShopHit(hit);
@@ -555,6 +574,8 @@ async function main(): Promise<void> {
           session.rest();
         } else if (btn.btn === ToolbarButton.USE) {
           pending = 'use';
+        } else if (btn.btn === ToolbarButton.MAP) {
+          toggleMap();
         } else if (btn.btn === ToolbarButton.HAND) {
           void getItems();
         } else if (btn.btn === ToolbarButton.SWORD) {
@@ -604,6 +625,12 @@ async function main(): Promise<void> {
     },
     onKey: (key) => {
       if (dialogs.handleKey(key)) return;
+      // The map window's own key handler: Escape closes it, and it says so.
+      if (screen.mapVisible && key === 'Escape') {
+        screen.mapVisible = false;
+        redraw();
+        return;
+      }
       if (session.shop) {
         // shop_chars: 'a'-'h' buy the eight visible rows, Escape leaves.
         if (key === 'Escape') {
@@ -676,7 +703,7 @@ async function main(): Promise<void> {
           else univ.addStringToBuf('Get: nothing here');
           break;
         case 'a':
-          univ.addStringToBuf('(The map is not implemented yet)');
+          toggleMap();
           break;
         case 's': case 'S':
           univ.addStringToBuf('(Missiles need M5b)');

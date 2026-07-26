@@ -10,7 +10,7 @@
   arrows/keypad move, **f** fight (and end a fight), **e** end combat,
   **w**/Space wait — stand ready in combat, **d** parry, **x** hold the turn on
   one PC, **t** talk, **l** look, **u** use, **b** bash, **g** get, **r** rest,
-  **1-6** whose pack shows. Keys for things not built yet (**a** map, **s**
+  **1-6** whose pack shows, **a** the automap. Keys for things not built yet (**s**
   shoot, **m**/**p** spells, **A** alchemy) say which milestone they're waiting
   on. In conversations: l/n/j/b/s/r/d/g/a. In shops: **a-h** buy, arrows
   scroll, Escape leaves. In prompts: 1-6, Escape, Enter.
@@ -125,6 +125,16 @@ Notes for M2 implementer:
   swings *and* turns the town. `CurTown.monstHostile` is the `cPopulation::hostile`
   flag, and `do_monsters` reads it so nobody drifts idly once it's set.
   `session.combatMove` is **async** now because of that prompt.
+- **The automap (2026-07-26)**: `render/mapScreen.ts` ports `draw_map`
+  (boe.town.cpp:1317) and `display_map`/`close_map`. **A** or the MAP toolbar
+  button toggles it; Escape closes it. The original opens a second 296×277 OS
+  window; the WASM build already draws it over the main one at (52, 62), and
+  this port does the same — `Screen.mapVisible` gates it and `Screen.draw`
+  paints it last, mirroring `redraw_screen`'s trailing
+  `if(map_visible) draw_map(false)`. Explored squares only, 6px each, a 40×40
+  window that slides with the party (`mapViewRect`, exported so it can be
+  tested), road stubs from trim.png, and the red party marker. Arena combat
+  says "No map in combat." and a `defy-mapping` town says so too.
 - **Hit animation (M5a)**: `game/booms.ts` ports `boom_space` — the explosion
   frame from booms.png over the square with the damage printed on it, and the
   sound. The C++ draws it and sleeps; here each boom carries an expiry and
@@ -242,6 +252,11 @@ Notes for M2 implementer:
   Despite the name, `MAKE_TOWN_HOSTILE` is the group version and takes
   `set_town_attitude(ex1a, ex1b, ex2a)`: a *slot range*, not a monster type.
   Both were ported wrong first time round.
+- (2026-07-26) `draw_map`'s small-icon branch is indexed by the terrain's
+  **full-size `picture`**, not by the `map_pic` it just tested — `map_pic` only
+  decides *which* branch runs (termap cell vs. a shrunken terrain tile). It
+  reads like a slip, but every scenario's map is drawn against it, so the port
+  keeps it with a comment.
 - (2026-07-26) `set_town_attitude` returns early in an arena fight
   (`is_combat() && which_combat_type == 0`) — there's no town population there
   to turn, and running `spec_on_hostile` would be worse than useless.
@@ -319,11 +334,9 @@ Fidelity notes for whoever picks this up:
 Two of the seven issues from the first real play-test are genuinely blocked,
 and both are honest gaps rather than bugs:
 
-- **The MAP button does nothing.** `draw_map` / the town-and-outdoor map
-  overlay was never built. It's self-contained UI work (a scaled-down view of
-  the explored grid over the whole window) and doesn't depend on any missing
-  system — a good standalone task. Reference: `boe.graphics.cpp`'s
-  `draw_map` and the `MODE_...` map handling in `boe.actions.cpp`.
+- ~~**The MAP button does nothing.**~~ **Fixed 2026-07-26** — see the automap
+  entry above. Still missing from it: DETECT_LIFE's green monster dots (the
+  party status effect doesn't exist yet) and custom scenario graphics sheets.
 - **No random encounters outdoors.** In *towns* encounters now work: monsters
   notice the party and come after it. Outdoors still needs `create_wand_monst`,
   `handle_wandering_specials` (boe.specials.cpp:119) and — the big piece —
@@ -349,8 +362,8 @@ Smaller things outstanding, all independent of M5:
 1. M5b continued: the `uAbility` port, because breath, missiles, monster
    spells and summons all depend on it. Then outdoor wandering monsters,
    which additionally need the outdoor combat arena.
-2. The **MAP overlay** is still unbuilt and depends on nothing; likewise
-   `place_treasure`. Either is a good standalone chunk.
+2. `place_treasure` — what a corpse leaves to loot — is still a good
+   standalone chunk. (The MAP overlay landed 2026-07-26.)
 3. M2's last leftover is the replay driver.
 4. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in
    parallel at any time.

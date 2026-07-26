@@ -45,6 +45,24 @@ const panels = await page.evaluate(async () => {
 console.log('PANEL COLOUR COUNTS:', JSON.stringify(panels));
 await shot('01-start-town');
 
+// 1b. The automap: 'a' opens it over the screen, Escape closes it again. The
+// map area (240x240 at 52+47, 62+29) has to hold more than one colour, or the
+// terrain never drew.
+await page.keyboard.press('a');
+await page.waitForTimeout(150);
+const map = await page.evaluate(() => {
+  const ctx = document.getElementById('canvas').getContext('2d');
+  const d = ctx.getImageData(2 * (52 + 47), 2 * (62 + 29), 480, 480).data;
+  const seen = new Set();
+  for (let i = 0; i < d.length; i += 4) seen.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
+  return { visible: window.__screen.mapVisible, colours: seen.size };
+});
+await shot('01a-map-town');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+const mapClosed = await page.evaluate(() => window.__screen.mapVisible);
+console.log('MAP:', JSON.stringify(map), 'closed:', mapClosed);
+
 // 2. A new game starts inside the start town with the pregen party.
 const start = await page.evaluate(async () => {
   const s = window.__session;
@@ -499,6 +517,23 @@ const roam = await page.evaluate(async () => {
 });
 console.log('ROAMED:', JSON.stringify(roam));
 
+// 4b. The map again, outdoors — a different branch of draw_map (the sector
+// window, offset by the party's quadrant of the 96x96 outdoor block).
+await page.keyboard.press('a');
+await page.waitForTimeout(150);
+const mapOut = await page.evaluate(() => {
+  const ctx = document.getElementById('canvas').getContext('2d');
+  const d = ctx.getImageData(2 * (52 + 47), 2 * (62 + 29), 480, 480).data;
+  const seen = new Set();
+  for (let i = 0; i < d.length; i += 4) seen.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
+  return { visible: window.__screen.mapVisible, colours: seen.size };
+});
+await shot('02b-map-outdoors');
+await page.keyboard.press('a');
+await page.waitForTimeout(150);
+const mapOutClosed = await page.evaluate(() => window.__screen.mapVisible);
+console.log('MAP OUTDOORS:', JSON.stringify(mapOut), 'closed:', mapOutClosed);
+
 // 5. Walking back onto a town entrance re-enters a town.
 const reenter = await page.evaluate(async () => {
   const s = window.__session;
@@ -824,6 +859,12 @@ const ok =
   bashPrompt?.rows === 6 &&
   shopOpened?.rows > 0 &&
   shopOpened.inTown === true &&
+  map.visible === true &&
+  map.colours > 4 &&
+  mapClosed === false &&
+  mapOut.visible === true &&
+  mapOut.colours > 4 &&
+  mapOutClosed === false &&
   shopPainted > 8 &&
   bought.gold < goldBefore &&
   bought.stillShopping === true &&

@@ -56,6 +56,7 @@ import { pcGraphic } from './pcPics';
 import { SheetStore, TILE_H, TILE_W, calcRect } from './sheets';
 import { terrainGraphic } from './terrainPics';
 import { DEFAULT_BG, PANEL_BG, tilePattern } from './tiling';
+import { MAP_SHEETS, MapScreen } from './mapScreen';
 import { TalkScreen } from './talkScreen';
 import { ShopScreen } from './shopScreen';
 import { Trim, TrimMasks } from './trim';
@@ -80,6 +81,7 @@ export const CHROME_SHEETS = [
   'tinyobj',
   'talkportraits',
   'booms',
+  ...MAP_SHEETS,
 ];
 
 export class Screen {
@@ -90,6 +92,9 @@ export class Screen {
   private trim: TrimMasks;
   readonly talkScreen: TalkScreen;
   readonly shopScreen: ShopScreen;
+  readonly mapScreen: MapScreen;
+  /** map_visible (boe.town.cpp) — the automap overlay is up. */
+  mapVisible = false;
   /** The ground terrain trim falls back to when a neighbour is impassable. */
   private currentGround = 0;
   animFrame = 0;
@@ -101,6 +106,7 @@ export class Screen {
     this.trim = new TrimMasks(store);
     this.talkScreen = new TalkScreen(ctx, store);
     this.shopScreen = new ShopScreen(ctx, store);
+    this.mapScreen = new MapScreen(ctx, store);
   }
 
   draw(session: GameSession): void {
@@ -118,6 +124,7 @@ export class Screen {
       this.drawInventory(session);
       this.drawPanel('transcript');
       this.drawTranscript(session);
+      if (this.mapVisible) this.mapScreen.draw(session);
       return;
     }
     this.drawPanel('terView');
@@ -131,6 +138,8 @@ export class Screen {
     this.drawPanel('transcript');
     this.drawTranscript(session);
     this.drawToolbar(session);
+    // redraw_screen ends with `if(map_visible) draw_map(false)` (boe.main.cpp:1767).
+    if (this.mapVisible) this.mapScreen.draw(session);
   }
 
   /** put_background (boe.graphics.cpp:653) — the pattern behind everything. */
