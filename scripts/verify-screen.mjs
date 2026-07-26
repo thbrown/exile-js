@@ -535,6 +535,53 @@ await page.evaluate(() => {
 await page.waitForTimeout(300);
 await shot('03-town-again');
 
+// 2c2. Combat: walking into a hostile creature starts a fight, the party is
+//      placed as six figures, a swing lands, and leaving regroups the party.
+const combat = await page.evaluate(async () => {
+  const s = window.__session;
+  const univ = s.univ;
+  const monst = univ.town.monsters.find((m) => m.isAlive);
+  if (!monst) return { skipped: true };
+  monst.attitude = 1; // HOSTILE_A
+  monst.mon.armor = 0;
+  monst.health = monst.maxHealth = 400;
+  monst.curLoc = { x: univ.party.townLoc.x, y: univ.party.townLoc.y - 1 };
+  const modeBefore = s.mode;
+  await s.moveTo(monst.curLoc);
+  const placed = univ.party.pcs.filter((pc) => pc.isAlive && pc.combatPos.x >= 0).length;
+  // Give the acting PC a real weapon and swing until something lands.
+  const pc = univ.currentPc;
+  pc.skills[3] = 20; // edged weapons
+  pc.skills[1] = 20; // dexterity
+  pc.items[0] = { ...pc.items[0], variety: 1, name: 'sword', fullName: 'sword',
+    itemLevel: 10, weapType: 3, ability: 0 };
+  pc.equip[0] = true;
+  const hpBefore = monst.health;
+  for (let i = 0; i < 25 && monst.health === hpBefore; i++) {
+    pc.ap = 4;
+    univ.curPc = univ.party.pcs.indexOf(pc);
+    s.attackAt(monst.curLoc);
+  }
+  window.__redraw();
+  return {
+    modeBefore, mode: s.mode, placed, hurt: hpBefore - monst.health,
+    bar: s.locationName(), tail: univ.transcript.slice(-3),
+  };
+});
+console.log('COMBAT:', JSON.stringify(combat));
+await shot('02c-combat');
+
+const combatEnd = await page.evaluate(() => {
+  const s = window.__session;
+  const ended = s.endCombat();
+  window.__redraw();
+  return {
+    ended, mode: s.mode, loc: { ...s.univ.party.townLoc },
+    placed: s.univ.party.pcs.filter((pc) => pc.combatPos.x >= 0).length,
+  };
+});
+console.log('COMBAT END:', JSON.stringify(combatEnd));
+
 console.log('ERRORS:', errors.length ? errors.join(' | ') : 'none');
 await browser.close();
 
@@ -573,6 +620,9 @@ const ok =
   (sign.skipped === true || (sign.readable === true && signShown.dialogOpen === true)) &&
   outdoors.inTown === false &&
   roam.moves > 0 &&
+  (combat.skipped === true || (combat.mode === 9 && combat.placed > 1
+    && combat.hurt > 0 && combatEnd.ended === true && combatEnd.mode === 1
+    && combatEnd.placed === 0)) &&
   reenter?.inTown === true &&
   errors.length === 0;
 console.log(ok ? 'PASS' : 'FAIL');

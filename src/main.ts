@@ -4,6 +4,8 @@
  */
 
 import { shiftLoc } from './core/location';
+import { GameMode } from './game/modes';
+import { pickNextPc } from './game/combat';
 import { GameRng } from './core/rng';
 import { DialogHost } from './dialogs/dialog';
 import { getStr, loadStringTables } from './data/strings';
@@ -466,6 +468,16 @@ async function main(): Promise<void> {
       lookAt(target);
       return;
     }
+    // In combat the arrow keys and clicks drive the current PC, not the party.
+    if (session.mode === GameMode.COMBAT) {
+      if (what === 'use') void session.useSpace(target).then(() => { setStatus(); redraw(); });
+      else {
+        session.combatMove(target);
+        setStatus();
+        redraw();
+      }
+      return;
+    }
     if (acting) return;
     acting = true;
     const done = (): void => {
@@ -480,7 +492,9 @@ async function main(): Promise<void> {
   const router = new InputRouter(canvas, {
     onMove: (dir) => {
       if (dialogs.active || session.talk || session.shop || acting) return;
-      const from = session.inTown ? univ.party.townLoc : univ.party.outLoc;
+      const from = session.mode === GameMode.COMBAT
+        ? univ.currentPc.combatPos
+        : session.inTown ? univ.party.townLoc : univ.party.outLoc;
       actOn(shiftLoc(from, dir));
       setStatus();
       redraw();
@@ -528,7 +542,9 @@ async function main(): Promise<void> {
       }
       const cell = screen.terrainCellAt(x, y);
       if (cell) {
-        const from = session.inTown ? univ.party.townLoc : univ.party.outLoc;
+        const from = session.mode === GameMode.COMBAT
+          ? univ.currentPc.combatPos
+          : session.inTown ? univ.party.townLoc : univ.party.outLoc;
         const clicked = { x: from.x + cell.q - 4, y: from.y + cell.r - 4 };
         // Look, Talk and Use all act on the square you clicked — handle_talk
         // (boe.actions.cpp:818) takes the destination as given and only needs
@@ -581,6 +597,21 @@ async function main(): Promise<void> {
         setStatus();
       } else if (key === 'r' || key === 'R') {
         session.rest();
+        redraw();
+      } else if (key === 'c' || key === 'C') {
+        // C toggles combat: start a fight from town mode, or regroup and leave
+        // one. The original has separate Fight and Return-to-town buttons.
+        if (session.mode === GameMode.COMBAT) session.endCombat();
+        else if (session.inTown) session.startCombat(univ.party.direction);
+        setStatus();
+        redraw();
+      } else if (key === ' ' && session.mode === GameMode.COMBAT) {
+        // Pass: give up the rest of this PC's turn, and start a new round once
+        // nobody has moves left.
+        univ.currentPc.ap = 0;
+        if (pickNextPc(univ, session.combatActivePc)) session.startCombatRound();
+        session.center = { ...univ.currentPc.combatPos };
+        setStatus();
         redraw();
       } else if (key === 'g' || key === 'G') {
         if (session.inTown) void getItems();

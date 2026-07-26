@@ -9,7 +9,7 @@
  * the milestone that will fill it in, so drift stays visible.
  */
 
-import { Direction, Location, dist, loc, shiftLoc } from '../core/location';
+import { Direction, Location, dist, loc, locsEqual, shiftLoc } from '../core/location';
 import { SIGHT_BLOCKED, canSee } from '../core/sight';
 import { Item, ItemAbil, ItemType, defaultItem } from '../data/item';
 import { MonstTime } from '../data/monster';
@@ -23,7 +23,7 @@ import { Creature, CreatureStatus, assignCreature } from '../universe/creature';
 import { DamageType } from '../data/monster';
 import { hitParty } from './damage';
 import {
-  NO_ONE, endTownCombat, pcAttack, pickNextPc, setPcMoves, startTownCombat,
+  NO_ONE, endTownCombat, pcAttack, pickNextPc, setPcMoves, startTownCombat, takeAp,
 } from './combat';
 import { CurTown } from '../universe/curTown';
 import {
@@ -49,6 +49,11 @@ import { SpecType } from '../data/special';
 import { SpecCtx, SpecCtxType, SpecialHost } from './specials/context';
 import { SpecialsEngine } from './specials/vm';
 import { alterSpace } from './specials/general';
+
+/** d_string (boe.combat.cpp:70) — the direction names the transcript prints. */
+const DIRECTION_NAMES = [
+  'North', 'NorthEast', 'East', 'SouthEast', 'South', 'SouthWest', 'West', 'NorthWest',
+];
 
 /** set_direction (boe.locutils.cpp) — direction from one point toward another. */
 function setDirection(from: Location, to: Location): Direction {
@@ -152,8 +157,25 @@ export class GameSession {
     return isTown(this.mode, this.preModes);
   }
 
+  /**
+   * Whether the world *around* the party is a town, rather than whether the
+   * game mode is a town mode: `inTown` is false during combat, because
+   * `MODE_COMBAT` sits outside `is_town`'s range, but the walls and the
+   * darkness are still there. Anything to do with seeing and lighting has to
+   * ask this, which is what the C++'s `univ.party.town_num != 200` does.
+   */
+  private get worldIsTown(): boolean {
+    return this.univ.isInTown();
+  }
+
   /** get_location (boe.text.cpp:1248) — the left half of the status bar. */
   locationName(): string {
+    if (this.mode === GameMode.COMBAT) {
+      // The original puts the acting PC and their remaining moves in the text
+      // bar during combat (draw_text_bar's combat half).
+      const pc = this.univ.currentPc;
+      return `${pc.name}: ${pc.ap} move${pc.ap === 1 ? '' : 's'} left`;
+    }
     if (this.inTown && this.univ.town) {
       const town = this.univ.town.record;
       let name = town.name;
@@ -339,6 +361,9 @@ export class GameSession {
 
   townIsBlocked(where: Location): boolean {
     const town = this.univ.town!;
+    // Off the map counts as blocked: combat placement walks a table of offsets
+    // that can run past the edge, and `sightObscurity` is asked the same way.
+    if (!town.isOnMap(where.x, where.y)) return true;
     const ter = this.univ.terrainType(town.record.terrain[where.x]![where.y]!);
     return (
       ter.blockage === TerObstruct.BLOCK_MOVE ||
@@ -1336,7 +1361,101 @@ export class GameSession {
     const target = this.univ.town?.monsterAt(where) ?? null;
     if (!target) return false;
     pcAttack(this.univ, this.univ.curPc, target, this);
-    if (this.univ.currentPc.ap <= 0) pickNextPc(this.univ, this.combatActivePc);
+    this.afterCombatAction();
+    return true;
+  }
+
+  /**
+   * After anything that spends action points: hand over to the next PC, and
+   * when nobody has moves left start a new round.
+   *
+   * TODO(M5b): this is where combat_run_monst goes — the monsters take their
+   * turn between rounds.
+   */
+  private afterCombatAction(): void {
+    if (this.univ.currentPc.ap > 0) return;
+    if (pickNextPc(this.univ, this.combatActivePc)) {
+      setPcMoves(this.univ);
+      pickNextPc(this.univ, this.combatActivePc);
+    }
+    this.center = { ...this.univ.currentPc.combatPos };
+  }
+
+  /**
+   * pc_combat_move (boe.combat.cpp:216) — one square for the current PC, which
+   * may instead be an attack, a swap with another PC, or a refusal. One action
+   * point for a move, four for a swing.
+   *
+   * TODO(M5b): monsters adjacent to the square you're leaving get a free
+   * back-shot, which needs monster_attack.
+   */
+  combatMove(destination: Location): boolean {
+    const town = this.univ.town;
+    const pc = this.univ.currentPc;
+    if (this.mode !== GameMode.COMBAT || !town) return false;
+    if (pc.ap <= 0) return false;
+
+    const monstHit = town.monsterAt(destination);
+    if (!monstHit && (pc.status[Status.FORCECAGE] ?? 0) > 0) {
+      this.univ.addStringToBuf("Move: Can't escape.");
+      this.univ.addStringToBuf('  (Try doing something else.)');
+      return false;
+    }
+    if (!monstHit && !this.checkSpecialTerrain(destination)) return false;
+
+    const dir = setDirection(pc.combatPos, destination);
+    if (this.locOffActiveArea(destination) && this.whichCombatType === 1
+      && !this.townIsBlocked(destination)) {
+      this.univ.addStringToBuf("Move: Can't leave town during combat.");
+      return true;
+    }
+
+    if (monstHit) {
+      // TODO(M5b): attacking a friendly should ask first, then turn the town.
+      if (!monstHit.isFriendly) {
+        pc.lastAttacked = monstHit;
+        pcAttack(this.univ, this.univ.curPc, monstHit, this);
+        this.afterCombatAction();
+        return true;
+      }
+      this.univ.addStringToBuf('Blocked: a creature is in the way.');
+      return false;
+    }
+
+    // Another PC on the square: swap places, at a cost to both.
+    const other = this.univ.party.pcs.find(
+      (p) => p !== pc && p.isAlive && locsEqual(p.combatPos, destination));
+    if (other) {
+      if (other.ap === 0) {
+        this.univ.addStringToBuf("Move: Can't switch places.");
+        this.univ.addStringToBuf('  (other PC has no APs)');
+        return false;
+      }
+      other.ap--;
+      this.univ.addStringToBuf('Move: Switch places.');
+      const storeLoc = { ...pc.combatPos };
+      pc.combatPos = { ...destination };
+      other.combatPos = storeLoc;
+      pc.direction = dir;
+      takeAp(this.univ, 1);
+      this.moveSound(town.record.terrain[destination.x]![destination.y]!, pc.ap);
+      this.afterCombatAction();
+      return true;
+    }
+
+    if (this.townIsBlocked(destination)) {
+      this.univ.addStringToBuf(`Blocked: ${DIRECTION_NAMES[dir] ?? ''}`);
+      return false;
+    }
+
+    pc.combatPos = { ...destination };
+    pc.direction = dir;
+    takeAp(this.univ, 1);
+    this.univ.addStringToBuf(`Moved: ${DIRECTION_NAMES[dir] ?? ''}`);
+    this.moveSound(town.record.terrain[destination.x]![destination.y]!, pc.ap);
+    this.updateExplored(destination);
+    this.center = { ...destination };
+    this.afterCombatAction();
     return true;
   }
 
@@ -1467,9 +1586,9 @@ export class GameSession {
    * 1-or-6, where 6 means "no".
    */
   partyCanSee(where: Location): number {
-    const from = this.inTown ? this.univ.party.townLoc : this.univ.party.outLoc;
+    const from = this.univ.party.getLoc();
     if (!pointOnScreen(this.center, where)) return 6;
-    if (this.inTown) {
+    if (this.worldIsTown) {
       // Unexplored squares hide what's on them, which is what makes a dungeon
       // a dungeon; the original folds this into pt_in_light.
       const town = this.univ.town;
@@ -1492,7 +1611,7 @@ export class GameSession {
 
   /** can_see_light (boe.locutils.cpp:173). */
   canSeeLight(from: Location, to: Location): number {
-    if (this.inTown && !this.ptInLight(from, to)) return SIGHT_BLOCKED + 1;
+    if (this.worldIsTown && !this.ptInLight(from, to)) return SIGHT_BLOCKED + 1;
     return canSee(from, to, this.sightObscurity);
   }
 

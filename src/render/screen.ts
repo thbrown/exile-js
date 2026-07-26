@@ -541,8 +541,44 @@ export class Screen {
     }
   }
 
+  /**
+   * In combat the party is six figures rather than one, drawn at their own
+   * `combatPos`. The PC whose turn it is gets a highlight ring, which is the
+   * port's stand-in for the original's animated pose (draw_pcs, M5b).
+   */
+  private drawCombatParty(session: GameSession): void {
+    const { univ } = session;
+    for (let i = 0; i < univ.party.pcs.length; i++) {
+      const pc = univ.party.pcs[i]!;
+      if (!pc.isAlive) continue;
+      const q = TER_VIEW_CENTER + pc.combatPos.x - session.center.x;
+      const row = TER_VIEW_CENTER + pc.combatPos.y - session.center.y;
+      if (q < 0 || row < 0 || q >= TER_VIEW_TILES || row >= TER_VIEW_TILES) continue;
+      const pos = terrainSpotPos(q, row);
+      const g = pcGraphic(pc.whichGraphic, pc.direction);
+      const img = g && this.store.get(g.sheetName);
+      if (g && img) {
+        this.ctx.drawImage(
+          img, g.rect.left, g.rect.top, g.rect.width, g.rect.height,
+          pos.x, pos.y, TILE_W, TILE_H,
+        );
+      }
+      if (i === univ.curPc) {
+        this.ctx.save();
+        this.ctx.strokeStyle = Colours.WHITE;
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(pos.x + 0.5, pos.y + 0.5, TILE_W - 1, TILE_H - 1);
+        this.ctx.restore();
+      }
+    }
+  }
+
   private drawPartySymbol(session: GameSession): void {
     const { univ } = session;
+    if (session.mode === GameMode.COMBAT) {
+      this.drawCombatParty(session);
+      return;
+    }
     const leader = univ.party.pcs[univ.firstActivePc()];
     if (!leader || !leader.isAlive) return;
     let q = TER_VIEW_CENTER;
