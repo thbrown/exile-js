@@ -7,11 +7,19 @@
 import {
   attitudeStrs,
   dmgNames,
+  fieldNames,
+  monstAbilTypes,
+  monstAbils,
   monstMelee,
+  monstMissiles,
+  monstSummons,
+  pcStatus,
   raceNames,
   readEnumTag,
+  spellPats,
 } from '../data/enumTags';
-import { Monster, RawAbility, defaultMonster } from '../data/monster';
+import { Monster, defaultMonster } from '../data/monster';
+import { MonstAbil, MonstAbilCat, MonstGen, MonstSummon, abilityCategory } from '../data/monsterAbility';
 import { boolText, children, intAttr, intText, tag, text } from './xml';
 
 export function parseDice(str: string, where: string): { count: number; sides: number } {
@@ -20,6 +28,16 @@ export function parseDice(str: string, where: string): { count: number; sides: n
   return { count: m[1] === '' ? 1 : parseInt(m[1]!, 10), sides: parseInt(m[2]!, 10) };
 }
 
+/**
+ * readMonstAbilFromXml (fileio_scen.cpp:1425). The element name picks the arm
+ * of the union, the `type` attribute picks the slot, and the required-element
+ * set is checked the same way the C++ does — including the two that only
+ * become required once a general ability turns out not to be a touch.
+ *
+ * Note the odds/chance conversion: the XML holds a percentage and the game
+ * stores **tenths of a percent**, so it is multiplied by 10 everywhere except
+ * `radiate`, which the C++ reads as a plain integer.
+ */
 function readAbility(el: Element, monst: Monster, fname: string): void {
   const element = tag(el);
   if (element === 'invisible') {
@@ -30,13 +48,153 @@ function readAbility(el: Element, monst: Monster, fname: string): void {
     monst.guard = true;
     return;
   }
-  const abilType = el.getAttribute('type') ?? '';
-  if (abilType === '') throw new Error(`${fname}: <${element}> ability missing type attribute`);
-  const raw: RawAbility = { element, abilType, fields: {} };
-  for (const child of children(el)) {
-    raw.fields[tag(child)] = text(child);
+  const typeAttr = el.getAttribute('type') ?? '';
+  if (typeAttr === '') throw new Error(`${fname}: <${element}> ability missing type attribute`);
+  const key = readEnumTag(monstAbils, typeAttr, 'monster ability') as MonstAbil;
+  if (key === MonstAbil.NO_ABIL || monst.abil[key]!.active)
+    throw new Error(`${fname}: bad or repeated monster ability '${typeAttr}'`);
+  const cat = abilityCategory(key);
+  const abil = monst.abil[key]!;
+  abil.active = true;
+
+  const bad = (want: MonstAbilCat): void => {
+    if (cat !== want) throw new Error(`${fname}: <${element}> can't hold ability '${typeAttr}'`);
+  };
+  const done = (reqs: Set<string>, what: string): void => {
+    const missing = reqs.values().next();
+    if (!missing.done) throw new Error(`${fname}: <${what}> is missing <${missing.value}>`);
+  };
+  /** A percentage in the file, tenths of a percent in the game. */
+  const tenths = (child: Element): number => Math.trunc(parseFloat(text(child)) * 10);
+
+  switch (element) {
+    case 'general': {
+      bad(MonstAbilCat.GENERAL);
+      const reqs = new Set(['type', 'strength', 'chance']);
+      if (key === MonstAbil.DAMAGE || key === MonstAbil.DAMAGE2 || key === MonstAbil.FIELD
+        || key === MonstAbil.STATUS || key === MonstAbil.STATUS2 || key === MonstAbil.STUN) {
+        reqs.add('extra');
+      }
+      for (const child of children(el)) {
+        const t = tag(child);
+        reqs.delete(t);
+        switch (t) {
+          case 'type':
+            abil.gen.type = readEnumTag(monstAbilTypes, text(child), 'ability delivery');
+            // Anything that isn't a touch needs a graphic and a range.
+            if (abil.gen.type !== MonstGen.TOUCH) {
+              reqs.add('missile');
+              reqs.add('range');
+            }
+            break;
+          case 'missile': abil.gen.pic = intText(child); break;
+          case 'strength': abil.gen.strength = intText(child); break;
+          case 'range': abil.gen.range = intText(child); break;
+          case 'extra':
+            if (key === MonstAbil.DAMAGE || key === MonstAbil.DAMAGE2) {
+              abil.gen.extra = readEnumTag(dmgNames, text(child), 'damage type');
+            } else if (key === MonstAbil.FIELD) {
+              abil.gen.extra = readEnumTag(fieldNames, text(child), 'field type');
+            } else if (key === MonstAbil.STATUS || key === MonstAbil.STATUS2
+              || key === MonstAbil.STUN) {
+              abil.gen.extra = readEnumTag(pcStatus, text(child), 'status');
+            } else throw new Error(`${fname}: <extra> makes no sense for '${typeAttr}'`);
+            break;
+          case 'chance': abil.gen.odds = tenths(child); break;
+          default: throw new Error(`${fname}: bad node <${t}> in <general>`);
+        }
+      }
+      done(reqs, 'general');
+      break;
+    }
+    case 'missile': {
+      bad(MonstAbilCat.MISSILE);
+      const reqs = new Set(['type', 'missile', 'strength', 'skill', 'range', 'chance']);
+      for (const child of children(el)) {
+        const t = tag(child);
+        reqs.delete(t);
+        switch (t) {
+          case 'type':
+            abil.missile.type = readEnumTag(monstMissiles, text(child), 'missile type');
+            break;
+          case 'missile': abil.missile.pic = intText(child); break;
+          case 'strength': {
+            const d = parseDice(text(child), `${fname} missile strength`);
+            abil.missile.dice = d.count;
+            abil.missile.sides = d.sides;
+            break;
+          }
+          case 'skill': abil.missile.skill = intText(child); break;
+          case 'range': abil.missile.range = intText(child); break;
+          case 'chance': abil.missile.odds = tenths(child); break;
+          default: throw new Error(`${fname}: bad node <${t}> in <missile>`);
+        }
+      }
+      done(reqs, 'missile');
+      break;
+    }
+    case 'summon': {
+      bad(MonstAbilCat.SUMMON);
+      // "type+what" stands for whichever of <type>, <lvl> and <race> appears:
+      // one of them is required, and it sets both `type` and `what`.
+      const reqs = new Set(['type+what', 'min', 'max', 'duration', 'chance']);
+      for (const child of children(el)) {
+        const t = tag(child);
+        reqs.delete(t);
+        switch (t) {
+          case 'min': abil.summon.min = intText(child); break;
+          case 'max': abil.summon.max = intText(child); break;
+          case 'duration': abil.summon.len = intText(child); break;
+          case 'chance': abil.summon.chance = tenths(child); break;
+          case 'type': case 'lvl':
+            abil.summon.what = intText(child);
+            reqs.delete('type+what');
+            abil.summon.type = readEnumTag(monstSummons, t, 'summon kind');
+            break;
+          case 'race':
+            abil.summon.what = readEnumTag(raceNames, text(child), 'race');
+            reqs.delete('type+what');
+            abil.summon.type = MonstSummon.SPECIES;
+            break;
+          default: throw new Error(`${fname}: bad node <${t}> in <summon>`);
+        }
+      }
+      done(reqs, 'summon');
+      break;
+    }
+    case 'radiate': {
+      bad(MonstAbilCat.RADIATE);
+      const reqs = new Set(['type', 'chance']);
+      for (const child of children(el)) {
+        const t = tag(child);
+        reqs.delete(t);
+        switch (t) {
+          case 'type': abil.radiate.type = readEnumTag(fieldNames, text(child), 'field type'); break;
+          case 'pattern': abil.radiate.pat = readEnumTag(spellPats, text(child), 'spell pattern'); break;
+          // Unlike everywhere else, this one is not scaled into tenths.
+          case 'chance': abil.radiate.chance = intText(child); break;
+          default: throw new Error(`${fname}: bad node <${t}> in <radiate>`);
+        }
+      }
+      done(reqs, 'radiate');
+      break;
+    }
+    case 'special': {
+      bad(MonstAbilCat.SPECIAL);
+      let n = 0;
+      for (const child of children(el)) {
+        const t = tag(child);
+        if (n >= 3 || t !== 'param') throw new Error(`${fname}: bad node <${t}> in <special>`);
+        if (n === 0) abil.special.extra1 = intText(child);
+        else if (n === 1) abil.special.extra2 = intText(child);
+        else abil.special.extra3 = intText(child);
+        n++;
+      }
+      break;
+    }
+    default:
+      throw new Error(`${fname}: bad ability node <${element}>`);
   }
-  monst.abilities.push(raw);
 }
 
 export function readMonstersFromXml(root: Element, fname = 'monsters.xml'): Monster[] {

@@ -20,7 +20,9 @@ import { DamageType, Monster } from '../data/monster';
 import { Creature, CreatureStatus } from '../universe/creature';
 import { getProtLevel, hasAbilEquip, takeItem } from '../universe/inventory';
 import { SpellNote, livingSound } from '../universe/living';
+import { MonstAbil } from '../data/monsterAbility';
 import { boomSpace } from './booms';
+import { findClearSpot, placeMonster } from './monsterPlace';
 import { placeGlands, placeTreasure } from './loot';
 import { NUM_INVEN_SLOTS, Player } from '../universe/player';
 import { MainStatus, Race, Skill, Status, Trait } from '../universe/skills';
@@ -313,8 +315,8 @@ export function damageMonst(
   if (damType < DamageType.SPECIAL) {
     howMuch = Math.trunc((howMuch * (victim.mon.resist[damType] ?? 100)) / 100);
   }
-  // TODO(M5b): ABSORB_SPELLS lets a monster swallow fire/magic/cold/acid whole
-  // and heal from it; that needs the uAbility port.
+  // ABSORB_SPELLS doesn't belong here: the C++ puts it in cCreature::magic_adjust,
+  // so it catches spell *effects* (drain, acid, web…) and not raw damage.
 
   // Saving throw — a tough monster shrugs off half of an elemental hit.
   if ((damType === DamageType.FIRE || damType === DamageType.COLD)
@@ -354,7 +356,23 @@ export function damageMonst(
       getSoundType(damType, options.soundType ?? -1));
   }
   victim.health -= howMuch;
-  // TODO(M5b): a SPLITS monster spawns a copy of itself here.
+
+  // Splitting monsters. The copy takes the *current* health of the original,
+  // so hacking a slime apart gives you two weakened slimes, not two fresh
+  // ones — and it only splits while it is still standing.
+  const splits = victim.mon.abil[MonstAbil.SPLITS]!;
+  if (splits.active && victim.health > 0
+    && univ.rng.getRan(1, 1, 1000) < splits.special.extra1 && options.session) {
+    const wherePut = findClearSpot(options.session, victim.curLoc, 1);
+    if (wherePut.x > 0) {
+      const slot = placeMonster(options.session, victim.number, wherePut);
+      const copy = univ.town?.monsters[slot];
+      if (copy) {
+        copy.health = victim.health;
+        victim.spellNote(SpellNote.SPLITS);
+      }
+    }
+  }
   if (whoHit < 7) univ.party.totalDamDone += howMuch;
 
   // Anything that gets hurt notices.
@@ -405,7 +423,13 @@ export function killMonst(
     void session.runSpecial(
       SpecCtx.KILL_MONST, SpecCtxType.TOWN, monst.specialOnKill, monst.curLoc);
   }
-  // TODO(M5b): the DEATH_TRIGGER monster ability runs a scenario special too.
+  // A DEATH_TRIGGER ability runs a *scenario* special, where special_on_kill
+  // above runs a town one.
+  const trigger = monst.mon.abil[MonstAbil.DEATH_TRIGGER]!;
+  if (trigger.active && session) {
+    void session.runSpecial(
+      SpecCtx.KILL_MONST, SpecCtxType.SCEN, trigger.special.extra1, monst.curLoc);
+  }
 
   // No experience for something the party summoned itself.
   if (monst.summonTime === 0 || !monst.partySummoned) {

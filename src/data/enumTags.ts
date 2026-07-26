@@ -112,7 +112,15 @@ export const monstMissiles = [
   'dart', 'arrow', 'spear', 'stone', 'star', 'spine', 'knife', 'bolt', 'boulder', 'arrow++',
 ] as const;
 
-export const attitudeStrs = ['docile', 'hostile-a', 'friendly', 'hostile-b'] as const;
+/** eMonstSummon (estreams.cpp:558) — also the element names summon reads. */
+export const monstSummons = ['type', 'lvl', 'race'] as const;
+
+/** eSpellPat (estreams.cpp:798). */
+export const spellPats = [
+  'single', 'square', 'small-square', 'open-square', 'radius-2', 'radius-3', 'plus', 'wall',
+] as const;
+
+export const attitudeStrs =['docile', 'hostile-a', 'friendly', 'hostile-b'] as const;
 
 export const talkNodes = [
   'reg', 'if-sdf', 'set-sdf', 'inn', 'if-time', 'if-event', 'if-town', 'shop', 'train', 'jobs',

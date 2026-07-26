@@ -17,7 +17,7 @@ export const BUFFER_STR = -8;
 import { Terrain } from '../data/terrain';
 import { CurOut } from './curOut';
 import { CurTown } from './curTown';
-import { setPrintResult } from './living';
+import { setLivingRng, setPrintResult } from './living';
 import { Party, TOWN_NUM_OUTDOORS } from './party';
 import { PartyPreset, NUM_PC_SLOTS, Player, makePresetPlayer } from './player';
 
@@ -47,6 +47,9 @@ export class Universe {
     // at this Universe's transcript. Constructing a second Universe steals it,
     // which is fine — tests build one at a time and the game only ever has one.
     setPrintResult((line) => { this.addStringToBuf(line); });
+    // Same reason: cCreature::magic_adjust and its callers reach for the
+    // global get_ran from methods this port hands no rng.
+    setLivingRng(rng);
     // The scenario decides where the party starts; the cParty defaults are
     // Exile III relics that get overwritten immediately (party.cpp:28).
     this.party.outdoorCorner = { ...scenario.outdoorStart };

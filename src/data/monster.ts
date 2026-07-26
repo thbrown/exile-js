@@ -1,10 +1,10 @@
 /**
  * Monster type data — cMonster core fields from
  * ../exile-wasm/src/scenario/monster.hpp; defaults match cMonster()
- * (monster.cpp:403). Detailed uAbility union semantics are combat-time
- * concerns (M5); abilities are captured losslessly as parsed XML records
- * until then.
+ * (monster.cpp:403). The uAbility union itself lives in `monsterAbility.ts`.
  */
+
+import { Ability, defaultAbilities } from './monsterAbility';
 
 export enum Attitude {
   DOCILE = 0,
@@ -45,13 +45,6 @@ export interface Attack {
   type: number; // eMonstMelee index into monstMelee tags
 }
 
-/** Lossless capture of one <abilities> child until M5 ports uAbility. */
-export interface RawAbility {
-  element: string; // 'general' | 'missile' | 'summon' | 'radiate' | 'special' | 'invisible' | 'guard'…
-  abilType: string; // the type= attribute tag ('' for invisible/guard)
-  fields: Record<string, string>;
-}
-
 /** eDamageType (damage.hpp:22) — the index into a monster's `resist` array. */
 export enum DamageType {
   WEAPON = 0,
@@ -82,7 +75,8 @@ export interface Monster {
   mu: number;
   cl: number;
   treasure: number;
-  abilities: RawAbility[];
+  /** uAbility abil[eMonstAbil] — indexed by `MonstAbil`, all 24 slots present. */
+  abil: Ability[];
   corpseItem: number;
   corpseItemChance: number;
   /** resist[eDamageType] = percent (100 = no resistance). */
@@ -115,7 +109,7 @@ export function defaultMonster(): Monster {
     mu: 0,
     cl: 0,
     treasure: 0,
-    abilities: [],
+    abil: defaultAbilities(),
     corpseItem: 0,
     corpseItemChance: 0,
     resist: new Array<number>(NUM_DAMAGE_TYPES).fill(100),

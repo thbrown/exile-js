@@ -11,8 +11,10 @@
 import { Direction, Location, minmax, percent } from '../core/location';
 import { GameRng } from '../core/rng';
 import { Attitude, DamageType, Monster, MonstTime, defaultMonster } from '../data/monster';
+import { MonstAbil } from '../data/monsterAbility';
+import { FieldType } from '../data/fields';
 import { Townperson } from '../data/town';
-import { Living, SpellNote } from './living';
+import { Living, SpellNote, livingRng } from './living';
 import { Race, Status } from './skills';
 
 export enum CreatureStatus {
@@ -105,25 +107,36 @@ export class Creature extends Living {
     return true;
   }
 
-  /** TODO(M5b): the MARTYRS_SHIELD monster ability needs the uAbility port. */
-  isShielded(_rng: GameRng): boolean {
-    return (this.status[Status.MARTYRS_SHIELD] ?? 0) > 0;
+  /**
+   * cCreature::is_shielded (creature.cpp:290) — the martyr's shield throws the
+   * blow back at whoever struck. A monster can carry it as a *status* (cast on
+   * it) or as an *ability*, in which case extra1 is its chance in thousandths.
+   */
+  isShielded(rng: GameRng): boolean {
+    if ((this.status[Status.MARTYRS_SHIELD] ?? 0) > 0) return true;
+    const abil = this.mon.abil[MonstAbil.MARTYRS_SHIELD]!;
+    return abil.active && rng.getRan(1, 1, 1000) <= abil.special.extra1;
   }
 
-  /** TODO(M5b): MARTYRS_SHIELD's extra2 scales the shared damage. */
+  /** cCreature::get_shared_dmg (creature.cpp:298) — extra2 scales what bounces back. */
   getSharedDmg(baseDmg: number, _rng: GameRng): number {
+    const abil = this.mon.abil[MonstAbil.MARTYRS_SHIELD]!;
+    if (abil.active) return percent(baseDmg, abil.special.extra2);
     return baseDmg;
   }
 
   /**
-   * cCreature::magic_adjust (creature.cpp) — a monster's magic resistance
-   * scales down anything a spell tries to do to it.
-   *
-   * TODO(M5b): ABSORB_SPELLS lets some monsters swallow a spell whole and heal
-   * from it; that needs the uAbility port.
+   * cCreature::magic_adjust (creature.cpp:305) — a monster's magic resistance
+   * scales down anything a spell tries to do to it, and ABSORB_SPELLS lets it
+   * swallow one whole (extra1 in thousandths) and heal by extra2 instead.
    */
   magicAdjust(howMuch: number): number {
     if (howMuch <= 0) return howMuch;
+    const absorb = this.mon.abil[MonstAbil.ABSORB_SPELLS]!;
+    if (absorb.active && livingRng().getRan(1, 1, 1000) <= absorb.special.extra1) {
+      this.health += absorb.special.extra2;
+      return 0;
+    }
     return percent(howMuch, this.mon.resist[DamageType.MAGIC] ?? 100);
   }
 
@@ -243,7 +256,11 @@ export class Creature extends Living {
     if (whichStatus === Status.FORCECAGE && (this.mon.mu > 0 || this.mon.cl > 0)) r1 += 5;
     if (whichStatus === Status.ASLEEP) r1 -= 25;
     if (whichStatus === Status.PARALYZED) r1 -= 15;
-    // TODO(M5b): a monster that radiates a sleep cloud can't be slept itself.
+    // Something that breathes out a sleep cloud can't be put to sleep itself.
+    if (whichStatus === Status.ASLEEP) {
+      const field = this.mon.abil[MonstAbil.FIELD]!;
+      if (field.active && field.gen.extra === FieldType.CLOUD_SLEEP) return;
+    }
 
     if (r1 > (CHARM_ODDS[Math.trunc(this.mon.level / 2)] ?? 0)) {
       this.spellNote(SpellNote.RESISTS);
@@ -293,7 +310,21 @@ export function assignCreature(
   c.slot = slot;
   c.number = preset.number;
   // The creature owns its stats, so the arrays are copied, not shared.
-  c.mon = { ...template, resist: [...template.resist], attacks: [...template.attacks] };
+  // The abilities are copied too: a creature's uAbility table is its own, and
+  // sharing it would let one split or charm edit the scenario's definition.
+  c.mon = {
+    ...template,
+    resist: [...template.resist],
+    attacks: [...template.attacks],
+    abil: template.abil.map((a) => ({
+      ...a,
+      missile: { ...a.missile },
+      gen: { ...a.gen },
+      summon: { ...a.summon },
+      radiate: { ...a.radiate },
+      special: { ...a.special },
+    })),
+  };
   c.attitude = preset.startAttitude;
   c.startLoc = { ...preset.startLoc };
   c.curLoc = { ...preset.startLoc };

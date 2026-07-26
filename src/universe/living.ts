@@ -141,6 +141,25 @@ export function livingSound(which: number): void {
   soundSink?.(which);
 }
 
+/**
+ * `get_ran` is a global in the C++ as well, and a handful of effects reach for
+ * it from methods this port gives no `rng` argument (`magic_adjust` is called
+ * by acid, curse, web, drain and half a dozen others). Same arrangement again:
+ * the game installs the stream. With none installed the roll falls back to a
+ * throwaway generator, which keeps tests that build a bare Creature working
+ * without silently changing the shared stream.
+ */
+let rngSink: GameRng | null = null;
+
+export function setLivingRng(rng: GameRng | null): void {
+  rngSink = rng;
+}
+
+export function livingRng(): GameRng {
+  rngSink ??= new GameRng();
+  return rngSink;
+}
+
 export abstract class Living {
   /** Timed status effects indexed by `Status`; 0 means "not afflicted". */
   status: number[] = new Array<number>(NUM_STATUSES).fill(0);
