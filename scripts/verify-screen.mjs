@@ -570,6 +570,30 @@ await page.evaluate(() => {
 await page.waitForTimeout(300);
 await shot('03-town-again');
 
+// 5b. A *real* scripted square, walked onto rather than driven synthetically:
+//     the chain has to raise its message dialog, and Enter has to dismiss it.
+//     The synthetic run above swaps the town's nodes out, so it never exercises
+//     the walk-onto-a-special path the player actually takes.
+const realSpecial = await page.evaluate(async () => {
+  const s = window.__session;
+  const t = s.univ.town?.record;
+  const spot = t?.specialLocs?.find((l) => l.spec >= 0);
+  if (!spot) return { skipped: true };
+  s.univ.party.townLoc = { x: spot.x - 1, y: spot.y };
+  void s.moveTo({ x: spot.x, y: spot.y });
+  await new Promise((r) => setTimeout(r, 300));
+  return { spot, dialogUp: !!window.__dialogs.active };
+});
+if (!realSpecial.skipped) {
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(250);
+}
+const realSpecialDone = await page.evaluate(() => ({
+  dialogGone: !window.__dialogs.active,
+  loc: { ...window.__session.univ.party.townLoc },
+}));
+console.log('REAL SPECIAL:', JSON.stringify(realSpecial), JSON.stringify(realSpecialDone));
+
 // 2c2. Combat: walking into a hostile creature starts a fight, the party is
 //      placed as six figures, a swing lands, and leaving regroups the party.
 const combat = await page.evaluate(async () => {
@@ -913,6 +937,8 @@ const ok =
   trained.gold < trainBefore.gold &&
   trained.dialogGone === true &&
   specials.flag === 3 &&
+  (realSpecial.skipped === true || realSpecial.dialogUp === true) &&
+  realSpecialDone.dialogGone === true &&
   specials.branched === 7 &&
   specials.ptrX === 5 &&
   specials.realNodes > 0 &&
