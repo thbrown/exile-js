@@ -142,6 +142,16 @@ Notes for M2 implementer:
   breather's immunity to sleep. `game/monsterPlace.ts` ports `find_clear_spot`
   and `place_monster`, which splitting needs and summoning will reuse.
   Still ahead: missiles, breath, monster spells and summons.
+- **Monster missiles and breath (M5b, 2026-07-26)**:
+  `game/monsterAbilities.ts` ports the ability-picking loop from
+  `do_monster_turn` (boe.combat.cpp:2303), `monst_fire_missile`'s MISSILE
+  branch and `monst_basic_abil`. `doMonsterTurn` now reaches for a ranged
+  ability *before* it considers a swing, so archers shoot and drakes breathe
+  instead of walking up to you. Damage, status, stun, drain-SP, kill, and the
+  food and gold thieves all land; PETRIFY, DRAIN_XP and FIELD say which
+  milestone they're waiting on. Not ported: `run_a_missile`, the projectile
+  flying across the screen — the shot resolves at once with its sound, and the
+  damage still draws its explosion.
 - **Loot (2026-07-26)**: `game/loot.ts` ports `place_item`, `reset_item_max`,
   `item_val`, `place_glands` and `place_treasure` (boe.items.cpp:168-841) —
   the five treasure tables verbatim and, more importantly, `place_treasure`'s

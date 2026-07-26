@@ -18,7 +18,11 @@ import { MonstMelee } from '../data/monster';
 import { Player } from '../universe/player';
 import { MainStatus, Race, Skill, Status } from '../universe/skills';
 import { Universe } from '../universe/universe';
+import { MonstAbil } from '../data/monsterAbility';
 import { NO_ONE } from './combat';
+import {
+  abilityCost, monsterBasicAbil, monsterFireMissile, pickMonsterAbility,
+} from './monsterAbilities';
 import { GameMode } from './modes';
 import { damageMonst, damagePc, hitChance } from './damage';
 import type { GameSession } from './session';
@@ -508,9 +512,12 @@ function giveMonstersMoves(session: GameSession): void {
  * action points: attack what's next to it, close on its target, or flee when
  * its morale has gone.
  *
- * TODO(M5b): breath weapons, mage and priest spells, missiles, summoning and
- * the SPECIAL ability all slot in between picking a target and swinging; they
- * need the uAbility port.
+ * Ranged abilities go first: `pickMonsterAbility` walks the monster's uAbility
+ * table before it considers a swing, which is why an archer shoots rather than
+ * closing.
+ *
+ * TODO(M5b): mage and priest spells, summoning and the SPECIAL ability, which
+ * the C++ handles alongside this.
  */
 export function doMonsterTurn(session: GameSession): void {
   const univ = session.univ;
@@ -546,6 +553,32 @@ export function doMonsterTurn(session: GameSession): void {
         if (monst.mobile) {
           actedYet = fleeParty(session, monst, targSpace);
           if (actedYet) monst.ap = Math.max(0, monst.ap - 1);
+        }
+      }
+
+      // Ranged abilities come before melee — the missile or breath is what an
+      // archer or a drake reaches for when the party isn't yet on top of it.
+      if (!actedYet && target !== NO_ONE && monst.attitude !== Attitude.DOCILE
+        && !monst.isFriendly) {
+        const who: Living | null = target < NO_ONE
+          ? univ.party.pcs[inCombat ? target : selectActivePc(univ)]!
+          : null;
+        if (who && who.isAlive) {
+          const picked = pickMonsterAbility(
+            session, monst, targSpace, monstAdjacent(monst, targSpace));
+          if (picked) {
+            univ.addStringToBuf(`${monst.mon.name}:`);
+            if (picked.key === MonstAbil.MISSILE) {
+              monsterFireMissile(session, monst, picked.abil, who);
+            } else {
+              monsterBasicAbil(session, monst, picked.key, picked.abil, who);
+            }
+            // A touch costs -1 and never gets here; anything else costs its own
+            // price, and 0 would spin the loop, so it still gives up a point.
+            const cost = abilityCost(picked);
+            monst.ap = Math.max(0, monst.ap - Math.max(1, cost));
+            actedYet = true;
+          }
         }
       }
 

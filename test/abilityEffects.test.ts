@@ -7,7 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { GameRng } from '../src/core/rng';
 import { DamageType } from '../src/data/monster';
-import { MonstAbil } from '../src/data/monsterAbility';
+import { MonstAbil, MonstGen, MonstMissile } from '../src/data/monsterAbility';
+import { defaultItem } from '../src/data/item';
+import {
+  monsterBasicAbil, monsterFireMissile, pickMonsterAbility,
+} from '../src/game/monsterAbilities';
 import { Scenario } from '../src/data/scenario';
 import { damageMonst } from '../src/game/damage';
 import { findClearSpot, placeMonster } from '../src/game/monsterPlace';
@@ -152,5 +156,85 @@ describe('a creature owns its abilities', () => {
     const m = aLiveMonster(s);
     m.mon.abil[MonstAbil.SPLITS]!.active = true;
     expect(scen.scenMonsters[m.number]!.abil[MonstAbil.SPLITS]!.active).toBe(false);
+  });
+});
+
+describe('ranged monster abilities', () => {
+  it('picks a missile when the target is out of reach and skips it when adjacent', () => {
+    const s = inTown();
+    const m = aLiveMonster(s);
+    const abil = m.mon.abil[MonstAbil.MISSILE]!;
+    abil.active = true;
+    abil.missile.type = MonstMissile.ARROW;
+    abil.missile.range = 8;
+    abil.missile.odds = 1000; // always
+    abil.missile.dice = 2;
+    abil.missile.sides = 7;
+    abil.missile.skill = 20;
+    m.curLoc = { x: 10, y: 10 };
+    // Four squares off: in range, not adjacent.
+    expect(pickMonsterAbility(s, m, { x: 14, y: 10 }, false)?.key).toBe(MonstAbil.MISSILE);
+    // Right next to it: prefer the swing.
+    expect(pickMonsterAbility(s, m, { x: 11, y: 10 }, true)).toBeNull();
+    // Out of range.
+    expect(pickMonsterAbility(s, m, { x: 30, y: 10 }, false)).toBeNull();
+  });
+
+  it('a spine-shooter fires even point-blank', () => {
+    const s = inTown();
+    const m = aLiveMonster(s);
+    const abil = m.mon.abil[MonstAbil.MISSILE]!;
+    abil.active = true;
+    abil.missile.type = MonstMissile.SPINE;
+    abil.missile.range = 8;
+    abil.missile.odds = 1000;
+    m.curLoc = { x: 10, y: 10 };
+    expect(pickMonsterAbility(s, m, { x: 11, y: 10 }, true)?.key).toBe(MonstAbil.MISSILE);
+  });
+
+  it('a fired missile hurts the PC it hits', () => {
+    const s = inTown();
+    const m = aLiveMonster(s);
+    const abil = m.mon.abil[MonstAbil.MISSILE]!;
+    abil.active = true;
+    abil.missile.type = MonstMissile.ARROW;
+    abil.missile.dice = 8;
+    abil.missile.sides = 7;
+    abil.missile.skill = 50; // hit_chance caps at 99, so this all but always lands
+    const pc = s.univ.party.pcs[0]!;
+    pc.maxHealth = 400;
+    pc.curHealth = 400;
+    pc.items.fill(defaultItem());
+    pc.equip.fill(false);
+    monsterFireMissile(s, m, abil, pc);
+    expect(pc.curHealth).toBeLessThan(400);
+  });
+
+  it('a breath weapon deals its damage type', () => {
+    const s = inTown();
+    const m = aLiveMonster(s);
+    const abil = m.mon.abil[MonstAbil.DAMAGE]!;
+    abil.active = true;
+    abil.gen.type = MonstGen.BREATH;
+    abil.gen.strength = 8;
+    abil.gen.range = 8;
+    abil.gen.odds = 1000;
+    abil.gen.extra = DamageType.FIRE;
+    const pc = s.univ.party.pcs[0]!;
+    pc.maxHealth = 400;
+    pc.curHealth = 400;
+    monsterBasicAbil(s, m, MonstAbil.DAMAGE, abil, pc);
+    expect(pc.curHealth).toBeLessThan(400);
+  });
+
+  it('a steal-gold ability empties the purse', () => {
+    const s = inTown();
+    const m = aLiveMonster(s);
+    const abil = m.mon.abil[MonstAbil.STEAL_GOLD]!;
+    abil.active = true;
+    abil.gen.strength = 50;
+    s.univ.party.gold = 1000;
+    monsterBasicAbil(s, m, MonstAbil.STEAL_GOLD, abil, s.univ.party.pcs[0]!);
+    expect(s.univ.party.gold).toBeLessThan(1000);
   });
 });
