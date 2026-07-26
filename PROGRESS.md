@@ -364,9 +364,12 @@ deliberately left at the seam — 13 markers as of now. In rough order:
    and morale-driven fleeing. Still missing from it: the free back-shot a
    monster gets when you step out of its reach (marked in `session.combatMove`),
    `monst_hate_spot`, `monst_check_special_terrain` and `monst_inflict_fields`.
-3. **Missiles**: FIRING/THROWING modes are already in the `GameMode` enum in the
-   right places. `calc_spec_dam` (boe.combat.cpp:711) belongs here too — it's
-   the slay-the-species damage bonus, and `pcAttackWeapon` notes where it goes.
+3. **Missiles**: the *monsters'* half is done (`game/monsterAbilities.ts`).
+   Still open: the **party's** missiles — FIRING/THROWING are already in the
+   `GameMode` enum in the right places — `run_a_missile` (the projectile
+   animation, which the monster half also wants), and `calc_spec_dam`
+   (boe.combat.cpp:711), the slay-the-species damage bonus that
+   `pcAttackWeapon` notes the place for.
 4. **On-hit item abilities**: exploding weapons (needs spell patterns),
    STATUS_WEAPON, SOULSUCKER, ANTIMAGIC_WEAPON, WEAPON_CALL_SPECIAL.
 5. **Random encounters outdoors** — the user reported this. It needs
@@ -443,10 +446,11 @@ Smaller things outstanding, all independent of M5:
 
 ## Next steps
 
-1. M5b continued: with `uAbility` ported, next are `monst_fire_missile`
-   (missiles and breath), monster spellcasting and `summon_monster`. Then
-   outdoor wandering monsters, which additionally need the outdoor combat
-   arena.
+1. M5b continued: monster missiles and breath landed 2026-07-26, so what's
+   left is monster spellcasting, `summon_monster` (with `party.summons` for
+   ability numbers >= 10000), the party's own missiles, and `run_a_missile`
+   for all of them. Then outdoor wandering monsters, which additionally need
+   the outdoor combat arena.
 2. (The MAP overlay and `place_treasure` both landed 2026-07-26.)
 3. M2's last leftover is the replay driver.
 4. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in
