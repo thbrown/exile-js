@@ -102,6 +102,27 @@ function withNodes(nodes: Record<number, Partial<SpecialNode>>) {
 }
 
 describe('the VM core', () => {
+  /**
+   * The one-chain-at-a-time lock has to come back down even when a handler
+   * blows up. Callers launch chains fire-and-forget, so a stuck lock used to
+   * queue every later special forever — one bad node killed all scripting for
+   * the rest of the session.
+   */
+  it('keeps running specials after one chain throws', async () => {
+    const { univ, session, host, run } = withNodes({
+      0: { type: SpecType.DISPLAY_MSG, m1: 0 },
+      1: { type: SpecType.SET_SDF, sd1: 3, sd2: 3, ex1a: 42 },
+    });
+    const boom = new Error('handler exploded');
+    host.message = () => Promise.reject(boom);
+    await run(0);
+    expect(univ.transcript.at(-1)).toBe('SPECIAL ENCOUNTER FAILED.');
+    // The lock is down again, so the next chain runs normally.
+    expect(session.specials!.busy).toBe(false);
+    await run(1);
+    expect(univ.party.getSdf(3, 3)).toBe(42);
+  });
+
   it('follows jumpto from node to node until it runs out', async () => {
     const { univ, run } = withNodes({
       0: { type: SpecType.SET_SDF, sd1: 1, sd2: 1, ex1a: 7, jumpto: 3 },

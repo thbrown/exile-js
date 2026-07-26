@@ -154,34 +154,46 @@ export class SpecialsEngine {
     let steps = 0;
     const MAX_STEPS = 20000;
 
-    while (ctx.nextSpec >= 0) {
-      const curSpec = ctx.nextSpec;
-      ctx.curSpecType = ctx.nextSpecType;
-      ctx.nextSpec = -1;
-      ctx.curSpec = this.resolvePointers(this.getNode(curSpec, ctx.curSpecType));
-
-      if (ctx.curSpec.type === SpecType.INVALID) break;
-
-      switch (categoryOf(ctx.curSpec.type)) {
-        case SpecCat.GENERAL: await generalSpec(this.univ, ctx, this); break;
-        case SpecCat.ONCE: await oneshotSpec(this.univ, ctx); break;
-        case SpecCat.AFFECT: await affectSpec(this.univ, ctx); break;
-        case SpecCat.IF_THEN: await ifThenSpec(this.univ, ctx); break;
-        case SpecCat.TOWN: await townSpec(this.univ, ctx); break;
-        case SpecCat.RECT: await rectSpec(this.univ, ctx); break;
-        case SpecCat.OUTDOOR: await outdoorSpec(this.univ, ctx); break;
-        default:
-          ctx.nextSpec = -1;
-          break;
-      }
-
-      if (++steps > MAX_STEPS) {
-        this.univ.addStringToBuf('SPECIAL ENCOUNTER INTERRUPTED.');
+    // `inProgress` has to come back down whatever happens in here. Most callers
+    // launch a chain fire-and-forget (`void runSpecial(...)`), so a handler that
+    // throws used to leave the flag stuck at true — and from then on *every*
+    // special in the session was silently pushed onto the queue and answered
+    // with "nothing happened". One bad node killed all scripting.
+    try {
+      while (ctx.nextSpec >= 0) {
+        const curSpec = ctx.nextSpec;
+        ctx.curSpecType = ctx.nextSpecType;
         ctx.nextSpec = -1;
-      }
-    }
+        ctx.curSpec = this.resolvePointers(this.getNode(curSpec, ctx.curSpecType));
 
-    this.inProgress = false;
+        if (ctx.curSpec.type === SpecType.INVALID) break;
+
+        switch (categoryOf(ctx.curSpec.type)) {
+          case SpecCat.GENERAL: await generalSpec(this.univ, ctx, this); break;
+          case SpecCat.ONCE: await oneshotSpec(this.univ, ctx); break;
+          case SpecCat.AFFECT: await affectSpec(this.univ, ctx); break;
+          case SpecCat.IF_THEN: await ifThenSpec(this.univ, ctx); break;
+          case SpecCat.TOWN: await townSpec(this.univ, ctx); break;
+          case SpecCat.RECT: await rectSpec(this.univ, ctx); break;
+          case SpecCat.OUTDOOR: await outdoorSpec(this.univ, ctx); break;
+          default:
+            ctx.nextSpec = -1;
+            break;
+        }
+
+        if (++steps > MAX_STEPS) {
+          this.univ.addStringToBuf('SPECIAL ENCOUNTER INTERRUPTED.');
+          ctx.nextSpec = -1;
+        }
+      }
+    } catch (err) {
+      // Say so rather than dying quietly: a chain that blew up is a port bug,
+      // and the player needs to know this square didn't finish what it started.
+      this.univ.addStringToBuf('SPECIAL ENCOUNTER FAILED.');
+      console.error('special chain failed', { startSpec, whichMode, whichType, specLoc }, err);
+    } finally {
+      this.inProgress = false;
+    }
 
     // Drain whatever the chain queued, carrying each one's trigger time.
     const pending = this.queue.shift();

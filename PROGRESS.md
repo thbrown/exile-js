@@ -276,6 +276,16 @@ Notes for M2 implementer:
   Despite the name, `MAKE_TOWN_HOSTILE` is the group version and takes
   `set_town_attitude(ex1a, ex1b, ex2a)`: a *slot range*, not a monster type.
   Both were ported wrong first time round.
+- (2026-07-26) **A throwing opcode handler used to kill all scripting for the
+  rest of the session.** `SpecialsEngine.run` set `inProgress = true` and only
+  cleared it on the normal path; there was no try/finally. Since almost every
+  caller launches a chain fire-and-forget (`void runSpecial(...)`), one
+  exception left the one-chain-at-a-time lock stuck at true, and from then on
+  *every* special was silently pushed onto the queue and answered "nothing
+  happened" — with no error anywhere the player could see. Now the flag comes
+  down in a `finally`, the failure prints `SPECIAL ENCOUNTER FAILED.` and the
+  detail goes to the console (which `verify-screen.mjs` fails on). If scripting
+  ever "just stops" again, this is the shape to suspect.
 - (2026-07-26) **`check_special_terrain` runs on outdoor moves too** —
   `outd_move_party` calls it first thing (boe.actions.cpp:3950) with
   `eSpecCtx::OUT_MOVE`. This port's version began `if (!town) return true`, so
