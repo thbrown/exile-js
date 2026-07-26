@@ -19,6 +19,8 @@ import { NUM_INVEN_SLOTS, Player } from '../universe/player';
 import { MainStatus, Race, Skill, Status, Trait } from '../universe/skills';
 import { Universe } from '../universe/universe';
 import { damageMonst, damagePc, hitChance } from './damage';
+import { calcSpecDam } from './missiles';
+import { onHitItemAbility } from './weaponAbilities';
 import type { GameSession } from './session';
 import type { Item } from '../data/item';
 
@@ -422,9 +424,8 @@ function pcTargetDefence(target: Living): number {
  * only weapon, 2 for the main hand of two, 0 for the off-hand; it changes both
  * the to-hit and the damage.
  *
- * TODO(M5b): the item abilities that fire on a hit — exploding weapons (which
- * need spell patterns), STATUS_WEAPON, SOULSUCKER, ANTIMAGIC_WEAPON and
- * WEAPON_CALL_SPECIAL — and `calc_spec_dam`'s slay-the-species bonuses.
+ * TODO(M5c): EXPLODING_WEAPON needs `place_spell_pattern`; a swing with one
+ * currently lands as an ordinary blow.
  */
 export function pcAttackWeapon(
   univ: Universe,
@@ -489,7 +490,17 @@ export function pcAttackWeapon(
     return;
   }
 
-  let specDam = 0;
+  // The weapon's own ability adds either *special* damage (a slayer bonus) or
+  // damage of a named type (DAMAGING_WEAPON). The C++ computes one variable and
+  // swaps it into the other when the type came back set, which is why the two
+  // are applied with different sound types below.
+  const spec = calcSpecDam(univ, weap.ability, weap.abilStrength, weap.abilData, target);
+  let specDam = spec.damage;
+  let bonusDam = 0;
+  if (spec.damType !== DamageType.SPECIAL) {
+    bonusDam = specDam;
+    specDam = 0;
+  }
   if (primary) {
     // Assassination: a big enough skill edge over a low-level target, and one
     // roll, doubles the damage. Amorphous things can't be assassinated.
@@ -522,14 +533,24 @@ export function pcAttackWeapon(
     specialDone = damageTarget(
       univ, target, specDam, DamageType.SPECIAL, whoAtt, attacker.race, false, session, 5);
   }
-  target.damagedMsg(weaponDone, specialDone);
+  let bonusDone = 0;
+  if (bonusDam) {
+    bonusDone = damageTarget(
+      univ, target, bonusDam, spec.damType, whoAtt, attacker.race, false, session, 0);
+  }
+  target.damagedMsg(weaponDone, specialDone + bonusDone);
 
   if (doPoison && (attacker.status[Status.POISONED_WEAPON] ?? 0) > 0) {
-    let amount = attacker.status[Status.POISONED_WEAPON] ?? 0;
+    const poisoned = attacker.status[Status.POISONED_WEAPON] ?? 0;
+    let amount = poisoned;
     if (hasAbilEquip(attacker, ItemAbil.POISON_AUGMENT)) amount += 2;
     target.poison(amount, univ.rng);
-    attacker.status[Status.POISONED_WEAPON] = moveToZero(amount);
+    // move_to_zero runs on the *status*, not on the augmented amount — an
+    // earlier version of this port wrote the bonus back and made poison grow.
+    attacker.status[Status.POISONED_WEAPON] = moveToZero(poisoned);
   }
+
+  onHitItemAbility(univ, attacker, weap, target, r2 + specDam, 'melee', session);
 }
 
 /**

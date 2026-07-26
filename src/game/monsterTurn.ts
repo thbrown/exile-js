@@ -26,6 +26,9 @@ import {
 } from './monsterAbilities';
 import { GameMode } from './modes';
 import { damageMonst, damagePc, hitChance } from './damage';
+import { onHitTargetSpecial } from './weaponAbilities';
+import { ItemAbil } from '../data/item';
+import { hasAbilEquip } from '../universe/inventory';
 import type { GameSession } from './session';
 
 /** move_to_zero — one step toward zero from either side. */
@@ -459,6 +462,21 @@ export function monsterAttack(
     // Touch abilities fire off a blow that landed — the burning touch, the
     // paralysing touch, the pickpocket.
     monsterTouches(session, monst, target, i);
+
+    // And what being hit sets off on the target's side.
+    if (pcTarget) {
+      const specItem = hasAbilEquip(pcTarget, ItemAbil.HIT_CALL_SPECIAL);
+      if (specItem) {
+        onHitTargetSpecial(
+          univ, monst, pcTarget, specItem.item.abilStrength, 'melee', session);
+      }
+    } else if (monstTarget) {
+      const trigger = monstTarget.mon.abil[MonstAbil.HIT_TRIGGER];
+      if (trigger?.active) {
+        onHitTargetSpecial(
+          univ, monst, monstTarget, trigger.special.extra1, 'melee', session);
+      }
+    }
   }
 }
 

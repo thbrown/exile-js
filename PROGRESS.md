@@ -31,7 +31,7 @@
 
 ## Current state
 
-**M2 done bar two items, M3 nearly done, M4 complete, M5a (melee combat) complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; what's still missing from combat is monster spellcasting and the on-hit item abilities (M5b), and the spells and field behaviours (M5c).**
+**M2 done bar two items, M3 nearly done, M4 complete, M5a (melee combat) complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; what's still missing from combat is monster spellcasting (M5b) and the spells and field behaviours (M5c).**
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -168,6 +168,17 @@ Notes for M2 implementer:
   `monst_basic_abil` behind it. STATUS2 rides only the first attack, STATUS
   every one. Still open in this area: monster spellcasting, RADIATE (needs
   M5c's spell patterns) and the party's own missiles.
+- **On-hit weapon abilities (M5b, 2026-07-26)**: `game/weaponAbilities.ts`
+  ports `apply_weapon_status` (boe.combat.cpp:459) and the on-hit chain both
+  `pc_attack_weapon` and `fire_missile` run — STATUS_WEAPON, SOULSUCKER,
+  ANTIMAGIC_WEAPON and WEAPON_CALL_SPECIAL — plus `onHitTargetSpecial`, the
+  chain the *target* runs (a creature's HIT_TRIGGER, a PC's HIT_CALL_SPECIAL),
+  which monsters' melee fires too. `pcAttackWeapon` now calls `calcSpecDam`, so
+  slayer and damaging weapons finally do their extra damage, with the C++'s
+  spec/bonus swap deciding which sound type it booms with. The one seam:
+  WEAPON_CALL_SPECIAL's chain is launched fire-and-forget and the free-swing
+  action points are handed back when it resolves, because the melee path is
+  synchronous and the C++ blocks there.
 - **The party's missiles (M5b, 2026-07-26)**: `game/missiles.ts` ports
   `load_missile` (boe.combat.cpp:1459), `fire_missile` (:1531) and
   `calc_spec_dam` (:711). **S** in combat arms whatever the acting PC has
@@ -334,6 +345,17 @@ Notes for M2 implementer:
   and CALL_SPECIAL terrain didn't fire. Only the terrain source and the
   special's context differ between the two modes. Pinned by two tests in
   `test/session.test.ts`.
+- (2026-07-26) **A poisoned blade ticks down twice per swing.**
+  `pc_attack_weapon` decrements POISONED_WEAPON when the poison lands, and
+  `pc_attack` decrements it again on the way out. That's the C++, and a test
+  pins it. What is *not* right — and was a slip in this port — is decrementing
+  the POISON_AUGMENT-boosted `amount` instead of the status itself, which made
+  a poisoned weapon get *stronger* every time it was used.
+- (2026-07-26) `calc_spec_dam` hands back a damage type as well as an amount,
+  and its caller **swaps** the amount into a second variable when the type came
+  back set: a slayer bonus is SPECIAL damage (boom sound 5), a DAMAGING_WEAPON
+  bonus is damage of its own named type (boom sound 0). Two variables, one
+  value, and only the swap tells them apart.
 - (2026-07-26) **`fire_missile`'s range check is not the range the targeting
   cursor was given.** `load_missile` computes `current_spell_range` including
   the ammunition's DISTANCE_MISSILE bonus, but `fire_missile` then recomputes a
@@ -427,12 +449,10 @@ deliberately left at the seam — 13 markers as of now. In rough order:
 3. ~~**Missiles**~~ — **done** on both sides (2026-07-26):
    `game/monsterAbilities.ts` for the monsters, `game/missiles.ts` for the
    party, and `calc_spec_dam` with them. Still open: `run_a_missile`, the
-   projectile animation both halves would use, and hooking `calcSpecDam` into
-   `pcAttackWeapon`, which still only notes the place for it.
-4. **On-hit item abilities**: exploding weapons (needs spell patterns),
-   STATUS_WEAPON, SOULSUCKER, ANTIMAGIC_WEAPON, WEAPON_CALL_SPECIAL, and the
-   target's HIT_TRIGGER / HIT_CALL_SPECIAL. Melee and missiles both want them,
-   and `fireMissile` marks the spot.
+   projectile animation both halves would use.
+4. ~~**On-hit item abilities**~~ — **done** (2026-07-26), in
+   `game/weaponAbilities.ts`, along with `calc_spec_dam` in melee. Still open:
+   exploding weapons, which need M5c's spell patterns.
 5. **Random encounters outdoors** — the user reported this. It needs
    `create_wand_monst` and outdoor combat terrain (`create_out_combat_terrain`,
    boe.town.cpp:817), and `Sector.wandering` is already parsed and waiting.
@@ -507,9 +527,9 @@ Smaller things outstanding, all independent of M5:
 
 ## Next steps
 
-1. M5b continued: missiles (both sides), breath, summons and the touch
-   abilities all landed 2026-07-26, so what's left is monster spellcasting
-   (`monst_cast_mage` / `monst_cast_priest`), the on-hit item abilities, and
+1. M5b continued: missiles (both sides), breath, summons, the touch abilities
+   and the on-hit weapon abilities all landed 2026-07-26, so what's left is
+   monster spellcasting (`monst_cast_mage` / `monst_cast_priest`) and
    `run_a_missile` — the projectile animation. Then outdoor wandering monsters,
    which additionally need the outdoor combat arena.
 2. (The MAP overlay and `place_treasure` both landed 2026-07-26.)

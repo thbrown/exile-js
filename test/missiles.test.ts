@@ -16,7 +16,7 @@ import { calcSpecDam, fireMissile, isLoaded, loadMissile } from '../src/game/mis
 import { GameSession } from '../src/game/session';
 import { Creature } from '../src/universe/creature';
 import { PartyPreset, Player } from '../src/universe/player';
-import { Race, Skill } from '../src/universe/skills';
+import { Race, Skill, Status } from '../src/universe/skills';
 import { Universe } from '../src/universe/universe';
 
 const opcodes = buildOpcodeTable(
@@ -187,5 +187,89 @@ describe('calc_spec_dam', () => {
     const monst = s.univ.town!.monsters.find((c) => c.isAlive)!;
     monst.mon.race = Race.SKELETAL;
     expect(calcSpecDam(s.univ, ItemAbil.SLAYER_WEAPON, 2, Race.UNDEAD, monst).damage).toBe(12);
+  });
+});
+
+describe('on-hit item abilities', () => {
+  /** A shot that always lands, from PC 0 at a creature two squares away. */
+  function aShot(ammoExtra: Partial<Item>): {
+    s: GameSession; monst: Creature; pc: Player;
+  } {
+    const s = inTown();
+    s.startCombat(s.univ.party.direction);
+    s.univ.curPc = 0;
+    const pc = s.univ.party.pcs[0]!;
+    const monst = s.univ.town!.monsters.find((c) => c.isAlive)!;
+    monst.curLoc = { x: pc.combatPos.x + 2, y: pc.combatPos.y };
+    monst.maxHealth = 500;
+    monst.health = 500;
+    armWith(pc, anItem(ItemType.BOW, { bonus: 20 }), anItem(ItemType.ARROW, {
+      itemLevel: 8, bonus: 30, charges: 10, ...ammoExtra,
+    }));
+    pc.skills[Skill.ARCHERY] = 20;
+    pc.ap = 10;
+    return { s, monst, pc };
+  }
+
+  function fire(s: GameSession, at: { x: number; y: number }): void {
+    const loaded = loadMissile(s.univ);
+    if (!isLoaded(loaded)) throw new Error('should be armed');
+    fireMissile(s, loaded, at);
+  }
+
+  it('a soulsucking missile heals the firer, on the coin flip that says so', () => {
+    const { s, monst, pc } = aShot({
+      ability: ItemAbil.SOULSUCKER, abilStrength: 10,
+    });
+    pc.maxHealth = 500;
+    pc.curHealth = 100;
+    // The flip is one get_ran call, so fire until it comes up.
+    for (let i = 0; i < 20 && pc.curHealth === 100; i++) {
+      pc.items[1]!.charges = 10;
+      monst.health = 500;
+      fire(s, monst.curLoc);
+    }
+    expect(s.univ.transcript.join('\n')).toContain('Missile drains life.');
+    expect(pc.curHealth).toBeGreaterThan(100);
+  });
+
+  it('a status missile applies its status', () => {
+    const { s, monst } = aShot({
+      ability: ItemAbil.STATUS_WEAPON, abilStrength: 8, abilData: Status.ACID,
+    });
+    for (let i = 0; i < 20 && (monst.status[Status.ACID] ?? 0) === 0; i++) {
+      monst.health = 500;
+      fire(s, monst.curLoc);
+    }
+    expect(s.univ.transcript.join('\n')).toContain('Missile drips acid.');
+    expect(monst.status[Status.ACID] ?? 0).toBeGreaterThan(0);
+  });
+
+  it('an antimagic missile drains a spellcaster and gives some back', () => {
+    const { s, monst, pc } = aShot({
+      ability: ItemAbil.ANTIMAGIC_WEAPON, abilStrength: 20,
+    });
+    monst.mon.mu = 5;
+    monst.maxMp = 60;
+    monst.mp = 60;
+    pc.curSp = 0;
+    pc.maxSp = 100;
+    for (let i = 0; i < 20 && monst.mp === 60; i++) {
+      monst.health = 500;
+      fire(s, monst.curLoc);
+    }
+    expect(monst.mp).toBeLessThan(60);
+    expect(s.univ.transcript.join('\n')).toContain('Missile drains energy.');
+    expect(pc.curSp).toBeGreaterThan(0);
+  });
+
+  it('a damaging missile lands its extra damage as its own type', () => {
+    const { s, monst } = aShot({
+      ability: ItemAbil.DAMAGING_WEAPON, abilStrength: 5, abilData: 1, // FIRE
+    });
+    const before = monst.health;
+    fire(s, monst.curLoc);
+    // Two hits, so more than the 8d1+30 the arrow alone could manage.
+    expect(monst.health).toBeLessThan(before);
   });
 });

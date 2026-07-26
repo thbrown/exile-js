@@ -18,7 +18,9 @@ import { Living } from '../universe/living';
 import { Player } from '../universe/player';
 import { Race, Skill, Status, Trait } from '../universe/skills';
 import { Universe } from '../universe/universe';
+import { MonstAbil } from '../data/monsterAbility';
 import { takeAp } from './combat';
+import { onHitItemAbility, onHitTargetSpecial } from './weaponAbilities';
 import { damageMonst, damagePc, hitChance } from './damage';
 import { GameMode } from './modes';
 import type { GameSession } from './session';
@@ -248,8 +250,6 @@ function seekTarget(
  *
  * TODO(M5c): EXPLODING_WEAPON needs `place_spell_pattern` (PAT_RAD2), so an
  * exploding arrow currently says so and doesn't fire.
- * TODO(M5b): STATUS_WEAPON, SOULSUCKER, ANTIMAGIC_WEAPON and
- * WEAPON_CALL_SPECIAL — the on-hit item abilities, which melee wants too.
  */
 export function fireMissile(
   session: GameSession, loaded: LoadedMissile, target: Location,
@@ -353,8 +353,23 @@ export function fireMissile(
       if (hasAbilEquip(firer, ItemAbil.POISON_AUGMENT)) amount++;
       victim.poison(amount, univ.rng);
     }
-    // TODO(M5b): STATUS_WEAPON, SOULSUCKER, ANTIMAGIC_WEAPON,
-    // WEAPON_CALL_SPECIAL, and the target's HIT_TRIGGER / HIT_CALL_SPECIAL.
+    // The ammunition's own on-hit ability. WEAPON_CALL_SPECIAL is tested on
+    // the ammunition but takes its node from the *launcher* — kept as written.
+    onHitItemAbility(univ, firer, ammo, victim, r2 + spec.damage, 'missile', session,
+      missile.abilStrength);
+
+    // And what the target does about being shot.
+    if (victim instanceof Creature) {
+      const trigger = victim.mon.abil[MonstAbil.HIT_TRIGGER];
+      if (trigger?.active) {
+        onHitTargetSpecial(univ, firer, victim, trigger.special.extra1, 'missile', session);
+      }
+    } else if (victim instanceof Player) {
+      const specItem = hasAbilEquip(victim, ItemAbil.HIT_CALL_SPECIAL);
+      if (specItem) {
+        onHitTargetSpecial(univ, firer, victim, specItem.item.abilStrength, 'missile', session);
+      }
+    }
   }
 
   spendAmmo(univ, loaded);

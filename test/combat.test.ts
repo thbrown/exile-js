@@ -308,6 +308,50 @@ describe('the melee attack', () => {
     expect(pc.ap).toBe(0);
   });
 
+it('a slayer weapon adds its bonus only against the race it names', () => {
+    const { univ, session } = newGame();
+    const pc = armedFighter(univ);
+    pc.items[0]!.ability = ItemAbil.SLAYER_WEAPON;
+    pc.items[0]!.abilStrength = 4;
+    pc.items[0]!.abilData = Race.BEAST;
+    univ.curPc = 0;
+
+    const wrongRace = hostileBeside(univ, session);
+    wrongRace.mon.race = Race.HUMAN;
+    wrongRace.maxHealth = 4000;
+    wrongRace.health = 4000;
+    for (let i = 0; i < 15; i++) { pc.ap = 4; pcAttack(univ, 0, wrongRace, session); }
+    const plainDamage = 4000 - wrongRace.health;
+
+    const rightRace = hostileBeside(univ, session);
+    rightRace.mon.race = Race.BEAST;
+    rightRace.maxHealth = 4000;
+    rightRace.health = 4000;
+    for (let i = 0; i < 15; i++) { pc.ap = 4; pcAttack(univ, 0, rightRace, session); }
+    const slainDamage = 4000 - rightRace.health;
+
+    // Four points times five for a beast, on top of every blow that landed.
+    expect(slainDamage).toBeGreaterThan(plainDamage);
+  });
+
+  it('a poisoned blade ticks down twice per swing, not by the augmented amount', () => {
+    const { univ, session } = newGame();
+    const pc = armedFighter(univ);
+    const monst = hostileBeside(univ, session);
+    univ.curPc = 0;
+    pc.status[Status.POISONED_WEAPON] = 5;
+    pc.weapPoisoned = pc.items[0]!;
+    // Something that lands: twenty swings, and the first hit spends the poison.
+    for (let i = 0; i < 20 && (pc.status[Status.POISONED_WEAPON] ?? 0) === 5; i++) {
+      pc.ap = 4;
+      pcAttack(univ, 0, monst, session);
+    }
+    // pc_attack_weapon decrements it when the poison lands and pc_attack
+    // decrements it again on the way out, so a landed blow costs two — but
+    // never the POISON_AUGMENT bonus, which is what this pins.
+    expect(pc.status[Status.POISONED_WEAPON]).toBe(3);
+  });
+
   it('an unarmed PC punches', () => {
     const { univ, session } = newGame();
     const pc = armedFighter(univ);
