@@ -20,6 +20,8 @@ import { TalkNodeType } from '../data/talking';
 import { Lighting } from '../data/town';
 import { Snd, SoundPlayer } from '../platform/sound';
 import { Creature, CreatureStatus, assignCreature } from '../universe/creature';
+import { DamageType } from '../data/monster';
+import { hitParty } from './damage';
 import { CurTown } from '../universe/curTown';
 import {
   GiveStatus,
@@ -847,12 +849,54 @@ export class GameSession {
         this.dangerousTerrain(spec);
         return true;
       case TerSpec.DAMAGING:
-        // TODO(M5): terrain damage needs damage_pc's resistance pipeline.
-        this.univ.addStringToBuf('  It looks dangerous.');
+        this.damagingTerrain(spec);
         return true;
       default:
         return true;
     }
+  }
+
+  /**
+   * The DAMAGING terrain branch of check_special_terrain
+   * (boe.specials.cpp:323) — lava, fire, spikes. flag3 names the damage type
+   * (0 or out of range means a plain wound), and the damage is
+   * `get_ran(flag2, 1, flag1)`. Outside combat it hits the whole party.
+   *
+   * TODO(M5): flying and boats make the party immune, and combat hurts only
+   * the PC who stepped in it.
+   */
+  private damagingTerrain(spec: Terrain): void {
+    let damType: DamageType = spec.flag3 > 0 && spec.flag3 < DamageType.SPECIAL
+      ? spec.flag3 as DamageType
+      : DamageType.WEAPON;
+    let amount = this.univ.rng.getRan(spec.flag2, 1, spec.flag1);
+    const say = (line: string): void => this.univ.addStringToBuf(line);
+    switch (damType) {
+      case DamageType.FIRE:
+        say("  It's hot!");
+        // TODO(M6): the firewalk party status makes fire terrain harmless.
+        break;
+      case DamageType.COLD: say('  You feel cold!'); break;
+      case DamageType.ACID: say('  It burns!'); break;
+      case DamageType.SPECIAL:
+        // Terrain can't deal true assassination damage; it becomes unblockable.
+        damType = DamageType.UNBLOCKABLE;
+        say('  Something shocks you!');
+        break;
+      case DamageType.MAGIC:
+      case DamageType.UNBLOCKABLE:
+        say('  Something shocks you!');
+        break;
+      case DamageType.WEAPON: say('  You feel pain!'); break;
+      case DamageType.POISON: say('  You suddenly feel very ill for a moment...'); break;
+      case DamageType.UNDEAD:
+      case DamageType.DEMON:
+        say('  A dark wind blows through you!');
+        break;
+      default: break;
+    }
+    if (amount < 0) return;
+    hitParty(this.univ, amount, damType);
   }
 
   /**

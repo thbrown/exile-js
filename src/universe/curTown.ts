@@ -13,6 +13,8 @@ import { Creature } from './creature';
 export class CurTown {
   monsters: Creature[] = [];
   items: Item[] = [];
+  /** How many of this town's monsters the party has killed (cTown::m_killed). */
+  monstersKilled = 0;
   /** Explored flags for the current town, [x][y]. */
   explored: Uint8Array[];
   /** Permanently lit tiles (braziers, bonfires…), cTown::lighting. */

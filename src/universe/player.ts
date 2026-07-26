@@ -5,7 +5,7 @@
  * protections and racial/trait disadvantages on top of the base `applyStatus`.
  */
 
-import { Direction, Location, loc } from '../core/location';
+import { Direction, Location, loc, percent } from '../core/location';
 import { GameRng } from '../core/rng';
 import { Item, ItemAbil, defaultItem } from '../data/item';
 import { getProtLevel, hasAbilEquip } from './inventory';
@@ -26,6 +26,31 @@ export enum PartyPreset {
   /** Maxed-out test party (pc.cpp:1036). */
   DEBUG = 1,
 }
+
+/**
+ * The percentage each trait adds to the experience needed per level
+ * (cPlayer::get_tnl), indexed by `Trait`. Negative entries are disadvantages,
+ * which make levelling *cheaper*.
+ */
+const TRAIT_XP_COST: number[] = [
+  10, // TOUGHNESS
+  20, // MAGICALLY_APT
+  8, // AMBIDEXTROUS
+  10, // NIMBLE
+  4, // CAVE_LORE
+  6, // WOODSMAN
+  10, // GOOD_CONST
+  7, // HIGHLY_ALERT
+  12, // STRENGTH
+  15, // RECUPERATION
+  -10, // SLUGGISH
+  -8, // MAGICALLY_INEPT
+  -8, // FRAIL
+  -20, // CHRONIC_DISEASE
+  -8, // BAD_BACK
+  -40, // PACIFIST
+  -10, // ANAMA
+];
 
 /** skill_bonus (shop.cpp:43) — the stat bonus table, indexed by skill level. */
 const SKILL_BONUS = [
@@ -62,6 +87,11 @@ export class Player extends Living {
   combatPos: Location = loc(-1, -1);
   /** cPlayer::party — set by `Universe`, and only `getLoc` needs it. */
   party: Party | null = null;
+  /**
+   * How much of this turn's damage the PC is parrying away (cPlayer::parry).
+   * Set by the combat Parry action and spent by `damagePc`.
+   */
+  parry = 0;
 
   get isAlive(): boolean {
     return this.mainStatus === MainStatus.ALIVE;
@@ -114,6 +144,39 @@ export class Player extends Living {
     if (fromStatus + fromGear <= 0) return 0;
     if (rng.getRan(1, 1, 20) < fromGear) return base + Math.max(1, Math.trunc(fromGear / 5));
     return base;
+  }
+
+  /**
+   * cPlayer::skill (pc.cpp:...) — the *effective* level of a skill, gear
+   * included. Anything that rolls against a skill uses this; `statAdj` and the
+   * training screen deliberately use the raw `skills` array instead.
+   */
+  skill(which: Skill): number {
+    let bulkBonus = 0;
+    if (which >= Skill.EDGED_WEAPONS && which <= Skill.DEFENSE) {
+      bulkBonus = getProtLevel(this, ItemAbil.BOOST_WAR);
+    } else if (which >= Skill.MAGE_SPELLS && which <= Skill.ITEM_LORE) {
+      bulkBonus = getProtLevel(this, ItemAbil.BOOST_MAGIC);
+    }
+    const boosted = (this.skills[which] ?? 0) + getProtLevel(this, ItemAbil.BOOST_STAT, which);
+    return Math.min(20, boosted) + bulkBonus;
+  }
+
+  /**
+   * cPlayer::get_tnl (pc.cpp:70) — experience per level. A race costs extra,
+   * and every trait shifts it by a percentage: the strong advantages are dear
+   * and the disadvantages pay you back.
+   */
+  getTnl(): number {
+    const racePenalty: Partial<Record<Race, number>> = {
+      [Race.NEPHIL]: 12, [Race.SLITH]: 20, [Race.VAHNATAI]: 18,
+    };
+    let storePercent = 100;
+    for (let i = 0; i < NUM_TRAITS; i++) {
+      if (this.traits[i]) storePercent += TRAIT_XP_COST[i] ?? 0;
+    }
+    const tnl = percent(100 + (racePenalty[this.race] ?? 0), storePercent);
+    return Math.max(tnl, 10);
   }
 
   /**

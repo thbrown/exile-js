@@ -38,6 +38,11 @@ export class Party {
   inHorse = -1;
   /** Halves every monster's health (cParty::easy_mode). */
   easyMode = false;
+  /** Running totals the endgame summary reports (cParty::total_*). */
+  totalDamTaken = 0;
+  totalDamDone = 0;
+  totalMKilled = 0;
+  totalXpGained = 0;
   /** Accumulated light from spells/items; drives light_radius in dark towns. */
   lightLevel = 0;
   /** Special items the party has acquired, by index (cParty::spec_items). */
