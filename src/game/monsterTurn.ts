@@ -33,6 +33,7 @@ import { hasAbilEquip } from '../universe/inventory';
 import { focusOn } from './anim';
 import { doPoison, handleAcid, handleDisease } from './increaseAge';
 import { processFields } from './processFields';
+import { monstCastMage, monstCastPriest } from './monsterSpells';
 import { placeSpellPattern } from './spellPatterns';
 import type { GameSession } from './session';
 
@@ -652,8 +653,7 @@ function giveMonstersMoves(session: GameSession): void {
  * table before it considers a swing, which is why an archer shoots rather than
  * closing.
  *
- * TODO(M5b): mage and priest spells, summoning and the SPECIAL ability, which
- * the C++ handles alongside this.
+ * TODO(M5b): the SPECIAL ability, which the C++ handles alongside this.
  */
 export function doMonsterTurn(session: GameSession): void {
   const univ = session.univ;
@@ -700,6 +700,39 @@ export function doMonsterTurn(session: GameSession): void {
         if (monst.mobile) {
           actedYet = fleeParty(session, monst, targSpace);
           if (actedYet) monst.ap = Math.max(0, monst.ap - 1);
+        }
+      }
+
+      // Spells come before the missile abilities, as they do in the C++
+      // (boe.combat.cpp:2272). A caster mostly won't bother when the party is
+      // already on top of it — unless it is a high-level one, or a scenario
+      // monster (number >= 160), or the coin says otherwise.
+      //
+      // Divergence worth knowing: the C++ tries *breath* before spells, but
+      // this port folds breath into `pickMonsterAbility` below, so a monster
+      // that both breathes and casts will reach for a spell first.
+      if (!actedYet && target !== NO_ONE && monst.attitude !== Attitude.DOCILE
+        && !monst.isFriendly && dist(monst.curLoc, targSpace) <= 10) {
+        const adjacent = monstAdjacent(monst, targSpace);
+        const mu = monst.mon.mu;
+        const cl = monst.mon.cl;
+        if (mu > 0 && univ.rng.getRan(1, 1, 10) < (cl > 0 ? 6 : 9)) {
+          if (!adjacent || univ.rng.getRan(1, 0, 2) < 2
+            || monst.number >= 160 || monst.getLevel() > 9) {
+            monstCastMage(session, monst, target);
+            // The C++ discards the return and counts the turn as spent either
+            // way, so a monster that couldn't afford the spell still loses its
+            // action points. Its own TODO asks whether that is right.
+            monst.ap = Math.max(0, monst.ap - 5);
+            actedYet = true;
+          }
+        }
+        if (!actedYet && cl > 0 && univ.rng.getRan(1, 1, 8) < 7) {
+          if (!adjacent || univ.rng.getRan(1, 0, 2) < 2 || monst.getLevel() > 9) {
+            monstCastPriest(session, monst, target);
+            monst.ap = Math.max(0, monst.ap - 4);
+            actedYet = true;
+          }
         }
       }
 

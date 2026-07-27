@@ -500,7 +500,7 @@ Notes for M2 implementer:
 - [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅, inventory panel ✅, fields overlay ✅; replay driver still open
 - [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅, shops ✅, sell/identify/recharge ✅, training ✅, inns ✅; item Use, enchanting, and full dialogxml still open
 - [x] **M4 — Specials interpreter (breadth-first)**: VM core (pointers, queueing, messages) + all seven opcode groups; triggers wired for movement, look, town entry/exit, use-space, call-special terrain and the two talk nodes. Opcodes needing combat/fields/timers/quests report themselves and wait for M5/M6.
-- [ ] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b nearly done (monster turns, melee AI, town *and outdoor* encounters, the `uAbility` port, missiles on both sides, breath, summons, touch abilities and the on-hit weapon abilities ✅; monster spells still open); M5c under way (spell patterns ✅, `process_fields` ✅; the spell list and `cast_spell` still open)
+- [x] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b ✅ (monster turns, melee AI, town *and outdoor* encounters, the `uAbility` port, missiles on both sides, breath, summons, touch abilities, on-hit weapon abilities, **monster spellcasting**); M5c ✅ (spell patterns, `process_fields`, the 147-spell table, `pc_can_cast_spell`, town/combat/targeted/multi-target casting, and the real casting dialog). Remaining odds and ends: `record_monst` (Capture Soul/Simulacrum), `do_mindduel`, and the SPECIAL monster ability.
 - [ ] **M6 — Specials depth + party ops** (valleydy completable)
 - [ ] **M7 — Save/load (.exg) + startup flow**
 - [ ] **M8 — Fidelity hardening** (replay golden masters)
@@ -931,6 +931,36 @@ Smaller things outstanding, all independent of M5:
   - *Gotcha*: fancy targeting can't rotate a wall, so Spray Fields uses a plus
     and everything else a single square, whatever the spell would otherwise get.
   - This closes the spell system: every `refer` now has a route.
+
+- **Monster spellcasting (M5b, 2026-07-27)**: `game/monsterSpells.ts` ports
+  `monst_cast_mage` (boe.combat.cpp:3207) and `monst_cast_priest` (:3550) with
+  their level tables (7x18 mage, 7x10 priest) and emergency columns, plus the
+  four AI helpers underneath — `find_fireball_loc`, `count_levels`, `pc_near`
+  and `monst_near` (:3875-3945). Wired into `doMonsterTurn` where the C++ has
+  it, ahead of the missile abilities. **This closes M5b.**
+  - A monster doesn't choose from the spell list: it rolls on a table indexed
+    by its magic level, after four emergency checks — slowed, outnumbered,
+    enemy bunched up, badly hurt. The *last* of those is tested **first**, so a
+    hurt caster heals or lashes out before anything else.
+  - *Gotcha*: `find_fireball_loc` has a deliberate coin-flip tie-break, which
+    moves the RNG on every candidate square that ties. Kept.
+  - *Gotcha*: `count_levels` scores party-*friendly* monsters positively, so in
+    a town full of guards a hostile caster finds a worthwhile target even with
+    the party nowhere near. This surprised a test before it surprised anyone
+    else.
+  - *Gotcha*: the C++ discards the return of both cast functions and counts the
+    turn as spent regardless, so a monster that couldn't afford its spell still
+    loses its action points (and gains 1 mp). Its own TODO asks whether that's
+    right; kept.
+  - *Gotcha*: Fireball and the two cheap summons are priced at a flat 4 rather
+    than by spell level; the priest side prices Summon Spirit, Pestilence and
+    anything level 7 at 8, and the two big summons at 10.
+  - *Gotcha*: Holy Scourge hits a PC far harder than another monster (the C++
+    has a TODO asking why), and a healthy caster swaps its big heals for Bless
+    Party / Summon Host rather than waste them.
+  - *Divergence*: the C++ tries **breath** before spells; this port folds breath
+    into `pickMonsterAbility`, which runs after, so a monster that both breathes
+    and casts reaches for a spell first. Noted at the call site.
 
 ## Dialog fidelity: the two screens that don't look like the original
 
