@@ -280,6 +280,35 @@ Notes for M2 implementer:
   `main.ts` runs a short rAF loop until they've all gone, which is the same
   observable behaviour without blocking.
 
+- **The party stats panel comes alive (2026-07-26)**: `data/statusIcons.ts`
+  ports `status_info` (damage.cpp:13) and `get_stat_effect_rect`
+  (boe.text.cpp:637), and `Screen.drawPcEffects` ports `draw_pc_effects` — the
+  status icons beside each name, which is where "poisoned" finally *shows*
+  rather than scrolling past in the transcript. A signed status draws a
+  different icon each way (blessed vs cursed, hasted vs slowed) and poison
+  switches to a nastier icon from level 4 up, which is the only use of
+  `status_info`'s `special` band. Clicking a PC row works too
+  (`Screen.pcRowHit` + the PC branch of `handle_action`): the name switches who
+  is active — in combat that needs APs, not a pulse, and it works mid-shop so
+  you can change who is buying — the HP and SP columns read themselves out, and
+  the two icons are Info and Trade Places. `switch_pc` takes two clicks and
+  `increase_age` cancels a half-finished one every turn.
+  - *Gotcha (2026-07-26)*: `draw_pc_effects` tests its right limit **after**
+    drawing and once per *status* rather than per icon, so a long enough name
+    gets one icon painted over the HP column before the row gives up. Kept, and
+    commented — it is what the original does.
+  - Info is still the transcript version of the character sheet, not
+    `give_pc_info`'s `pc-info.xml` dialog — TODO(M6), with the dialogxml
+    toolkit.
+- **Gotcha (2026-07-26): `verify-screen.mjs`'s missile assertion was
+  timing-dependent.** It read `screen.missiles` straight after the party's shot
+  and demanded exactly one projectile. Once monster thrown weapons became
+  visible (the "spears you never saw" fix), the preceding step — which turns the
+  town hostile — could leave a townsperson's spear still in the air, so the gate
+  failed on two. The step now empties `screen.missiles` before firing, which is
+  what the assertion always meant. Worth remembering: that array is the whole
+  screen's projectiles, not one actor's.
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page

@@ -5,6 +5,7 @@
 
 import { Location, shiftLoc } from './core/location';
 import { SpellPat } from './data/pattern';
+import { statusName } from './data/statusIcons';
 import { placeSpellPattern } from './game/spellPatterns';
 import { GameMode, isCombat } from './game/modes';
 import { setBoomSink } from './game/booms';
@@ -31,7 +32,7 @@ import { itemWeight } from './universe/inventory';
 import { PartyPreset } from './universe/player';
 import { HP_PER_LEVEL, TrainingState, trainCost } from './game/training';
 import { doRest } from './game/rest';
-import { NUM_SKILLS, Skill } from './universe/skills';
+import { MainStatus, NUM_SKILLS, Skill, Status } from './universe/skills';
 import { Universe } from './universe/universe';
 
 /** Terrain animation ticks at 4 Hz, matching the C++ animation timer. */
@@ -342,6 +343,35 @@ async function main(): Promise<void> {
     redraw();
   };
 
+  /**
+   * The Info button beside a PC. `give_pc_info` (boe.infodlg.cpp:476) opens
+   * pc-info.xml — a full character sheet with all nineteen skills, the spell
+   * lists and the traits — which needs the dialogxml toolkit. Until that lands
+   * this prints the same information into the transcript, statuses included,
+   * which is what you actually want to know mid-fight.
+   */
+  const printPcInfo = (which: number): void => {
+    const pc = univ.party.pcs[which];
+    if (!pc) return;
+    univ.addStringToBuf(`${pc.name}:`);
+    univ.addStringToBuf(`  Level ${pc.level}, ${pc.experience} experience.`);
+    univ.addStringToBuf(`  Health ${pc.curHealth}/${pc.maxHealth}, spell points ${pc.curSp}/${pc.maxSp}.`);
+    const skills: string[] = [];
+    for (let i = 0; i < NUM_SKILLS; i++) {
+      const value = pc.skills[i] ?? 0;
+      if (value > 0) skills.push(`${getStr('skills', 1 + i * 2)} ${value}`);
+    }
+    if (skills.length > 0) univ.addStringToBuf(`  ${skills.join(', ')}.`);
+    const effects: string[] = [];
+    for (let s = Status.POISONED_WEAPON; s <= Status.CHARM; s++) {
+      const name = statusName(s, pc.status[s] ?? 0);
+      if (name) effects.push(`${name} (${Math.abs(pc.status[s] ?? 0)})`);
+    }
+    univ.addStringToBuf(effects.length > 0
+      ? `  Affected by: ${effects.join(', ')}.`
+      : '  No effects on this PC.');
+  };
+
   /** A click on an inventory row: equip/unequip, give, drop, describe, or sell. */
   const handleInventoryClick = async (
     row: number,
@@ -559,6 +589,43 @@ async function main(): Promise<void> {
       if (screen.mapVisible
         && x >= MAP_WINDOW.left && x < MAP_WINDOW.right
         && y >= MAP_WINDOW.top && y < MAP_WINDOW.bottom) return;
+      // The party stats list: clicking a name makes that PC active, the HP and
+      // SP columns read themselves out, and the two icons are Info and Trade
+      // Places (handle_action's PC-area branch, boe.actions.cpp:1739).
+      //
+      // This comes *before* the shop, because the C++ dispatches on which
+      // window the click landed in and the PC panel is its own window — which
+      // is how you switch who's shopping without leaving the shop.
+      const pcHit = screen.pcRowHit(x, y);
+      if (pcHit) {
+        const pc = univ.party.pcs[pcHit.index];
+        if (pc && pc.mainStatus !== MainStatus.ABSENT) {
+          sound.play(Snd.BUTTON);
+          // The HP and SP read-outs are blank for a PC who isn't alive, so a
+          // click there does nothing rather than reporting on a corpse.
+          const aliveOnly = pcHit.part === 'hp' || pcHit.part === 'sp';
+          if (!aliveOnly || pc.mainStatus === MainStatus.ALIVE) {
+            if (pcHit.part === 'name') {
+              session.switchPc(pcHit.index);
+              screen.itemPage = univ.curPc;
+            } else if (pcHit.part === 'hp') {
+              session.printPcHp(pcHit.index);
+            } else if (pcHit.part === 'sp') {
+              session.printPcSp(pcHit.index);
+            } else if (pcHit.part === 'trade') {
+              session.tradePlaces(pcHit.index);
+              screen.itemPage = univ.curPc;
+            } else {
+              // TODO(M6): give_pc_info's full character sheet is a dialogxml
+              // screen (pc-info.xml); this is the transcript version of it.
+              printPcInfo(pcHit.index);
+            }
+          }
+          setStatus();
+          redraw();
+        }
+        return;
+      }
       if (session.shop) {
         const hit = screen.shopScreen.hit(session.shop, x, y);
         if (hit) handleShopHit(hit);

@@ -15,7 +15,9 @@ import { GameSession } from '../game/session';
 import { GameMode, isCombat } from '../game/modes';
 import { Boom } from '../game/booms';
 import { MISSILE_MS, Missile, getMissileDirection } from '../game/missileAnim';
-import { MAIN_STATUS_LABEL, MainStatus } from '../universe/skills';
+import { MAIN_STATUS_LABEL, MainStatus, Status } from '../universe/skills';
+import { statIconRect, statusIconFor } from '../data/statusIcons';
+import { Player } from '../universe/player';
 import { Colours } from './colours';
 import {
   BOE_HEIGHT,
@@ -62,7 +64,7 @@ import { TalkScreen } from './talkScreen';
 import { ShopScreen } from './shopScreen';
 import { Trim, TrimMasks } from './trim';
 import {
-  drawString, drawStringCentre, drawStringEllipsis, drawStringRight, wrapLines,
+  drawString, drawStringCentre, drawStringEllipsis, drawStringRight, measureString, wrapLines,
 } from './text';
 
 /** Every image the main screen needs, beyond the terrain/monster sheets. */
@@ -83,6 +85,7 @@ export const CHROME_SHEETS = [
   'talkportraits',
   'booms',
   'missiles',
+  'staticons',
   ...MAP_SHEETS,
 ];
 
@@ -826,6 +829,7 @@ export class Screen {
               : Colours.PINK;
         drawString(this.ctx, at(row.hp), String(pc.curHealth), { size: 12, colour: hpColour });
         drawString(this.ctx, at(row.sp), String(pc.curSp), { size: 12, colour: spColour });
+        this.drawPcEffects(pc, i, at);
       } else {
         const wide = { ...at(row.hp), right: at(row.hp).right + 20 };
         drawString(this.ctx, wide, MAIN_STATUS_LABEL[pc.mainStatus] ?? '', {
@@ -842,6 +846,68 @@ export class Screen {
         this.ctx.drawImage(btns, 13, 0, 12, 12, trade.left, trade.top, 12, 12);
       }
     }
+  }
+
+  /**
+   * draw_pc_effects (boe.text.cpp:643) — the status icons that sit to the right
+   * of a PC's name, which is where "poisoned" actually shows up.
+   *
+   * They start just past the name and march rightwards 13px at a time, stopping
+   * before they'd reach the HP column. Statuses are drawn in `Status` order —
+   * the C++ walks a `std::map` keyed by the enum, so ascending is the order,
+   * and a status sitting at 0 draws nothing.
+   */
+  private drawPcEffects(
+    pc: Player, index: number, at: (rect: UiRect) => UiRect,
+  ): void {
+    const icons = this.store.get('staticons');
+    if (!icons) return;
+    const nameRow = at(PC_ROWS[index]!.name);
+    // The C++ measures the name alone and adds 33 for the "1. " and the gap.
+    const nameWidth = measureString(this.ctx, pc.name, { size: 12 });
+    let left = nameRow.left + nameWidth + 30;
+    // The icon row sits three pixels above the name row: {18,15,30,27} in the
+    // C++ against a name row that starts at 21.
+    const top = nameRow.top - 3;
+    const rightLimit = at(PC_ROWS[0]!.hp).left - 5;
+
+    for (let which = Status.POISONED_WEAPON; which <= Status.CHARM; which++) {
+      const code = statusIconFor(which, pc.status[which] ?? 0);
+      if (code >= 0) {
+        const from = statIconRect(code);
+        this.ctx.drawImage(icons, from.left, from.top, 12, 12, left, top, 12, 12);
+        left += 13;
+      }
+      // The C++ tests the limit once per status, not once per icon drawn — so a
+      // name long enough to push the first slot past the limit stops the row
+      // even when that status had no icon. It also tests *after* drawing, so a
+      // name that long gets one icon painted over the HP column before the row
+      // gives up. Both are the original's behaviour; kept.
+      if (left + 12 >= rightLimit) break;
+    }
+  }
+
+  /**
+   * Which part of which PC row a click landed on, if any — the `pc_buttons`
+   * hit test from handle_action's PC-area branch.
+   */
+  pcRowHit(
+    x: number, y: number,
+  ): { index: number; part: 'name' | 'hp' | 'sp' | 'info' | 'trade' } | null {
+    const panel = WIN_RECTS.pcStats;
+    const lx = x - panel.left;
+    const ly = y - panel.top;
+    for (let i = 0; i < PC_ROWS.length; i++) {
+      const row = PC_ROWS[i]!;
+      const inside = (rect: UiRect): boolean =>
+        lx >= rect.left && lx < rect.right && ly >= rect.top && ly < rect.bottom;
+      if (inside(row.info)) return { index: i, part: 'info' };
+      if (inside(row.trade)) return { index: i, part: 'trade' };
+      if (inside(row.hp)) return { index: i, part: 'hp' };
+      if (inside(row.sp)) return { index: i, part: 'sp' };
+      if (inside(row.name)) return { index: i, part: 'name' };
+    }
+    return null;
   }
 
   // --------------------------------------------------------------- inventory

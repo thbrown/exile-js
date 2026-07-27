@@ -945,6 +945,10 @@ const missileFired = await page.evaluate(() => {
   const monst = window.__missileMonst;
   const before = monst.health;
   const arrows = s.univ.party.pcs[0].items[1].charges;
+  // Empty the air first. The step before this one makes the town hostile, and a
+  // townsperson's thrown spear can still be in flight here — since monster
+  // missiles became visible, `missiles` is not the party's shot alone.
+  window.__screen.missiles = [];
   s.fireMissileAt(window.__missileTarget);
   // run_a_missile's sink fires synchronously, so the arrow is already in the
   // air by the time fireMissileAt returns.

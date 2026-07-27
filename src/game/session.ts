@@ -274,6 +274,9 @@ export class GameSession {
     // increase_age's upkeep — poison biting, wounds closing, blessings running
     // out. Without this a status effect is only ever a line in the transcript.
     increaseAgeEffects(this);
+    // increase_age (boe.actions.cpp:3586) cancels a half-finished trade-places
+    // every turn, so a stray first click doesn't swap someone a minute later.
+    this.currentSwitch = NO_ONE;
     if (this.mode === GameMode.TOWN) {
       doMonsters(this);
       doMonsterTurn(this);
@@ -1625,6 +1628,92 @@ export class GameSession {
       this.univ.curPc = this.combatActivePc;
       this.combatActivePc = NO_ONE;
     }
+  }
+
+  /**
+   * `prime_time` (boe.actions.cpp:295) — the game is in one of the three modes
+   * where the party is free to act, rather than mid-conversation or mid-shop.
+   */
+  get primeTime(): boolean {
+    return this.mode === GameMode.OUTDOORS || this.mode === GameMode.TOWN
+      || this.mode === GameMode.COMBAT;
+  }
+
+  /**
+   * handle_switch_pc (boe.actions.cpp:1012) — clicking a name in the party
+   * stats list makes that PC the active one.
+   *
+   * In combat this costs nothing but needs the PC to have action points left;
+   * out of combat they only have to be alive and present.
+   */
+  switchPc(which: number): void {
+    const pc = this.univ.party.pcs[which];
+    if (!pc) return;
+    if (!this.primeTime && this.mode !== GameMode.SHOPPING
+      && this.mode !== GameMode.TALKING) {
+      this.univ.addStringToBuf('Set active: Finish what you are doing first.');
+      return;
+    }
+    if (isCombat(this.mode)) {
+      if (pc.ap > 0) {
+        this.univ.curPc = which;
+        this.center = { ...pc.combatPos };
+      } else this.univ.addStringToBuf('Set active: PC has no APs.');
+      return;
+    }
+    if (pc.mainStatus !== MainStatus.ALIVE) {
+      this.univ.addStringToBuf('Set active: PC must be here & active.');
+      return;
+    }
+    this.univ.curPc = which;
+    this.univ.addStringToBuf(
+      `${this.mode === GameMode.SHOPPING ? 'Now shopping' : 'Now active'}: ${pc.name}`);
+  }
+
+  /**
+   * `current_switch` — who the player picked first for a trade-places. 6 is the
+   * C++'s "nobody yet", and `increase_age` resets it every turn.
+   */
+  currentSwitch = NO_ONE;
+
+  /**
+   * switch_pc (boe.actions.cpp:3619) — trade two PCs' places in the marching
+   * order. The first click names one, the second names the other.
+   */
+  tradePlaces(which: number): void {
+    if (!this.primeTime) {
+      this.univ.addStringToBuf('Trade places: Finish what you are doing first.');
+      return;
+    }
+    if (isCombat(this.mode)) {
+      this.univ.addStringToBuf("Trade places: Can't do this in combat.");
+      return;
+    }
+    if (this.currentSwitch < NO_ONE) {
+      if (this.currentSwitch !== which) {
+        this.univ.addStringToBuf('Switch: OK.');
+        this.univ.party.swapPcs(which, this.currentSwitch);
+        if (this.univ.curPc === this.currentSwitch) this.univ.curPc = which;
+        else if (this.univ.curPc === which) this.univ.curPc = this.currentSwitch;
+      } else this.univ.addStringToBuf('Switch: Not with self.');
+      this.currentSwitch = NO_ONE;
+      return;
+    }
+    this.univ.addStringToBuf('Switch: Switch with who?');
+    this.currentSwitch = which;
+  }
+
+  /** handle_print_pc_hp / handle_print_pc_sp — the two read-outs. */
+  printPcHp(which: number): void {
+    const pc = this.univ.party.pcs[which];
+    if (!pc) return;
+    this.univ.addStringToBuf(`${pc.name} has ${pc.curHealth} health out of ${pc.maxHealth}.`);
+  }
+
+  printPcSp(which: number): void {
+    const pc = this.univ.party.pcs[which];
+    if (!pc) return;
+    this.univ.addStringToBuf(`${pc.name} has ${pc.curSp} spell points out of ${pc.maxSp}.`);
   }
 
   /**

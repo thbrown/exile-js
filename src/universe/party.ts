@@ -152,6 +152,14 @@ export class Party {
     return this.pcs.reduce((sum, pc) => sum + (pc.isAlive ? pc.level : 0), 0);
   }
 
+  /** cParty::swap_pcs (party.cpp:379) — trade two places in the marching order. */
+  swapPcs(a: number, b: number): void {
+    if (a < 0 || b < 0 || a >= this.pcs.length || b >= this.pcs.length) return;
+    const tmp = this.pcs[a]!;
+    this.pcs[a] = this.pcs[b]!;
+    this.pcs[b] = tmp;
+  }
+
   /** cParty::get_loc (party.cpp) — whichever of the two positions is live. */
   getLoc(): Location {
     return this.townNum === TOWN_NUM_OUTDOORS ? this.outLoc : this.townLoc;

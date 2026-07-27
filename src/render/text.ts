@@ -32,6 +32,16 @@ function applyStyle(ctx: CanvasRenderingContext2D, style: TextStyle): void {
   ctx.textBaseline = 'alphabetic';
 }
 
+/** string_length (render_text.cpp) — how wide `text` is in `style`, in pixels. */
+export function measureString(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  style: TextStyle = {},
+): number {
+  applyStyle(ctx, style);
+  return ctx.measureText(text).width;
+}
+
 /** Draw a single line, left-aligned, baselined near the bottom of `rect`. */
 export function drawString(
   ctx: CanvasRenderingContext2D,
