@@ -13,6 +13,7 @@ import { combatCastSpell } from './game/spellCombat';
 import { takeAp } from './game/combat';
 import { castTownSpell, startTownTargeting } from './game/spellTarget';
 import { CastDialog } from './dialogs/castDialog';
+import { GetItemsDialog } from './dialogs/getItemsDialog';
 import { placeSpellPattern } from './game/spellPatterns';
 import { GameMode, isCombat } from './game/modes';
 import { setBoomSink } from './game/booms';
@@ -330,23 +331,11 @@ async function main(): Promise<void> {
       redraw();
       return;
     }
-    const picked = await dialogs.run({
-      text: 'Take which item?',
-      rows: reachable.slice(0, 9).map((item, i) => ({
-        name: String(i),
-        key: String(i + 1),
-        label: `${item.ident ? item.fullName : item.name}${item.property ? ' (not yours)' : ''}`,
-        itemPic: item.graphicNum,
-      })),
-      escapeButton: 'done',
-      buttons: [{ name: 'done', label: 'Done' }],
-    });
-    const index = Number(picked);
-    const item = reachable[index];
-    if (item) {
-      const who = await selectPc('living', 'Give the item to whom?');
-      if (who >= 0) session.takeItem(item, who);
-    }
+    // show_get_items: one screen that stays up — pick who is carrying with the
+    // PC buttons, take as many things as you like, then Done.
+    await dialogs.runScreen(
+      new GetItemsDialog(ctx, store, session, reachable, 'Getting all adjacent items:'));
+    setStatus();
     redraw();
   };
 

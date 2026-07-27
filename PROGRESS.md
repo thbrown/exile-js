@@ -869,6 +869,19 @@ Smaller things outstanding, all independent of M5:
   - Changing caster re-filters the grid and drops a pick the new caster can't
     cast, as `pick_spell_caster` does.
 
+- **The real pick-up-items dialog (M3, 2026-07-26)**: `dialogs/getItemsDialog.ts`
+  ports `get-items.xml` and `show_get_items` (boe.items.cpp:559). Unlike a plain
+  pick-list it **stays open**: the six PC buttons (each beside that PC's
+  portrait) choose who is carrying, every item click hands it over and drops it
+  out of the list, `a`-`h` take the eight visible rows, the arrows scroll, and
+  Done closes. Rows carry the item's graphic, its name, its weight, and
+  "(not yours)" on anything the party would be stealing.
+  - *Gotcha*: `cButton::btnRects` writes its frames as BoE rectangles, which are
+    **`{top, left, bottom, right}`** — so BTN_UP `{69,0,92,63}` is a 63x23 frame
+    at *y* 69, not x 69. Read the other way the arrows come out blank.
+  - `GameSession.takeItem` returns a message on success *and* on refusal, so
+    this judges success by whether the item actually left `town.items`.
+
 ## Dialog fidelity: the two screens that don't look like the original
 
 Reported from play-testing 2026-07-26. Both are real divergences, and both are
@@ -895,16 +908,18 @@ way to name a target. The target buttons are that way.
 Note the caster column is only interactive out of combat: in combat
 `can_choose_caster` is false and the active PC casts (already correct here).
 
-**Picking up items.** The original is `rsrc/dialogs/get-items.xml` (70 lines):
+**Picking up items — done 2026-07-26**, see `dialogs/getItemsDialog.ts` above.
+The original is `rsrc/dialogs/get-items.xml` (70 lines):
 a framed, scrolling list of what's on the ground — each row an *item graphic*
 plus a name and a detail line — with PC buttons `1`-`6` along the bottom, each
 next to that PC's *portrait*, to say who takes it. Up/down arrows scroll; Done
 closes. The port currently uses a plain keyed-row list with no graphics and no
 scrolling.
 
-What the toolkit needs for both: item and PC pictures inside rows, a scrolling
-row region with up/down buttons, multi-column row layout, and per-row
-sub-labels. That is the "full dialogxml" item M3 has been carrying.
+Both are now done, as hand-laid-out `ModalScreen`s rather than by building a
+general dialogxml engine — the same approach the port already takes for the
+talk, shop and map screens. A general engine for the remaining ~210 dialog
+definitions is still the long-term M3 item.
 
 ## Next steps
 
