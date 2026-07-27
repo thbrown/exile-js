@@ -189,3 +189,14 @@ export const MAIN_STATUS_LABEL: Record<number, string> = {
   [MainStatus.SURFACE]: 'Surface',
   [MainStatus.WON]: 'Won',
 };
+
+/**
+ * `ePartyStatus` (damage.hpp:59) — the effects that sit on the party as a
+ * whole rather than on any one PC. Each counts down in turns.
+ */
+export enum PartyStatus {
+  STEALTH = 0,
+  FLIGHT = 1,
+  DETECT_LIFE = 2,
+  FIREWALK = 3,
+}

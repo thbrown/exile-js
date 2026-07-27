@@ -27,6 +27,13 @@ import { PartyPreset } from '../src/universe/player';
 import { MainStatus, Status } from '../src/universe/skills';
 import { Universe } from '../src/universe/universe';
 
+/**
+ * Slack for comparisons between two performance.now()-derived timestamps. The
+ * animation timeline books slots by adding to a float clock, so a gap that is
+ * exactly N milliseconds in real arithmetic can come back a hair under it.
+ */
+const EPSILON = 0.001;
+
 const opcodes = buildOpcodeTable(
   readFileSync(new URL('../public/data/strings/specials-opcodes.txt', import.meta.url), 'utf8'),
 );
@@ -158,8 +165,13 @@ describe('the animation timeline', () => {
       }
     });
     expect(missiles.length).toBe(3);
-    expect(missiles[1]!.started - missiles[0]!.started).toBeGreaterThanOrEqual(MISSILE_MS);
-    expect(missiles[2]!.started - missiles[1]!.started).toBeGreaterThanOrEqual(MISSILE_MS);
+    // EPSILON, because these are differences of two performance.now()-derived
+    // floats: the spacing is exactly MISSILE_MS in real arithmetic but can come
+    // back as 199.9999999999999 once the timestamps are large enough. A
+    // sub-millisecond slack still catches the bug this pins, which is a spacing
+    // of *zero*.
+    expect(missiles[1]!.started - missiles[0]!.started).toBeGreaterThan(MISSILE_MS - EPSILON);
+    expect(missiles[2]!.started - missiles[1]!.started).toBeGreaterThan(MISSILE_MS - EPSILON);
   });
 
   it('holds a hit back until its missile has arrived', () => {
@@ -167,7 +179,8 @@ describe('the animation timeline', () => {
       runAMissile({ x: 1, y: 1 }, { x: 5, y: 5 }, 3, 0, 14);
       boomSpace({ x: 5, y: 5 }, 3, 7, 0);
     });
-    expect(booms[0]!.starts).toBeGreaterThanOrEqual(missiles[0]!.started + MISSILE_MS);
+    // Same float caveat as above.
+    expect(booms[0]!.starts).toBeGreaterThan(missiles[0]!.started + MISSILE_MS - EPSILON);
   });
 
   it('shows several blows in one turn together, since none books a slot', () => {

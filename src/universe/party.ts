@@ -12,6 +12,7 @@
 
 import { Direction, Location, loc } from '../core/location';
 import { OutdoorCreature } from './outdoorCreature';
+import { PartyStatus } from './skills';
 
 export const SDF_ROWS = 350;
 export const SDF_COLUMNS = 50;
@@ -46,6 +47,16 @@ export class Party {
   totalXpGained = 0;
   /** Accumulated light from spells/items; drives light_radius in dark towns. */
   lightLevel = 0;
+  /**
+   * `cParty::status` — the four effects that sit on the party rather than on
+   * any one PC (ePartyStatus, damage.hpp:59). Each is a countdown in turns.
+   */
+  partyStatus: Record<PartyStatus, number> = {
+    [PartyStatus.STEALTH]: 0,
+    [PartyStatus.FLIGHT]: 0,
+    [PartyStatus.DETECT_LIFE]: 0,
+    [PartyStatus.FIREWALK]: 0,
+  };
   /**
    * The ten wandering encounters roaming the outdoor map (cParty::out_c). They
    * live on the *party*, not on the outdoors, because they follow it across

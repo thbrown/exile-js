@@ -375,6 +375,49 @@ Notes for M2 implementer:
     `combat_immed_*_cast` functions. That is the next piece of work, and it is
     the last thing standing between the port and a playable M5.
 
+- **Spells that do something, out of combat (M5c, 2026-07-26)**:
+  `game/spellTown.ts` ports `do_mage_spell` (boe.party.cpp:616),
+  `do_priest_spell` (:873) and the `cast_spell` entry point (:494), so the
+  town/outdoors half of the spell list works: light, true sight, stealth,
+  flight, magic map, the protections, every summon on both lists, location,
+  manna, the heals and cures, raise dead and resurrect, remove curse, destone,
+  the party-wide heals and hides, shatter, detect life and firewalk.
+  `universe/party.ts` gains `partyStatus` (`ePartyStatus` — stealth, flight,
+  detect life, firewalk), which several of these set and which the automap's
+  DETECT_LIFE dots were waiting on.
+  - *Shape worth knowing*: almost every arm deducts the spell's cost itself
+    rather than the caller doing it once, because several spells decide **not**
+    to charge — a summon that fails, a Flight cast while already flying, an
+    Identify with nothing to identify. `freebie` means the spell came from an
+    item and never costs points.
+  - *Gotcha*: `do_priest_spell` reads the **current** PC's Anama trait when
+    working out the level bonus, not the caster's. Kept as written.
+  - *Gotcha*: three of the summon arms roll a `store` value and throw it away
+    before recomputing it (the C++ has its own "why is this discarded?"
+    comment). The rolls are kept, because they move the RNG and `get_ran` call
+    order is part of the spec.
+  - *Gotcha*: `RAISE_DEAD` rolls `get_ran(1,1,level/2)`, which below level 2 is
+    `get_ran(1,1,0)` — undefined in the C++. Our `getRan` clamps an empty range
+    and returns 1, so a level-1 caster always reduces the body to dust.
+  - **Divergence, deliberate**: the arms that read `store_spell_target` (the
+    protections, the single-target heals and restorations) take *the caster* as
+    the target, because the caster/target dialog doesn't exist yet. That makes
+    `SYMBIOSIS` permanently answer "Can't cast on self." Revisit when the
+    spellcasting dialog lands.
+  - Reporting rather than doing, each marked in place: the arms that call
+    `start_town_targeting` (Unlock, Capture Soul, the barriers, Quickfire,
+    Dispel, Antimagic, Move Mountains, Ritual of Sanctification), Identify and
+    Recharge (they open MODE_ITEM_TARGET), and Word of Recall (needs the
+    town-entry plumbing, TODO(M6)).
+- **Gotcha (2026-07-26): a float-precision flake in `increaseAge.test.ts`.**
+  The animation-timeline assertions compared differences of two
+  `performance.now()`-derived floats against an exact `MISSILE_MS`, and a gap
+  that is exactly 200ms in real arithmetic can read back as 199.9999999999999
+  once the timestamps grow large enough. It passed for months and started
+  failing ~40% of the time purely because new modules made the suite take
+  longer to reach it. Now compared with a 0.001 slack, which still catches the
+  bug those tests pin (a spacing of *zero*).
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
@@ -735,16 +778,22 @@ Smaller things outstanding, all independent of M5:
 2. M5c is under way. **`place_spell_pattern` and the field helpers landed**
    2026-07-26, and **`process_fields` landed** the same day (both above), so
    fields now both land and persist. What's left:
-   a. **The spell effects.** The spell *data* landed 2026-07-26 (`data/spell.ts`,
-      all 147 entries) along with `pc_can_cast_spell` in both forms
-      (`game/spellCast.ts`), so the game knows every spell and who may cast it.
-      What's left is what they *do*: `do_mage_spell` (boe.party.cpp:616),
-      `do_priest_spell` (:873), `do_combat_cast` (boe.combat.cpp:839) and
-      `combat_immed_mage_cast`/`combat_immed_priest_cast` (:4596, :4798), plus
-      the targeting modes they hand off to (`start_spell_targeting`,
-      `start_fancy_spell_targeting`). `hit_space` and `place_spell_pattern` are
-      already ported and are what most of the damage will go through.
-      After that, `monst_cast_mage`/`monst_cast_priest` closes out M5b.
+   a. **The spell effects, in combat.** The data (`data/spell.ts`),
+      eligibility (`game/spellCast.ts`) and the **town/outdoors** effects
+      (`game/spellTown.ts`) all landed 2026-07-26. What's left:
+      - `do_combat_cast` (boe.combat.cpp:839) and
+        `combat_immed_mage_cast`/`combat_immed_priest_cast` (:4596, :4798) —
+        the combat half of the same two lists.
+      - The targeting modes everything above hands off to:
+        `start_town_targeting` + `cast_town_spell` (boe.party.cpp:1293),
+        `start_spell_targeting` and `start_fancy_spell_targeting`
+        (boe.combat.cpp:4910, :4961). This is the single biggest unblocker
+        left — a dozen already-written spell arms are waiting on it.
+      - The caster/target dialog, which is why the town spells currently treat
+        the caster as their own target (see the divergence noted above).
+      - Then `monst_cast_mage`/`monst_cast_priest` closes out M5b.
+      `hit_space` and `place_spell_pattern` are already ported and are what
+      most of the damage will go through.
 3. (The MAP overlay and `place_treasure` both landed 2026-07-26.)
 4. M2's last leftover is the replay driver.
 5. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in
