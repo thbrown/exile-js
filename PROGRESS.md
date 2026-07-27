@@ -343,6 +343,38 @@ Notes for M2 implementer:
     blocking terrain, rolls against antimagic, and clears other fields first).
     Quickfire currently goes down through plain `setField`.
 
+- **The spell list and who may cast it (M5c, 2026-07-26)**: `data/spell.ts`
+  ports `eSpell` and the whole `cSpell` dictionary — all 147 entries from
+  spell.cpp, with `refer`, cost, range, level, selector, skill, the
+  when-castable bit field, `peaceful` and `target_lock`. The numbers are
+  verbatim because a PC's known spells are stored as flags indexed by them:
+  mage 0..61 with scenario-granted specials at 62..78, priest the same from
+  100. **The table was transcribed by script from spell.cpp rather than by
+  hand** — 147 builder chains is too many to retype reliably — and the
+  generator checked that every `eSpell` member got exactly one row.
+  `game/spellCast.ts` ports both `pc_can_cast_spell` overloads: the per-spell
+  one (skill, level, points, known-flags, pacifism, dumbfounding, sleep and
+  paralysis, and where the spell may be cast) and the per-skill one that the
+  caster buttons use, returning `eCastStatus` so the UI can say *why* not.
+  - *Gotcha*: `needsSelect()` in the C++ builder quietly sets `peaceful` as
+    well as the selector. Every entry that calls it carries both here.
+    `peaceful` means "a pacifist may cast this", **not** "only outside combat".
+  - *Gotcha*: the dumbfounding test is `DUMB >= 8 - level`, so a dumbfounded PC
+    is silenced at DUMB **7**, one step before the status maxes out — even a
+    level-1 spell needs DUMB < 7.
+  - *Gotcha*: `pc_can_cast_spell(pc, type)` **consumes RNG**, because
+    `total_encumbrance` rolls per item. Asking "can they cast?" is not a free
+    question, and the call order is part of the spec.
+  - *Gotcha*: that same function checks only the *first* known mage spell
+    before giving up (`break`), but tries every known priest spell. The
+    asymmetry looks like a bug and is kept.
+  - `isMage`/`isPriest` deliberately answer no for the special spells (62+,
+    162+): those belong to scenario scripting and monsters, not the spell list.
+  - Not yet ported: the effects themselves — `do_mage_spell` (boe.party.cpp:616),
+    `do_priest_spell` (:873), `do_combat_cast` (boe.combat.cpp:839) and the two
+    `combat_immed_*_cast` functions. That is the next piece of work, and it is
+    the last thing standing between the port and a playable M5.
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
@@ -703,11 +735,16 @@ Smaller things outstanding, all independent of M5:
 2. M5c is under way. **`place_spell_pattern` and the field helpers landed**
    2026-07-26, and **`process_fields` landed** the same day (both above), so
    fields now both land and persist. What's left:
-   a. **The spell list itself** (`cSpell`, the mage and priest tables) and
-      `cast_spell` — after which monster spellcasting closes out M5b too. This
-      is now the only thing standing between the port and a playable M5.
-      `hit_space` is already ported (`processFields.ts`) and is what
-      `cast_spell`'s damage will go through.
+   a. **The spell effects.** The spell *data* landed 2026-07-26 (`data/spell.ts`,
+      all 147 entries) along with `pc_can_cast_spell` in both forms
+      (`game/spellCast.ts`), so the game knows every spell and who may cast it.
+      What's left is what they *do*: `do_mage_spell` (boe.party.cpp:616),
+      `do_priest_spell` (:873), `do_combat_cast` (boe.combat.cpp:839) and
+      `combat_immed_mage_cast`/`combat_immed_priest_cast` (:4596, :4798), plus
+      the targeting modes they hand off to (`start_spell_targeting`,
+      `start_fancy_spell_targeting`). `hit_space` and `place_spell_pattern` are
+      already ported and are what most of the damage will go through.
+      After that, `monst_cast_mage`/`monst_cast_priest` closes out M5b.
 3. (The MAP overlay and `place_treasure` both landed 2026-07-26.)
 4. M2's last leftover is the replay driver.
 5. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in
