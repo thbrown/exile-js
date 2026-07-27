@@ -33,6 +33,7 @@ import { hasAbilEquip } from '../universe/inventory';
 import { focusOn } from './anim';
 import { doPoison, handleAcid, handleDisease } from './increaseAge';
 import { processFields } from './processFields';
+import { specialIncreaseAge } from './specialIncreaseAge';
 import { monstCastMage, monstCastPriest } from './monsterSpells';
 import { placeSpellPattern } from './spellPatterns';
 import type { GameSession } from './session';
@@ -845,6 +846,9 @@ export function combatRunMonst(session: GameSession): void {
       pc.status[which] = moveToZero(pc.status[which] ?? 0);
     }
   }
+  // combat_run_monst's own call (boe.combat.cpp:2018): the timers get their
+  // round in a fight too, so a town timer keeps counting while you fight in it.
+  specialIncreaseAge(session);
   // Poison, disease and acid bite far more often in combat than they do on the
   // road: every other round rather than every fiftieth turn.
   if (univ.party.age % 2 === 0) doPoison(session);

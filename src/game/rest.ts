@@ -8,16 +8,21 @@ import { ItemAbil } from '../data/item';
 import { hasAbilEquip } from '../universe/inventory';
 import { MainStatus, Status, Trait } from '../universe/skills';
 import { Universe } from '../universe/universe';
+import type { GameSession } from './session';
+import { specialIncreaseAge } from './specialIncreaseAge';
 
 /**
  * do_rest — advance the clock by `length` ticks and restore the party.
  *
+ * The `session` is only needed for the timers at the end; without one they are
+ * skipped, which is what the older callers did.
+ *
  * TODO(M5): handle_disease runs three times first, and apply_status feeds the
  * OCCASIONAL_STATUS item effects.
- * TODO(M6): special_increase_age ticks the scenario's timers.
  */
 export function doRest(
   univ: Universe, length: number, hpRestore: number, spRestore: number, isOutdoors = false,
+  session?: GameSession,
 ): void {
   const ageBefore = univ.party.age;
   univ.party.age += length;
@@ -56,6 +61,11 @@ export function doRest(
     if (pc.curSp > pc.maxSp) pc.curSp = pc.maxSp;
     if (pc.curHealth > pc.maxHealth) pc.curHealth = pc.maxHealth;
   }
+
+  // do_rest's tail (boe.actions.cpp:3353) passes the *whole* length and asks
+  // for the chains to be queued, so a week's worth of timers fire once the
+  // party is awake rather than from inside the rest.
+  if (session) specialIncreaseAge(session, length, true);
 }
 
 /**

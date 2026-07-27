@@ -212,6 +212,46 @@ export class SpecialsEngine {
     return { a: ctx.retA, b: ctx.retB, redraw: ctx.redraw };
   }
 
+  /**
+   * queue_special (boe.specials.cpp:1990) — hand a chain to the queue rather
+   * than running it now, remembering the clock reading it was triggered at.
+   * The timers use this so that a rest lasting a week doesn't run seven days of
+   * chains from inside the rest.
+   *
+   * LEAVE_TOWN is forced through immediately, exactly as the C++ does, with its
+   * own FIXME explaining why: queued, it would run once the party is already
+   * outdoors with `town_num` 200 and the town gone.
+   */
+  queueSpecial(mode: SpecCtx, type: SpecCtxType, spec: number, specLoc: Location): void {
+    if (spec < 0) return;
+    if (mode === SpecCtx.LEAVE_TOWN) {
+      void this.run(mode, type, spec, specLoc);
+      return;
+    }
+    this.queue.push({
+      spec, mode, type, where: specLoc, triggerTime: this.univ.party.age,
+    });
+  }
+
+  /**
+   * The queue check at the tail of handle_action (boe.actions.cpp:1910). One
+   * pending chain, not a loop — `run` pulls the rest from the queue itself.
+   */
+  async drainQueue(): Promise<void> {
+    if (this.inProgress) return;
+    const pending = this.queue.shift();
+    if (!pending) return;
+    const storeTime = this.univ.party.age;
+    this.univ.party.age = pending.triggerTime;
+    await this.run(pending.mode, pending.type, pending.spec, pending.where);
+    this.univ.party.age = Math.max(this.univ.party.age, storeTime);
+  }
+
+  /** Whether anything is waiting in the queue (the tests and the tick loop ask). */
+  get queued(): number {
+    return this.queue.length;
+  }
+
   /** coord_to_ter — the terrain type at a location, wherever the party is. */
   terrainAt(where: Location): number {
     const town = this.univ.town;

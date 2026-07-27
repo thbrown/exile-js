@@ -14,6 +14,7 @@ import { NUM_INVEN_SLOTS } from '../../universe/player';
 import { MainStatus, Skill, Status } from '../../universe/skills';
 import { takeItem } from '../../universe/inventory';
 import { Universe } from '../../universe/universe';
+import { QuestStatus } from '../../data/quest';
 import { SpecCtx, SpecCtxType, SpecialCtx } from './context';
 import { handleMessage, setSdf } from './vm';
 import { reportUnsupported } from './general';
@@ -409,10 +410,21 @@ export async function ifThenSpec(univ: Universe, ctx: SpecialCtx): Promise<void>
       break;
     }
 
-    case SpecType.IF_QUEST:
-      // TODO(M6): quests need the party's active_quests table.
-      reportUnsupported(univ, spec.type);
+    case SpecType.IF_QUEST: {
+      if (spec.ex1a < 0 || spec.ex1a >= univ.scenario.quests.length) {
+        univ.addStringToBuf('The scenario tried to update a non-existent quest.');
+        break;
+      }
+      if (spec.ex1b < 0 || spec.ex1b > 3) {
+        univ.addStringToBuf('Invalid quest status (range 0 .. 3).');
+        break;
+      }
+      // A quest the party has never heard of reads as AVAILABLE, which is what
+      // the C++'s std::map::operator[] default gives it.
+      const status = party.activeQuests.get(spec.ex1a)?.status ?? QuestStatus.AVAILABLE;
+      if (status === (spec.ex1b as QuestStatus)) ctx.nextSpec = spec.ex1c;
       break;
+    }
 
     default:
       reportUnsupported(univ, spec.type);

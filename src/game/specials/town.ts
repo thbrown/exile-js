@@ -14,7 +14,7 @@ import { TerSpec } from '../../data/terrain';
 import { CreatureStatus } from '../../universe/creature';
 import { Status } from '../../universe/skills';
 import { Universe } from '../../universe/universe';
-import { SpecCtx, SpecialCtx } from './context';
+import { SpecCtx, SpecCtxType, SpecialCtx } from './context';
 import { alterSpace, reportUnsupported } from './general';
 import { setTownAttitude } from '../townAttitude';
 import { handleMessage } from './vm';
@@ -256,8 +256,10 @@ export async function townSpec(univ: Universe, ctx: SpecialCtx): Promise<void> {
     }
 
     case SpecType.TOWN_TIMER_START:
-      // TODO(M6): town timers need the tick loop.
-      reportUnsupported(univ, spec.type);
+      // Note there's no `checkMess` here, unlike its scenario-level twin — a
+      // TOWN_TIMER_START node prints nothing. That asymmetry is the C++'s
+      // (boe.specials.cpp:4170 against :2266).
+      univ.party.startTimer(spec.ex1a, spec.ex1b, SpecCtxType.TOWN);
       break;
 
     default:

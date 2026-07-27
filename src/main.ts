@@ -232,7 +232,7 @@ async function main(): Promise<void> {
     startTalk: (monsterIndex, personality, monsterType, pic) =>
       session.startTalkMode(monsterIndex, personality, monsterType, pic),
     sound: (which) => sound.play(which),
-    rest: (length, hp, sp) => doRest(univ, length, hp, sp, session.isOutdoors),
+    rest: (length, hp, sp) => doRest(univ, length, hp, sp, session.isOutdoors, session),
     moveParty: (where) => {
       if (session.inTown) univ.party.townLoc = { ...where };
       else univ.party.outLoc = { ...where };

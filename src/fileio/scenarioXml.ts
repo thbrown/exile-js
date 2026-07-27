@@ -1,11 +1,16 @@
 /**
  * scenario.xml reader — partial port of readScenarioFromXml
  * (fileio_scen.cpp:781). Parses the header text, the <game> geometry block,
- * and the shop list. Deferred sections (special items, quests, timers,
- * strings, journals) are skipped by name and picked up in later milestones.
+ * the shop list, the special items, the quests and the scenario timers.
+ * Deferred sections (journals, town flags) are skipped by name and picked up
+ * in later milestones.
  */
 
 import { Scenario } from '../data/scenario';
+import {
+  Quest, SpecItem, makeQuest, makeSpecItem,
+} from '../data/quest';
+import { Timer } from '../data/town';
 import {
   Shop, ShopItemType, ShopPrompt, ShopType, SHOP_PROMPT_TAGS, SHOP_TYPE_TAGS, shopBaseItem,
 } from '../data/shop';
@@ -17,7 +22,7 @@ const DEFERRED_TOP = new Set([
   'editor',
 ]);
 const DEFERRED_GAME = new Set([
-  'special-item', 'quest', 'timer', 'journal', 'town-flag',
+  'journal', 'town-flag',
 ]);
 
 /** The entry tags that carry a single number and map straight to a type. */
@@ -123,12 +128,79 @@ export interface ScenarioHeader {
   outdoorStart: { x: number; y: number };
   sectorStart: { x: number; y: number };
   shops: Shop[];
+  /** The scenario's quest (special) items — at most 50. */
+  specialItems: SpecItem[];
+  quests: Quest[];
+  /** scenario_timers — at most 20; fire every `time` days. */
+  scenarioTimers: Timer[];
   /** The special node run once when a new game starts (scenario.init_spec). */
   initSpec: number;
   /** spec_strs — the scenario-level message strings specials print. */
   specStrs: string[];
   /** store_item_rects — where each town's shops keep sold-back goods. */
   storeItemRects: Map<number, { top: number; left: number; bottom: number; right: number }>;
+}
+
+/** readSpecItemFromXml (fileio_scen.cpp:529). */
+export function readSpecItemFromXml(data: Element, fname = 'scenario.xml'): SpecItem {
+  const item = makeSpecItem();
+  const special = attr(data, 'special');
+  if (special !== undefined) item.special = parseInt(special, 10);
+  // Two independent bits packed into one number by addition, as the C++ does.
+  if (attr(data, 'start-with') === 'true') item.flags += 10;
+  if (attr(data, 'useable') === 'true') item.flags += 1;
+  const reqs = new Set(['name', 'description']);
+  for (const elem of children(data)) {
+    const type = tag(elem);
+    reqs.delete(type);
+    if (type === 'name') item.name = text(elem);
+    else if (type === 'description') item.descr = text(elem);
+    else throw new Error(`${fname}: bad node <${type}> in <special-item>`);
+  }
+  if (reqs.size > 0) throw new Error(`${fname}: <special-item> missing <${[...reqs][0]}>`);
+  return item;
+}
+
+/** readQuestFromXml (fileio_scen.cpp:566). */
+export function readQuestFromXml(data: Element, fname = 'scenario.xml'): Quest {
+  const quest = makeQuest();
+  if (attr(data, 'start-with') === 'true') quest.autoStart = true;
+  const reqs = new Set(['name', 'description']);
+  let banksFound = 0;
+  for (const elem of children(data)) {
+    const type = tag(elem);
+    reqs.delete(type);
+    if (type === 'deadline') {
+      if (attr(elem, 'relative') === 'true') quest.deadlineIsRelative = true;
+      const waive = attr(elem, 'waive-if');
+      if (waive !== undefined) quest.event = parseInt(waive, 10);
+      quest.deadline = intText(elem);
+    } else if (type === 'reward') {
+      const xp = attr(elem, 'xp');
+      if (xp !== undefined) quest.xp = parseInt(xp, 10);
+      const gold = attr(elem, 'gold');
+      if (gold !== undefined) quest.gold = parseInt(gold, 10);
+    } else if (type === 'bank') {
+      if (banksFound === 0) quest.bank1 = intText(elem);
+      else if (banksFound === 1) quest.bank2 = intText(elem);
+      else throw new Error(`${fname}: too many <bank> in <quest>`);
+      banksFound++;
+    } else if (type === 'name') quest.name = text(elem);
+    else if (type === 'description') quest.descr = text(elem);
+    else throw new Error(`${fname}: bad node <${type}> in <quest>`);
+  }
+  if (reqs.size > 0) throw new Error(`${fname}: <quest> missing <${[...reqs][0]}>`);
+  return quest;
+}
+
+/**
+ * readTimerFromXml (fileio_scen.cpp:738). `freq` is required — the C++ uses
+ * -1000 as its "not seen yet" sentinel and throws when it survives.
+ */
+export function readTimerFromXml(data: Element, fname = 'scenario.xml'): Timer {
+  const freq = attr(data, 'freq');
+  if (freq === undefined) throw new Error(`${fname}: <timer> missing freq`);
+  return { time: parseInt(freq, 10), node: intText(data) };
 }
 
 export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): ScenarioHeader {
@@ -147,6 +219,9 @@ export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): Scen
     outdoorStart: { x: 0, y: 0 },
     sectorStart: { x: 0, y: 0 },
     shops: [],
+    specialItems: [],
+    quests: [],
+    scenarioTimers: [],
     initSpec: -1,
     specStrs: [],
     storeItemRects: new Map(),
@@ -180,6 +255,12 @@ export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): Scen
         else if (gt === 'outdoor-start') hdr.outdoorStart = locFromXml(g);
         else if (gt === 'sector-start') hdr.sectorStart = locFromXml(g);
         else if (gt === 'shop') hdr.shops.push(readShopFromXml(g, fname));
+        else if (gt === 'special-item') hdr.specialItems.push(readSpecItemFromXml(g, fname));
+        else if (gt === 'quest') hdr.quests.push(readQuestFromXml(g, fname));
+        else if (gt === 'timer') {
+          if (hdr.scenarioTimers.length >= 20) throw new Error(`${fname}: too many <timer>`);
+          hdr.scenarioTimers.push(readTimerFromXml(g, fname));
+        }
         else if (gt === 'string') {
           const id = intAttr(g, 'id');
           while (hdr.specStrs.length <= id) hdr.specStrs.push('');

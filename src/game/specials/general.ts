@@ -6,6 +6,8 @@
 import { SpecType } from '../../data/special';
 import { interestingString } from '../../data/item';
 import { BUFFER_STR, Universe } from '../../universe/universe';
+import { QuestStatus } from '../../data/quest';
+import { awardPartyXp } from '../damage';
 import { doRest } from '../rest';
 import { SpecCtx, SpecCtxType, SpecialCtx } from './context';
 import { SpecialsEngine, handleMessage, setSdf } from './vm';
@@ -151,7 +153,8 @@ export async function generalSpec(
 
     case SpecType.REST:
       checkMess = true;
-      doRest(univ, Math.max(spec.ex1a, 0), Math.max(spec.ex1b, 0), Math.max(spec.ex1b, 0));
+      doRest(univ, Math.max(spec.ex1a, 0), Math.max(spec.ex1b, 0), Math.max(spec.ex1b, 0),
+        ctx.session.isOutdoors, ctx.session);
       break;
 
     case SpecType.PLAY_SOUND:
@@ -289,13 +292,63 @@ export async function generalSpec(
       break;
 
     case SpecType.SCEN_TIMER_START:
-      // TODO(M6): scenario timers need cParty::start_timer and the tick loop.
       checkMess = true;
+      univ.party.startTimer(spec.ex1a, spec.ex1b, SpecCtxType.SCEN);
       break;
+
+    case SpecType.UPDATE_QUEST: {
+      checkMess = true;
+      const quest = univ.scenario.quests[spec.ex1a];
+      if (spec.ex1a < 0 || !quest) {
+        univ.addStringToBuf('The scenario tried to update a non-existent quest.');
+        break;
+      }
+      if (spec.ex1b < 0 || spec.ex1b > 3) {
+        univ.addStringToBuf('Invalid quest status (range 0 .. 3).');
+        break;
+      }
+      // The C++ reads active_quests[ex1a] through std::map::operator[], which
+      // creates a default (AVAILABLE, start 0, source -1) record when the party
+      // has never heard of this quest. That default is what the STARTED branch
+      // below tests against, so it has to exist here too.
+      let job = univ.party.activeQuests.get(spec.ex1a);
+      if (!job) {
+        job = { status: QuestStatus.AVAILABLE, start: 0, source: -1 };
+        univ.party.activeQuests.set(spec.ex1a, job);
+      }
+      if (spec.ex1b === QuestStatus.STARTED && job.status !== QuestStatus.STARTED) {
+        job.start = univ.party.calcDay();
+        job.source = Math.max(-1, spec.ex2a);
+        if (job.source >= 0) univ.party.jobBank(job.source);
+      }
+      job.status = spec.ex1b as QuestStatus;
+      switch (job.status) {
+        case QuestStatus.STARTED:
+          univ.addStringToBuf('You have received a quest.');
+          break;
+        case QuestStatus.AVAILABLE:
+          // Nothing — the C++ wonders in a TODO whether un-starting a quest
+          // should still pay out, and does nothing in the meantime.
+          break;
+        case QuestStatus.FAILED:
+          univ.addStringToBuf('You have failed to complete a quest.');
+          if (job.source >= 0 && job.source < univ.party.jobBanks.length)
+            univ.party.jobBanks[job.source]!.anger += spec.ex2a < 0 ? 1 : spec.ex2a;
+          break;
+        case QuestStatus.COMPLETED:
+          univ.addStringToBuf('You have completed a quest!');
+          if (quest.gold > 0) {
+            univ.addStringToBuf(`  Received ${quest.gold} as a reward.`);
+            univ.party.gold += quest.gold;
+          }
+          if (quest.xp > 0) awardPartyXp(univ, quest.xp);
+          break;
+      }
+      break;
+    }
 
     case SpecType.FORCED_GIVE:
     case SpecType.BUY_ITEMS_OF_TYPE:
-    case SpecType.UPDATE_QUEST:
     case SpecType.SET_CAMP_FLAG:
     case SpecType.CHANGE_HORSE_OWNER:
     case SpecType.CHANGE_BOAT_OWNER:

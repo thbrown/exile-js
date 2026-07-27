@@ -31,7 +31,7 @@
 
 ## Current state
 
-**M2 done bar two items, M3 nearly done, M4 complete, M5a (melee combat) complete (2026-07-25): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; projectiles fly across the screen; and `place_spell_pattern` works, so exploding weapons blast, monsters lay fields and a protective circle raises four rings of wall. What's still missing from combat is monster spellcasting, the spell list itself, and `process_fields` — what fields do over time (M5c).**
+**M2 done bar the replay driver, M3 nearly done, M4 and M5 complete, M6 begun (2026-07-27): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; projectiles fly across the screen; and `place_spell_pattern` works, so exploding weapons blast, monsters lay fields and a protective circle raises four rings of wall. **M5 is closed**: monster spellcasting, the 147-spell list, `process_fields` and the real casting dialog all landed 2026-07-26. **M6 has started**: quests, job banks, special items and the town/scenario/party timers work as of 2026-07-27, so a scripted deadline can expire and a timed node can fire.
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -493,6 +493,51 @@ Notes for M2 implementer:
     (:4910, :4961) and `do_combat_cast` (:839, ~600 lines) — the targeted
     combat spells, which is the bulk of the offensive list.
 
+- **Quests, timers and the party's bookkeeping (M6, 2026-07-27)**: the first
+  chunk of M6, and the one most of the rest was waiting on. `data/quest.ts`
+  ports `cQuest`, `cJob`, `eQuestStatus`, `job_bank_t` and `cSpecItem`;
+  `scenarioXml.ts` stops skipping `<quest>`, `<timer>` and `<special-item>` and
+  ports `readQuestFromXml`/`readTimerFromXml`/`readSpecItemFromXml` (the town
+  parser now shares the timer reader); `Party` gains `activeQuests`,
+  `partyEventTimers` (+ `startTimer`) and `jobBanks`; and
+  `game/specialIncreaseAge.ts` ports `special_increase_age`
+  (boe.specials.cpp:1871) — quest deadlines expiring, job boards getting angry
+  and cooling off, and the town, scenario and party timers firing their nodes.
+  Wired at all three C++ call sites: `increase_age`'s tail (so it runs between
+  the status upkeep and `process_fields`), `combat_run_monst`, and `do_rest`.
+  The VM gained `queue_special` and the queue check from the tail of
+  `handle_action`. The opcodes that were reporting themselves now work:
+  `SCEN_TIMER_START`, `TOWN_TIMER_START`, `UPDATE_QUEST` and `IF_QUEST`; so do
+  the quest-item paths in `give_item`, `ok_to_buy` and the town's preset-item
+  placement, and `cUniverse::generate_job_bank`.
+  - *Gotcha*: a **town or scenario timer zeroes itself the first time it
+    fires**, so a "`freq` = 50" timer is really once-only, not every 50 days.
+    That's the C++ (it assigns `time = 0` inside the loop that just ran the
+    node), and scenarios are written against it.
+  - *Gotcha*: `increase_age` calls `special_increase_age()` with the **default
+    length of 1**, even outdoors where the clock just jumped by 5 or 10. So an
+    outdoor turn ticks a party timer down by one, and the `age_before + 1 .. age`
+    window the periodic timers scan misses most of the multiples it passed.
+  - *Gotcha*: a `TOWN_TIMER_START` node prints no message and a
+    `SCEN_TIMER_START` node does (`check_mess`). Asymmetric, and kept.
+  - *Gotcha*: party timers are **blanked, not removed** when they fire (time 0,
+    node -1), because the slot numbering is part of the save format. The ones
+    whose `nodeType` is TOWN *are* dropped on leaving town, since their node
+    numbers index a list that's going away (boe.town.cpp:590).
+  - *Gotcha*: the C++ reads `active_quests[n]` through `std::map::operator[]`,
+    which **inserts** a default AVAILABLE record for every quest it merely
+    looks at. Here an absent entry reads as AVAILABLE instead; the one place
+    the difference could show is `UPDATE_QUEST`, which needs the record to
+    exist, so that one creates it explicitly.
+  - *Gotcha*: `generate_job_bank` fills at most **four** of a board's six slots
+    and stops scanning the quest list once they're full — a quest late in the
+    list can never be offered while earlier ones keep winning their rolls.
+  - `cSpecItem::flags` is two bits packed by *addition*: +1 useable, +10
+    start-with. The C++ tests them as `flags % 10 == 1` and `flags >= 10`.
+  - Still open in this area: the JOB_BANK talk node and its board dialog (which
+    is what would call `generateJobBank`), `RECEIVE_QUEST`, and the quest pane
+    of the item window.
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
@@ -501,7 +546,9 @@ Notes for M2 implementer:
 - [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅, shops ✅, sell/identify/recharge ✅, training ✅, inns ✅; item Use, enchanting, and full dialogxml still open
 - [x] **M4 — Specials interpreter (breadth-first)**: VM core (pointers, queueing, messages) + all seven opcode groups; triggers wired for movement, look, town entry/exit, use-space, call-special terrain and the two talk nodes. Opcodes needing combat/fields/timers/quests report themselves and wait for M5/M6.
 - [x] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b ✅ (monster turns, melee AI, town *and outdoor* encounters, the `uAbility` port, missiles on both sides, breath, summons, touch abilities, on-hit weapon abilities, **monster spellcasting**); M5c ✅ (spell patterns, `process_fields`, the 147-spell table, `pc_can_cast_spell`, town/combat/targeted/multi-target casting, and the real casting dialog). Remaining odds and ends: `record_monst` (Capture Soul/Simulacrum), `do_mindduel`, and the SPECIAL monster ability.
-- [ ] **M6 — Specials depth + party ops** (valleydy completable)
+- [ ] **M6 — Specials depth + party ops** (valleydy completable): quests,
+      job banks, special items and the three timer kinds ✅ (2026-07-27);
+      alchemy, traps, boats/horses, job-bank dialog and end-scenario open
 - [ ] **M7 — Save/load (.exg) + startup flow**
 - [ ] **M8 — Fidelity hardening** (replay golden masters)
 
@@ -1003,32 +1050,26 @@ definitions is still the long-term M3 item.
 
 ## Next steps
 
-1. M5b is done bar **monster spellcasting** (`monst_cast_mage` /
-   `monst_cast_priest`), which wants a spell list to cast from. Everything else
-   landed 2026-07-26: missiles both ways, breath, summons, the touch abilities,
-   the on-hit weapon abilities, outdoor encounters, the projectile animation
-   and the rest of `monst_fire_missile`.
-2. M5c is under way. **`place_spell_pattern` and the field helpers landed**
-   2026-07-26, and **`process_fields` landed** the same day (both above), so
-   fields now both land and persist. What's left:
-   a. **The spell effects, in combat.** The data (`data/spell.ts`),
-      eligibility (`game/spellCast.ts`) and the **town/outdoors** effects
-      (`game/spellTown.ts`) all landed 2026-07-26. What's left:
-      - `do_combat_cast` (boe.combat.cpp:839) and
-        `combat_immed_mage_cast`/`combat_immed_priest_cast` (:4596, :4798) —
-        the combat half of the same two lists.
-      - The *combat* targeting modes: `start_spell_targeting` and
-        `start_fancy_spell_targeting` (boe.combat.cpp:4910, :4961). Town
-        targeting landed 2026-07-26 (`game/spellTarget.ts`) and is the model to
-        follow.
-      - The caster/target dialog, which is why the town spells currently treat
-        the caster as their own target (see the divergence noted above). The
-        `m`/`p` picker in `main.ts` already chooses the *caster*; what's
-        missing is choosing a *target PC* for the heals and protections.
-      - Then `monst_cast_mage`/`monst_cast_priest` closes out M5b.
-      `hit_space` and `place_spell_pattern` are already ported and are what
-      most of the damage will go through.
-3. (The MAP overlay and `place_treasure` both landed 2026-07-26.)
-4. M2's last leftover is the replay driver.
-5. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in
+M5 is closed and the first slice of **M6** landed 2026-07-27 (quests, job
+banks, special items, the three timer kinds and `special_increase_age` — see
+the entry above). What M6 still owes, roughly in the order the valleydy
+playthrough will hit it:
+
+1. **Party ops**: boats and horses (`in_boat`/`in_horse`, the mount/dismount in
+   `use_space`, `CHANGE_BOAT_OWNER`/`CHANGE_HORSE_OWNER`), and `force_town_enter`
+   + `position_party`.
+2. **The job-bank board**: the JOB_BANK talk node and its dialog, which is the
+   only caller of `generateJobBank`; `RECEIVE_QUEST` alongside it. The data
+   behind both is ported.
+3. **Alchemy** (`A`), which needs the recipe table and its two ingredients, and
+   **item Use** — M3's last real leftover.
+4. **`increase_age`'s remaining upkeep**: hunger and the autosave.
+5. **The dialogxml toolkit**, still M3's long-term item: `give_pc_info`'s
+   character sheet, `story_dialog`'s pagination, `display_monst`, and the ~210
+   remaining definitions.
+6. Odds and ends left over from M5: `record_monst` (Capture Soul / Simulacrum),
+   `do_mindduel`, the SPECIAL monster ability, `petrify_pc`/`petrify_monst`,
+   and `drain_pc`'s level-down path.
+7. M2's last leftover is the replay driver.
+8. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in
    parallel at any time.

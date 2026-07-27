@@ -5,6 +5,7 @@
  * cItem::item_weight (item.cpp:99).
  */
 
+import { makeJob } from '../data/quest';
 import { Item, ItemAbil, ItemType, defaultItem } from '../data/item';
 import { ItemCat, variety } from '../data/itemVariety';
 import { Party } from './party';
@@ -107,7 +108,8 @@ export function giveItem(
       if (!checkOnly) party.specItems.add(item.itemLevel);
       return { status: GiveStatus.OK, slot: -1, message: 'You get a special item.' };
     case ItemType.QUEST:
-      // TODO(M6): quests need the party's active_quests table.
+      // Picking up a quest item *starts* that quest, dated today.
+      if (!checkOnly) party.activeQuests.set(item.itemLevel, makeJob(party.calcDay()));
       return { status: GiveStatus.OK, slot: -1, message: 'You get a quest.' };
     default:
       break;

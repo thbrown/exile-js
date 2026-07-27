@@ -14,6 +14,7 @@ import {
 import { Speech, emptySpeech, emptyTalkNode } from '../data/talking';
 import { Town, defaultPresetItem, defaultTownperson } from '../data/town';
 import { MapData, MapFeature } from './mapParse';
+import { readTimerFromXml } from './scenarioXml';
 import { children, intAttr, intText, locFromXml, rectFromXml, tag, text } from './xml';
 
 const DIRS = 'nwse';
@@ -83,8 +84,7 @@ export function readTownFromXml(root: Element, fname: string): Town {
         break;
       case 'timer': {
         if (town.timers.length >= 8) throw new Error(`${fname}: too many <timer>`);
-        const freq = elem.getAttribute('freq');
-        town.timers.push({ time: freq === null ? -1000 : parseInt(freq, 10), node: intText(elem) });
+        town.timers.push(readTimerFromXml(elem, fname));
         break;
       }
       case 'flags':

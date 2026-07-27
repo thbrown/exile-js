@@ -9,6 +9,7 @@
  * the milestone that will fill it in, so drift stays visible.
  */
 
+import { QuestStatus } from '../data/quest';
 import { Direction, Location, dist, loc, locsEqual, shiftLoc } from '../core/location';
 import { SIGHT_BLOCKED, canSee } from '../core/sight';
 import { Item, ItemAbil, ItemType, defaultItem } from '../data/item';
@@ -60,6 +61,7 @@ import { TalkAction, TalkState } from './talk';
 import { SpecType } from '../data/special';
 import { SpecCtx, SpecCtxType, SpecialHost } from './specials/context';
 import { SpecialsEngine } from './specials/vm';
+import { specialIncreaseAge } from './specialIncreaseAge';
 import { alterSpace } from './specials/general';
 
 /** d_string (boe.combat.cpp:70) — the direction names the transcript prints. */
@@ -291,12 +293,18 @@ export class GameSession {
    * The clock is not touched here: this port folds `increase_age`'s tick into
    * the move functions themselves, which already advanced it.
    *
-   * TODO(M6): increase_age's timers, hunger and autosave.
+   * TODO(M6): increase_age's hunger and autosave.
    */
   private afterPartyTurn(): void {
     // increase_age's upkeep — poison biting, wounds closing, blessings running
     // out. Without this a status effect is only ever a line in the transcript.
     increaseAgeEffects(this);
+    // increase_age's tail (boe.actions.cpp:3578): quest deadlines and the town,
+    // scenario and party timers, between the status upkeep and the fields.
+    // The length is **1** even outdoors, where the clock has just jumped by 5
+    // or 10 — that's what the C++ passes (the default argument), so an outdoor
+    // turn ticks a party timer down by one, not by the time that passed.
+    specialIncreaseAge(this, 1);
     // The fields do their work here, before the monsters move — increase_age
     // runs ahead of do_monsters in town (boe.actions.cpp:1266). Outdoors there
     // are no fields, which is why the C++ gates this on is_town().
@@ -304,6 +312,10 @@ export class GameSession {
     // increase_age (boe.actions.cpp:3586) cancels a half-finished trade-places
     // every turn, so a stray first click doesn't swap someone a minute later.
     this.currentSwitch = NO_ONE;
+    // The queue check at the tail of handle_action (boe.actions.cpp:1910),
+    // which is what actually runs anything the timers queued. Fire-and-forget,
+    // like every other chain launched from a synchronous path.
+    void this.specials?.drainQueue();
     if (this.mode === GameMode.TOWN) {
       doMonsters(this);
       doMonsterTurn(this);
@@ -1380,7 +1392,7 @@ export class GameSession {
       });
     };
     this.talk.onRest = (length, hp, sp, wakeAt) => {
-      doRest(this.univ, length, hp, sp, this.isOutdoors);
+      doRest(this.univ, length, hp, sp, this.isOutdoors, this);
       this.univ.party.townLoc = { ...wakeAt };
       this.center = { ...wakeAt };
       this.updateExplored(this.center);
@@ -2120,8 +2132,7 @@ export class GameSession {
    * The preset-item half of start_town_mode (boe.town.cpp:370). Items the
    * party has already taken stay gone unless the preset says "always there".
    *
-   * TODO(M6): special and quest items also check the party's spec_items and
-   * active_quests, and store_item_rects restores player-dropped stock.
+   * TODO(M6): store_item_rects restores player-dropped stock.
    */
   private placePresetItems(town: CurTown): void {
     town.items = [];
@@ -2131,6 +2142,14 @@ export class GameSession {
       if (preset.code < 0) continue;
       const template = this.univ.scenario.scenItems[preset.code];
       if (!template) continue;
+      // Don't put back a special item the party is already carrying, or a quest
+      // it has already taken — the three tests in the C++'s source order.
+      if (template.variety === ItemType.SPECIAL
+        && this.univ.party.specItems.has(template.itemLevel)) continue;
+      if (template.variety === ItemType.QUEST) {
+        const job = this.univ.party.activeQuests.get(template.itemLevel);
+        if (job && job.status !== QuestStatus.AVAILABLE) continue;
+      }
       if (town.record.itemTaken[i] && !preset.alwaysThere) continue;
 
       const item: Item = { ...template, itemLoc: { ...preset.loc } };
@@ -2212,6 +2231,12 @@ export class GameSession {
     for (let x = 0; x < town.record.maxDim; x++)
       for (let y = 0; y < town.record.maxDim; y++)
         if (town.isExplored(x, y)) town.record.maps[x]![y] = 1;
+
+    // A party timer started by a TOWN_TIMER_START node dies with the town
+    // (boe.town.cpp:590) — its node number indexes a list that's about to go
+    // away. Scenario-level ones survive.
+    party.partyEventTimers = party.partyEventTimers.filter(
+      (t) => t.nodeType !== SpecCtxType.TOWN);
 
     this.mode = GameMode.OUTDOORS;
     this.univ.addStringToBuf(`You leave ${town.record.name}.`);

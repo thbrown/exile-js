@@ -11,8 +11,25 @@
  */
 
 import { Direction, Location, loc } from '../core/location';
+import { Job, JobBank, makeJobBank } from '../data/quest';
+import { SpecCtxType } from '../game/specials/context';
 import { OutdoorCreature } from './outdoorCreature';
 import { PartyStatus } from './skills';
+
+/**
+ * cTimer (special.hpp:125) as the party stores it: a countdown, the node to
+ * run when it expires, and which list that node number indexes.
+ */
+export interface PartyTimer {
+  time: number;
+  nodeType: SpecCtxType;
+  node: number;
+}
+
+/** cTimer::is_valid (special.cpp:30) — a blanked-out slot is not valid. */
+export function timerIsValid(t: PartyTimer): boolean {
+  return t.time >= 0 && t.node >= 0;
+}
 
 export const SDF_ROWS = 350;
 export const SDF_COLUMNS = 50;
@@ -102,6 +119,43 @@ export class Party {
   pointers = new Map<number, [number, number]>();
   /** Days on which each major event happened (cParty::key_times). */
   keyTimes = new Map<number, number>();
+
+  /**
+   * `cParty::active_quests` — quest number → the party's record of it. A quest
+   * the party has never heard of simply isn't in the map; one it has *finished*
+   * stays in, with status COMPLETED, because that is what IF_QUEST asks about.
+   */
+  activeQuests = new Map<number, Job>();
+  /**
+   * `cParty::job_banks` — one per job board, grown on demand. The C++ resizes
+   * the vector wherever a bank number turns out to be past the end (there's a
+   * "safety valve in case it was given by a special node" comment at one such
+   * site), so `jobBank()` below does the same.
+   */
+  jobBanks: JobBank[] = [];
+  /**
+   * `cParty::party_event_timers` — one-shot countdowns a special node started.
+   * Unlike town and scenario timers these are *not* periodic: they fire once
+   * and are then blanked (time 0, node -1) rather than removed, so the slot
+   * numbering in a save file stays put.
+   */
+  partyEventTimers: PartyTimer[] = [];
+
+  /** The job bank numbered `which`, creating it (and any gap) if need be. */
+  jobBank(which: number): JobBank {
+    while (this.jobBanks.length <= which) this.jobBanks.push(makeJobBank());
+    return this.jobBanks[which]!;
+  }
+
+  /**
+   * cParty::start_timer (party.cpp:714). The C++ refuses when the vector is at
+   * `max_size()`, which never happens — its own comment says "Shouldn't be
+   * reached" — so this always succeeds too.
+   */
+  startTimer(time: number, node: number, type: SpecCtxType): boolean {
+    this.partyEventTimers.push({ time, nodeType: type, node });
+    return true;
+  }
 
   pcs: import('./player').Player[] = [];
 

@@ -6,6 +6,7 @@
 
 import { GameRng } from '../core/rng';
 import { Item, ItemType, defaultItem } from '../data/item';
+import { JobBank, QuestStatus, makeJob, specItemStartWith } from '../data/quest';
 import { Scenario } from '../data/scenario';
 import { ShopItemType, ShopType } from '../data/shop';
 import { Town } from '../data/town';
@@ -58,7 +59,45 @@ export class Universe {
     this.party.outLoc = { ...scenario.sectorStart };
     this.out = new CurOut(scenario, this.party);
     this.out.addMaps();
+    // The tail of cUniverse::set_scenario (universe.cpp:1438): the party begins
+    // holding every special item flagged start-with, and every quest flagged
+    // auto-start is already under way — on day 1, not on the current day.
+    for (let i = 0; i < scenario.specialItems.length; i++) {
+      if (specItemStartWith(scenario.specialItems[i]!)) this.party.specItems.add(i);
+    }
+    for (let i = 0; i < scenario.quests.length; i++) {
+      if (scenario.quests[i]!.autoStart) this.party.activeQuests.set(i, makeJob(1));
+    }
     this.refreshStoreItems();
+  }
+
+  /**
+   * cUniverse::generate_job_bank (universe.cpp:1463) — roll a job board's
+   * offers. Called lazily the first time the board is opened, so an angry board
+   * (anger raised by a missed deadline) only bites on its next refresh.
+   *
+   * Two things worth knowing: it fills at most **four** of the six slots, and
+   * it stops scanning the quest list once those four are full — so a quest late
+   * in the list can never be offered while earlier ones keep winning their
+   * rolls. Both are the C++'s.
+   *
+   * Divergence, invisible: the C++ reads `party.active_quests[i]`, which on a
+   * std::map *inserts* a default (AVAILABLE) record for every quest it looks
+   * at. Here an absent entry simply reads as AVAILABLE and nothing is written.
+   */
+  generateJobBank(which: number): JobBank {
+    const bank = this.party.jobBank(which);
+    bank.jobs.fill(-1);
+    bank.inited = true;
+    let slot = 0;
+    for (let i = 0; slot < 4 && i < this.scenario.quests.length; i++) {
+      const quest = this.scenario.quests[i]!;
+      if (quest.bank1 !== which && quest.bank2 !== which) continue;
+      const held = this.party.activeQuests.get(i);
+      if (held !== undefined && held.status !== QuestStatus.AVAILABLE) continue;
+      if (this.rng.getRan(1, 1, 100) <= 50 - bank.anger) bank.jobs[slot++] = i;
+    }
+    return bank;
   }
 
   /**
@@ -88,7 +127,8 @@ export class Universe {
         }
       }
     }
-    // TODO(M6): generate_job_bank for each of the party's job banks.
+    // Job banks are *not* refreshed here: generate_job_bank runs lazily when a
+    // JOB_BANK talk node opens the board (boe.dlgutil.cpp:813).
   }
 
   /**

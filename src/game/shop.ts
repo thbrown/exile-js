@@ -9,6 +9,7 @@
  * through it.
  */
 
+import { QuestStatus } from '../data/quest';
 import { Item, ItemType, interestingString } from '../data/item';
 import {
   SKILL_MAX, Shop, ShopItem, ShopItemType, ShopPrompt, ShopType, shopItemCost,
@@ -359,7 +360,9 @@ export function okToBuy(univ: Universe, cost: number, item: Item): BuyStatus {
   if (item.variety === ItemType.SPECIAL) {
     if (univ.party.specItems.has(item.itemLevel)) return 'have-lots';
   } else if (item.variety === ItemType.QUEST) {
-    // TODO(M6): quests need the party's active_quests table.
+    // A quest already taken (or finished, or failed) can't be bought again.
+    const job = univ.party.activeQuests.get(item.itemLevel);
+    if (job && job.status !== QuestStatus.AVAILABLE) return 'have-lots';
   } else if (item.variety !== ItemType.GOLD && item.variety !== ItemType.FOOD) {
     for (let i = 0; i < NUM_INVEN_SLOTS; i++) {
       const held = pc.items[i]!;

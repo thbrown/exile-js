@@ -7,11 +7,12 @@
 import { Item } from './item';
 import { Monster } from './monster';
 import { Sector } from './outdoors';
+import { Quest, SpecItem } from './quest';
 import { Shop } from './shop';
 import { SpecialNode } from './special';
 import { Speech } from './talking';
 import { Terrain } from './terrain';
-import { Town } from './town';
+import { Timer, Town } from './town';
 
 export interface Scenario {
   title: string;
@@ -37,6 +38,12 @@ export interface Scenario {
   outdoors: Sector[][];
   scenSpecials: Map<number, SpecialNode>;
   shops: Shop[];
+  /** cSpecItem definitions — the quest items, indexed by special-item number. */
+  specialItems: SpecItem[];
+  /** cQuest definitions; the party's own progress lives in Party.activeQuests. */
+  quests: Quest[];
+  /** scenario_timers — a node that fires every `time` days, scenario-wide. */
+  scenarioTimers: Timer[];
   initSpec: number;
   specStrs: string[];
   storeItemRects: Map<number, { top: number; left: number; bottom: number; right: number }>;
