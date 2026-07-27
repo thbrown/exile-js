@@ -54,6 +54,33 @@ export function animPending(): number {
 /** Drop everything queued — used when the view jumps for another reason. */
 export function animClear(): void {
   cursor = 0;
+  for (const id of scheduled) clearTimeout(id);
+  scheduled.clear();
+}
+
+const scheduled = new Set<ReturnType<typeof setTimeout>>();
+
+
+/**
+ * Run `fn` when the timeline reaches `at`. The C++ has no need for this — it
+ * blocks, so anything written after an animation simply happens after it. Here
+ * the game logic runs straight through, so a side effect that should be heard
+ * or seen *when the animation lands* has to be booked for that moment.
+ *
+ * The hit sound is the case that matters: played at once, you hear the arrow
+ * strike while it is still in the air.
+ */
+export function animSchedule(fn: () => void, at: number): void {
+  const delay = at - performance.now();
+  if (delay <= 0) {
+    fn();
+    return;
+  }
+  const id = setTimeout(() => {
+    scheduled.delete(id);
+    fn();
+  }, delay);
+  scheduled.add(id);
 }
 
 /**

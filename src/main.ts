@@ -3,6 +3,7 @@
  * the classic 605x430 screen.
  */
 
+import { animAt, animSchedule } from './game/anim';
 import { useItem } from './game/itemUse';
 import type { SpecialHost } from './game/specials/context';
 import { Location, shiftLoc } from './core/location';
@@ -101,7 +102,17 @@ async function main(): Promise<void> {
   // iLiving's effects call one_sound/play_sound from deep inside the damage
   // pipeline, where there's no session to hand; the C++ uses globals for the
   // same reason (universe/living.ts).
-  setLivingSound((which) => { sound.play(which); });
+  /**
+   * Sounds ride the animation timeline. The C++ animates by blocking, so a
+   * noise raised after `do_missile_anim` is simply heard after the missile has
+   * landed; here the game logic runs straight through, so the *host* holds each
+   * sound until the queue reaches it. `animAt()` is the wall clock whenever
+   * nothing is animating, so out of combat this changes nothing.
+   */
+  const playSound = (which: number): void => {
+    animSchedule(() => sound.play(which), animAt());
+  };
+  setLivingSound(playSound);
   session.startNewGame();
   const screen = new Screen(ctx, store);
 
@@ -1079,7 +1090,7 @@ async function main(): Promise<void> {
     __startTownTargeting: (spell: Spell) => startTownTargeting(session, spell, univ.curPc),
     // Lets the headless verifier watch which sound files actually get played.
     __setLivingSound: (fn: ((which: number) => void) | null) =>
-      setLivingSound(fn ?? ((which: number) => { sound.play(which); })),
+      setLivingSound(fn ?? playSound),
     __dialogs: dialogs,
   });
 }

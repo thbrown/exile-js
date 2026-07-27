@@ -665,6 +665,56 @@ Notes for M2 implementer:
     asserts both that a type-2 projectile is on screen and that the monster
     lost health.
 
+- **Sounds on the timeline, and the sight rules combat actually uses
+  (2026-07-27)**. Two more from play-testing.
+  - **The hit was heard at launch.** The boom *sprite* was already correct — it
+    takes `animAt()`, which is past the missile the caller just booked — but the
+    sound went straight out. Sound scheduling now lives in **one** place: the
+    sink `main.ts` installs holds each sound until `animAt()`. The game logic
+    goes on raising sounds exactly where the C++ does, and the host decides when
+    they are heard. Since `animAt()` is the wall clock whenever nothing is
+    animating, nothing outside combat changes.
+    - This also fixes the ordering *between* effect sounds: the web thrown by a
+      monster now makes its throw noise, then the flight, then each PC's
+      "caught in a web" — because those are raised after `run_a_missile` and so
+      book a later slot.
+    - *Gotcha kept*: `do_missile_anim` plays its sound **before** the per-missile
+      setup discards anything (boe.newgraph.cpp:429), so a missile that draws
+      nothing — a negative pic, or one travelling zero distance — still makes
+      its noise. A test pins this.
+  - **`party_can_see` was one branch where the C++ has three.** This port had a
+    single "on screen, lit, explored, unobstructed" test drawn from the party's
+    square. The real function (boe.locutils.cpp:519) differs in ways that are
+    very visible now the view can scroll:
+    - **In town the on-screen test is waived once `center != party.town_loc`** —
+      scrolling away from the party is itself permission to see further.
+    - **In combat there is no on-screen test at all**, and the line is drawn
+      from *each PC in turn*, returning which one can see it. A scout standing
+      forward reveals ground for the whole party.
+    - The explored check this port had added is not in the C++ at all. It was
+      redundant while the view was pinned to the party (anything within 4 with
+      light and line of sight is already explored) and wrong the moment it
+      wasn't. Gone.
+    - `combat_pt_in_light` (:486) landed with it — the combat twin of
+      `pt_in_light`, measuring the light radius from each PC rather than from
+      the party, and always true in an outdoor arena.
+  - **The draw gate has a separate combat branch** (boe.graphics.cpp:939) that
+    this port had collapsed into the town one. It bypasses the explored map
+    entirely when `which_combat_type == 0`, when the monsters are moving, or
+    when **`overall_mode != MODE_COMBAT` — that is, while you are aiming**. So
+    scrolling with the pointing arrows during targeting shows you what the
+    party can actually see instead of a wall of black. That was the "I should
+    be able to see much further" report, and it was this.
+  - *Verified, not changed*: line of sight itself is correct. `can_see` has no
+    range limit at all — probing from the start town gives an obscurity of 0 and
+    `canSeeLight` of 0 out to fourteen squares along a clear line — and
+    `updateExplored`'s ±4 window is verbatim from boe.locutils.cpp:250. What
+    limits reach is the 9x9 view, the spell's own `range`, and the fog.
+  - `verify-screen.mjs` now scrolls four squares while aiming and asserts more
+    squares are visible than the explored map alone would allow. Note the test
+    is *not* "all 81 draw": squares genuinely behind a wall stay dark, which is
+    the point of the line-of-sight test.
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page

@@ -208,11 +208,21 @@ export class Screen {
         const y = center.y + row - TER_VIEW_CENTER;
         const pos = terrainSpotPos(q, row);
         // Out of bounds, unexplored, or unlit all draw darkness — the
-        // can_draw logic in draw_terrain (boe.graphics.cpp:929).
+        // can_draw logic in draw_terrain (boe.graphics.cpp:929). Town and
+        // combat are separate branches there, and they differ in a way that is
+        // very visible: in combat the explored map is bypassed the moment the
+        // mode is anything other than plain MODE_COMBAT — i.e. while you are
+        // aiming — so scrolling the view with the pointing arrows shows you
+        // whatever the party can actually see, not a wall of black.
         let canDraw = x >= 0 && y >= 0 && x < maxDim && y < maxDimY;
-        if (canDraw && town)
+        if (canDraw && town && isCombat(session.mode)) {
+          const ignoreExplored = session.whichCombatType === 0
+            || session.mode !== GameMode.COMBAT;
+          canDraw = (town.isExplored(x, y) || ignoreExplored)
+            && session.partyCanSee({ x, y }) < 6;
+        } else if (canDraw && town) {
           canDraw = town.isExplored(x, y) && session.ptInLight(univ.party.townLoc, { x, y });
-        else if (canDraw) canDraw = univ.out.explored[x]![y]! !== 0;
+        } else if (canDraw) canDraw = univ.out.explored[x]![y]! !== 0;
         if (!canDraw) {
           this.ctx.fillStyle = Colours.BLACK;
           this.ctx.fillRect(pos.x, pos.y, TILE_W, TILE_H);

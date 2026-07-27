@@ -1168,6 +1168,24 @@ const combatSpell = await page.evaluate(async () => {
   const scrolled = { ...s.center };
   s.center = { ...pc.combatPos };
 
+  // Scrolling while aiming must reveal ground the party can see but hasn't
+  // walked near: in combat the draw gate bypasses the explored map whenever
+  // the mode isn't plain MODE_COMBAT (boe.graphics.cpp:939).
+  const countVisible = () => {
+    let n = 0;
+    let unexplored = 0;
+    for (let q = 0; q < 9; q++)
+      for (let r = 0; r < 9; r++) {
+        const p = { x: s.center.x + q - 4, y: s.center.y + r - 4 };
+        if (s.partyCanSee(p) < 6) n++;
+        if (!s.univ.town.isExplored(p.x, p.y)) unexplored++;
+      }
+    return { visible: n, unexplored };
+  };
+  for (let i = 0; i < 4; i++) s.screenShift(1, 0);
+  const scrolledView = countVisible();
+  s.center = { ...pc.combatPos };
+
   // Now the spell itself, at a monster three squares east.
   sc.missiles.length = 0;
   const at = { x: pc.combatPos.x + 3, y: pc.combatPos.y };
@@ -1179,6 +1197,7 @@ const combatSpell = await page.evaluate(async () => {
   window.__redraw();
   return {
     scroll: { shift, moved, before, scrolled },
+    scrolledView,
     hpBefore,
     hpAfter: monst ? monst.health : null,
     missiles: sc.missiles.map((m) => ({ type: m.type, from: m.from, dest: m.dest })),
@@ -1187,6 +1206,13 @@ const combatSpell = await page.evaluate(async () => {
 console.log('COMBAT SPELL:', JSON.stringify(combatSpell));
 if (!combatSpell.scroll.moved || combatSpell.scroll.scrolled.x !== combatSpell.scroll.before.x - 1)
   throw new Error('clicking the terrain border did not scroll the view');
+// Squares genuinely behind a wall stay dark, so the test isn't "all 81 draw" —
+// it's that more of them are visible than the explored map alone would allow.
+if (combatSpell.scrolledView.unexplored === 0)
+  throw new Error('the scrolled view was entirely explored, so it proves nothing');
+if (combatSpell.scrolledView.visible <= 81 - combatSpell.scrolledView.unexplored)
+  throw new Error(
+    `scrolling while aiming revealed nothing new: ${JSON.stringify(combatSpell.scrolledView)}`);
 if (combatSpell.missiles.length !== 1 || combatSpell.missiles[0].type !== 2)
   throw new Error(`Flame threw no projectile: ${JSON.stringify(combatSpell.missiles)}`);
 if (!(combatSpell.hpAfter < combatSpell.hpBefore))

@@ -59,6 +59,10 @@ export function boomSpace(
   where: Location, type: number, damage: number, soundType: number,
 ): void {
   const file = soundType < 0 ? -soundType : (SOUND_LOOKUP[soundType] ?? 0);
+  // The sound is raised here, as the C++ does, but the *host* decides when it
+  // is actually heard — see the sink in main.ts. The C++ gets the timing for
+  // free by sleeping through the missile's flight, so `boom_space` isn't even
+  // reached until the thing has landed.
   if (file > 0) livingSound(file);
   if (type < 0 || type > 6) return;
   // A hit shows at the front of the queue rather than booking its own slot:

@@ -69,6 +69,10 @@ export function runAMissile(
   yAdj = 0,
   len = 100,
 ): void {
+  // do_missile_anim plays its sound before the flight loop, and before the
+  // per-missile setup has thrown anything away (boe.newgraph.cpp:429) — so a
+  // missile that draws nothing still makes its noise. Raised before the
+  // booking below, so it is heard as the missile *launches*.
   if (soundNum > 0) livingSound(soundNum);
   if (type < 0) return;
   // "Eliminate missiles traveling 0 distance" — do_missile_anim drops any

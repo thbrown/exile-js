@@ -2066,21 +2066,57 @@ export class GameSession {
   };
 
   /**
-   * party_can_see (boe.locutils.cpp:519) — whether a space is visible at all:
-   * on screen, lit, and with an unobstructed line to it. Returns the C++'s
-   * 1-or-6, where 6 means "no".
+   * combat_pt_in_light (boe.locutils.cpp:486) — the combat twin of
+   * `pt_in_light`: a square is lit if *any* living PC is within the light
+   * radius of it, rather than the party as a whole. An outdoor arena
+   * (`whichCombatType === 0`) is always lit.
+   */
+  combatPtInLight(to: Location): boolean {
+    const town = this.univ.town;
+    if (!town) return true;
+    if (town.record.lightingType === Lighting.LIGHT_NORMAL || this.whichCombatType === 0)
+      return true;
+    if (!town.isOnMap(to.x, to.y)) return true;
+    if (town.isLit(to.x, to.y)) return true;
+    const rad = this.lightRadius();
+    return this.univ.party.pcs.some((pc) => pc.isAlive && dist(pc.combatPos, to) <= rad);
+  }
+
+  /**
+   * party_can_see (boe.locutils.cpp:519) — whether a space is visible at all.
+   * Returns the C++'s 1-or-6, where 6 means "no"; in combat it returns *which*
+   * PC can see it, which is why the caller only ever compares against 6.
+   *
+   * Three genuinely different branches, and the differences matter:
+   * - Outdoors and in town the line is drawn from the party's own square.
+   * - **In town the on-screen test is waived once the view has been scrolled
+   *   away from the party** (`center != univ.party.town_loc`), which is what
+   *   lets the pointing arrows show you something the party can see but that
+   *   isn't in the 9x9 window.
+   * - In combat there is no on-screen test at all, and the line is drawn from
+   *   each PC in turn — so a scout standing forward reveals ground for
+   *   everyone.
    */
   partyCanSee(where: Location): number {
-    const from = this.univ.party.getLoc();
-    if (!pointOnScreen(this.center, where)) return 6;
-    if (this.worldIsTown) {
-      // Unexplored squares hide what's on them, which is what makes a dungeon
-      // a dungeon; the original folds this into pt_in_light.
-      const town = this.univ.town;
-      if (town && !town.isExplored(where.x, where.y)) return 6;
-      if (!this.ptInLight(from, where)) return 6;
+    if (this.isOutdoors) {
+      const from = this.univ.party.outLoc;
+      return pointOnScreen(from, where) && this.canSeeLight(from, where) < SIGHT_BLOCKED
+        ? 1 : 6;
     }
-    return this.canSeeLight(from, where) < SIGHT_BLOCKED ? 1 : 6;
+    if (!isCombat(this.mode)) {
+      const from = this.univ.party.townLoc;
+      const onScreen = pointOnScreen(from, where) || !locsEqual(this.center, from);
+      return onScreen && this.ptInLight(from, where)
+        && this.canSeeLight(from, where) < SIGHT_BLOCKED ? 1 : 6;
+    }
+    // Combat: light first, since a dark square is invisible to everyone.
+    if (this.whichCombatType !== 0 && !this.combatPtInLight(where)) return 6;
+    for (let i = 0; i < this.univ.party.pcs.length; i++) {
+      const pc = this.univ.party.pcs[i]!;
+      if (!pc.isAlive) continue;
+      if (canSee(pc.combatPos, where, this.sightObscurity) < SIGHT_BLOCKED) return i;
+    }
+    return 6;
   }
 
   /**
