@@ -1090,6 +1090,64 @@ const pattern = await page.evaluate(() => {
 await shot('02i-spell-pattern');
 console.log('SPELL PATTERN:', JSON.stringify(pattern));
 
+// Spell targeting: the crosshair follows the cursor, and the click lands where
+// it points. Both were broken once — every targeting click was reduced to one
+// step toward the target, so no spell could reach past an adjacent square.
+const targeting = await page.evaluate(async () => {
+  const s = window.__session;
+  if (s.mode === 9) s.endCombat();
+  const targetMod = await import('/src/game/spellTarget.ts');
+  const patMod = await import('/src/data/pattern.ts');
+  const spellMod = await import('/src/data/spell.ts');
+  s.univ.party.townLoc = { x: 20, y: 20 };
+  s.center = { x: 20, y: 20 };
+  s.univ.curPc = 3;
+  // Make the destination the same terrain the party stands on, so Wall of
+  // Force has somewhere legal to land.
+  s.univ.town.record.terrain[23][20] = s.univ.town.record.terrain[20][20];
+  targetMod.startTownTargeting(
+    s, spellMod.Spell.BARRIER_FORCE, 3, false, patMod.SpellPat.RADIUS_2, 1);
+  window.__redraw();
+  return { mode: s.mode, range: s.townTarget?.range };
+});
+// Hover three squares east of centre — cell (7, 4) of the 9x9 view.
+const targetCell = await page.evaluate(() => {
+  const sc = window.__screen;
+  for (let y = 0; y < 430; y++)
+    for (let x = 0; x < 605; x++) {
+      const c = sc.terrainCellAt(x, y);
+      if (c && c.q === 7 && c.r === 4) return { x, y };
+    }
+  return null;
+});
+const targetPt = await page.evaluate(({ x, y }) => {
+  const c = document.querySelector('canvas');
+  const r = c.getBoundingClientRect();
+  return {
+    x: r.left + (x + 0.5) * (r.width / c.width),
+    y: r.top + (y + 0.5) * (r.height / c.height),
+  };
+}, targetCell);
+await page.mouse.move(targetPt.x, targetPt.y);
+await page.waitForTimeout(250);
+const hovering = await page.evaluate(() => window.__screen.hover !== null);
+await shot('02c4-spell-targeting');
+await page.mouse.click(targetPt.x, targetPt.y);
+await page.waitForTimeout(300);
+const landed = await page.evaluate(() => {
+  const t = window.__session.univ.town;
+  // WALL_FORCE is 14; find where the barrier actually went.
+  const at = [];
+  for (let x = 15; x < 30; x++)
+    for (let y = 15; y < 26; y++)
+      if (t.fields[x] && t.fields[x][y] && t.fields[x][y].has(14)) at.push({ x, y });
+  return { mode: window.__session.mode, at };
+});
+console.log('SPELL TARGETING:', JSON.stringify({ ...targeting, hovering, landed }));
+if (!hovering) throw new Error('the targeting crosshair did not follow the cursor');
+if (!landed.at.some((p) => p.x === 23 && p.y === 20))
+  throw new Error(`the spell missed the square clicked: ${JSON.stringify(landed.at)}`);
+
 console.log('PARRY:', JSON.stringify(parryButtons));
 await shot('02c3-encounter');
 

@@ -5,9 +5,10 @@
  * independently as its underlying systems land.
  */
 
-import { Direction } from '../core/location';
+import { Direction, dist } from '../core/location';
 import { ItemAbil, ItemType, canUse } from '../data/item';
 import { variety } from '../data/itemVariety';
+import { EffectPattern, SpellPat, getBuiltinPattern } from '../data/pattern';
 import { groundFromTer, terFromGround } from '../data/scenario';
 import { TerSpec, TrimType, blocksMove } from '../data/terrain';
 import { Lighting } from '../data/town';
@@ -36,6 +37,8 @@ import {
   PlacedButton,
   ROAD_DEST,
   ROAD_SRC,
+  TER_INSET_X,
+  TER_INSET_Y,
   TER_VIEW_CENTER,
   TER_VIEW_TILES,
   TOWN_BUTTONS,
@@ -226,6 +229,133 @@ export class Screen {
     this.drawPartySymbol(session);
     this.drawBooms(session);
     this.drawMissiles(session);
+    // redraw_screen draws these over the finished terrain (boe.graphics.cpp:637
+    // and :1077), which is why they come after everything else.
+    this.drawTargets(session);
+    this.drawTargetingLine(session);
+  }
+
+  /**
+   * Where the pointer is, in canvas coordinates, or null when it's off the
+   * canvas. `mouse_window_coords()` in the C++, which `draw_targeting_line`
+   * re-reads on every frame.
+   */
+  hover: { x: number; y: number } | null = null;
+
+  /**
+   * What the game is currently aiming, if anything: the pattern that will land
+   * and how far it reaches. Missiles and the two combat targeting modes all
+   * draw the same overlay as a town spell does.
+   */
+  private aiming(session: GameSession): { pattern: EffectPattern; range: number } | null {
+    if (session.spellTargeting) {
+      return {
+        pattern: getBuiltinPattern(session.spellTargeting.pattern),
+        range: session.spellTargeting.range,
+      };
+    }
+    if (session.townTarget) {
+      const pattern = getBuiltinPattern(session.townTarget.pattern);
+      // The C++ gates town targeting's overlay on `current_pat[4][4] != 0` —
+      // a pattern with an empty centre gets no crosshair at all.
+      if (pattern[4]?.[4] === 0) return null;
+      return { pattern, range: session.townTarget.range };
+    }
+    // A missile is a single square, at the range load_missile worked out.
+    if (session.missile) {
+      return { pattern: getBuiltinPattern(SpellPat.SINGLE), range: session.missile.range };
+    }
+    return null;
+  }
+
+  /**
+   * draw_targeting_line (boe.graphics.cpp:1708) — the grey line from the
+   * caster to the cursor, and a white frame around every square the spell's
+   * pattern would cover. Drawn only while the cursor is on a square that is
+   * both in sight and in range, so losing the crosshair *is* the "you can't
+   * reach that" feedback.
+   */
+  private drawTargetingLine(session: GameSession): void {
+    const aim = this.hover === null ? null : this.aiming(session);
+    if (!aim || !this.hover) return;
+    // Outdoors the C++ skips it entirely (`if(!is_out()) draw_targeting_line()`).
+    if (!session.univ.town) return;
+
+    const cell = this.terrainCellAt(this.hover.x, this.hover.y);
+    if (!cell) return;
+    const center = session.center;
+    const at = { x: center.x + cell.q - 4, y: center.y + cell.r - 4 };
+
+    const from = isCombat(session.mode) || session.missile !== null
+      ? session.univ.currentPc.combatPos
+      : session.univ.party.townLoc;
+    if (session.canSeeLight(from, at) >= 5) return;
+    if (dist(from, at) > aim.range) return;
+
+    const { ctx } = this;
+    ctx.save();
+    const panel = WIN_RECTS.terView;
+    // Clipped to the terrain view, as the C++ does, so a line to a square near
+    // the edge doesn't run out over the panel frame.
+    ctx.beginPath();
+    ctx.rect(panel.left + TER_INSET_X, panel.top + TER_INSET_Y,
+      TER_VIEW_TILES * TILE_W, TER_VIEW_TILES * TILE_H);
+    ctx.clip();
+
+    // The line runs from the middle of the caster's square to the cursor.
+    const fromSpot = terrainSpotPos(from.x - center.x + 4, from.y - center.y + 4);
+    ctx.strokeStyle = 'rgb(128,128,128)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(fromSpot.x + TILE_W / 2, fromSpot.y + TILE_H / 2);
+    ctx.lineTo(this.hover.x, this.hover.y);
+    ctx.stroke();
+
+    // Then the footprint: every cell of the 9x9 pattern that is set, framed.
+    ctx.strokeStyle = Colours.WHITE;
+    ctx.lineWidth = 1;
+    for (let q = 0; q < TER_VIEW_TILES; q++)
+      for (let r = 0; r < TER_VIEW_TILES; r++) {
+        const spot = { x: center.x + q - 4, y: center.y + r - 4 };
+        const dx = spot.x - at.x;
+        const dy = spot.y - at.y;
+        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) continue;
+        if ((aim.pattern[dx + 4]?.[dy + 4] ?? 0) === 0) continue;
+        const px = terrainSpotPos(q, r);
+        ctx.strokeRect(px.x + 0.5, px.y + 0.5, TILE_W - 1, TILE_H - 1);
+        // A multi-target spell prints how many shots are left in the middle
+        // square, so you can see the count come down as you pick.
+        if (session.mode === GameMode.FANCY_TARGET && dx === 0 && dy === 0) {
+          drawStringCentre(ctx,
+            { top: px.y + TILE_H / 2 - 6, left: px.x, bottom: px.y + TILE_H / 2 + 6,
+              right: px.x + TILE_W },
+            String(session.spellTargeting?.targetsLeft ?? 0),
+            { size: 12, colour: Colours.WHITE });
+        }
+      }
+    ctx.restore();
+  }
+
+  /**
+   * draw_targets (boe.graphics.cpp:1665) — the squares a multi-target spell has
+   * already been pointed at, marked from the invenbtns sheet. Only FANCY_TARGET
+   * collects squares, so only it has anything to draw.
+   */
+  private drawTargets(session: GameSession): void {
+    if (session.mode !== GameMode.FANCY_TARGET) return;
+    const chosen = session.spellTargeting?.targets ?? [];
+    if (chosen.length === 0) return;
+    const sheet = this.store.get('invenbtns');
+    if (!sheet) return;
+    const center = session.center;
+    for (const target of chosen) {
+      const q = target.x - center.x + 4;
+      const r = target.y - center.y + 4;
+      if (q < 0 || r < 0 || q >= TER_VIEW_TILES || r >= TER_VIEW_TILES) continue;
+      const spot = terrainSpotPos(q, r);
+      // src {top:0,left:46,bottom:12,right:58}, inset 8 and 12 into the cell.
+      this.ctx.drawImage(sheet, 46, 0, 12, 12, spot.x + 8, spot.y + 12, 12, 12);
+    }
   }
 
   private drawTerrainSpot(pic: number, px: number, py: number): void {

@@ -51,7 +51,17 @@ export interface TownTarget {
   pattern: SpellPat;
   /** `store_item_spell_level` — the level a spell from an item counts as. */
   itemSpellLevel: number;
+  /**
+   * `current_spell_range` — a flat 8 for every town spell, set by
+   * `do_mage_spell` (boe.party.cpp:631) and `do_priest_spell` (:893) before
+   * they hand over. It isn't the spell's own range and it doesn't gate the
+   * cast; it's what the targeting overlay draws its reach from.
+   */
+  range: number;
 }
+
+/** The range every town spell targets at (boe.party.cpp:631). */
+export const TOWN_SPELL_RANGE = 8;
 
 /**
  * `start_town_targeting` — go into targeting mode with `spell` in the air.
@@ -76,6 +86,7 @@ export function startTownTargeting(
     freebie,
     pattern: pattern === SpellPat.WALL ? SpellPat.SINGLE : pattern,
     itemSpellLevel,
+    range: TOWN_SPELL_RANGE,
   };
 }
 

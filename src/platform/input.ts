@@ -30,6 +30,14 @@ export interface InputHandlers {
   onMove(dir: Direction): void;
   onClick(x: number, y: number): void;
   onKey(key: string, event: KeyboardEvent): void;
+  /**
+   * Where the pointer is, in canvas coordinates, or null once it leaves. The
+   * targeting overlay needs this: `draw_targeting_line` reads
+   * `mouse_window_coords()` every frame, which is how the spell's footprint
+   * follows the cursor before you commit to a square.
+   */
+  onHover?(x: number, y: number): void;
+  onHoverEnd?(): void;
 }
 
 export class InputRouter {
@@ -44,6 +52,8 @@ export class InputRouter {
   attach(): void {
     window.addEventListener('keydown', (ev) => this.onKeyDown(ev));
     this.canvas.addEventListener('mousedown', (ev) => this.onMouseDown(ev));
+    this.canvas.addEventListener('mousemove', (ev) => this.onMouseMove(ev));
+    this.canvas.addEventListener('mouseleave', () => this.handlers.onHoverEnd?.());
   }
 
   private get blocked(): boolean {
@@ -63,10 +73,27 @@ export class InputRouter {
 
   private onMouseDown(ev: MouseEvent): void {
     if (this.blocked) return;
-    // The canvas is drawn at native size and may be CSS-scaled up.
+    const at = this.toCanvas(ev);
+    this.handlers.onClick(at.x, at.y);
+  }
+
+  private onMouseMove(ev: MouseEvent): void {
+    // A dialog hides the terrain view, so stop tracking rather than leaving a
+    // stale crosshair behind it.
+    if (this.blocked) {
+      this.handlers.onHoverEnd?.();
+      return;
+    }
+    const at = this.toCanvas(ev);
+    this.handlers.onHover?.(at.x, at.y);
+  }
+
+  /** The canvas is drawn at native size and may be CSS-scaled up. */
+  private toCanvas(ev: MouseEvent): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect();
-    const scaleX = this.canvas.width / rect.width;
-    const scaleY = this.canvas.height / rect.height;
-    this.handlers.onClick((ev.clientX - rect.left) * scaleX, (ev.clientY - rect.top) * scaleY);
+    return {
+      x: (ev.clientX - rect.left) * (this.canvas.width / rect.width),
+      y: (ev.clientY - rect.top) * (this.canvas.height / rect.height),
+    };
   }
 }

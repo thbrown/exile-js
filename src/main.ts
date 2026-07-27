@@ -583,6 +583,15 @@ async function main(): Promise<void> {
    */
   let acting = false;
 
+  /**
+   * Whether a click on the terrain is a *shot* rather than a step: a loaded
+   * missile or a spell waiting for its square. These are the modes that get
+   * the targeting crosshair, and the modes whose clicks must be taken as given
+   * instead of reduced to one step toward the target.
+   */
+  const isAiming = (): boolean => session.missile !== null
+    || session.spellTargeting !== null || session.townTarget !== null;
+
   /** Act on a target space according to what the player asked for. */
   const actOn = (target: { x: number; y: number }): void => {
     const what = pending;
@@ -789,8 +798,10 @@ async function main(): Promise<void> {
         // Look, Talk and Use all act on the square you clicked — handle_talk
         // (boe.actions.cpp:818) takes the destination as given and only needs
         // line of sight. Moving is the one that steps once toward it. A missile
-        // is aimed at the square clicked, at whatever range it will reach.
-        if (pending === null && session.missile === null) {
+        // or a spell is aimed at the square clicked, at whatever range it will
+        // reach — reducing those to one step toward the target made every spell
+        // in the game hit the square next to you and nothing else.
+        if (pending === null && !isAiming()) {
           const dx = Math.sign(cell.q - 4);
           const dy = Math.sign(cell.r - 4);
           if (dx === 0 && dy === 0) return;
@@ -801,6 +812,25 @@ async function main(): Promise<void> {
         setStatus();
         redraw();
       }
+    },
+    // The targeting overlay follows the cursor, so a move has to repaint — but
+    // only while something is actually being aimed, or every mouse twitch
+    // redraws the whole 605x430 screen for nothing.
+    onHover: (x, y) => {
+      if (!isAiming()) {
+        if (screen.hover !== null) {
+          screen.hover = null;
+          redraw();
+        }
+        return;
+      }
+      screen.hover = { x, y };
+      redraw();
+    },
+    onHoverEnd: () => {
+      if (screen.hover === null) return;
+      screen.hover = null;
+      redraw();
     },
     onKey: (key) => {
       if (dialogs.handleKey(key)) return;

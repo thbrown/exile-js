@@ -583,6 +583,41 @@ Notes for M2 implementer:
     the panel, clicks it for real through the canvas's bounding box, and checks
     the potion healed and lost a dose.
 
+- **Spell targeting: the crosshair, and the bug that made every spell hit the
+  next square (2026-07-27)**. Two defects found by play-testing scrolls:
+  - **The bug.** `main.ts`'s terrain-click branch decided between "act on the
+    square you clicked" and "step once toward it" with
+    `if (pending === null && session.missile === null)`. `pending` is only ever
+    set by Talk/Look/Use/Bash, and **spell targeting sets neither** — so every
+    click in TOWN_TARGET, SPELL_TARGET and FANCY_TARGET was reduced to one step
+    toward the target, and no spell in the game could reach past an adjacent
+    square. The condition now asks `isAiming()`, which covers the missile and
+    both spell-targeting states.
+  - **The missing crosshair.** `draw_targeting_line` (boe.graphics.cpp:1708)
+    and `draw_targets` (:1665) had never been ported, so there was no visible
+    targeting at all. `Screen.hover` now tracks the pointer (the `InputRouter`
+    grew `onHover`/`onHoverEnd` from mousemove/mouseleave, which it had no
+    notion of before) and `Screen.drawTargetingLine` draws the grey line from
+    the caster to the cursor plus a white frame around every square the spell's
+    pattern would cover; `drawTargets` marks the squares a multi-target spell
+    has already collected.
+  - *Worth knowing*: the overlay draws **only when the hovered square is both in
+    line of sight and within range**, so the crosshair vanishing *is* the "you
+    can't reach that" feedback — there is no other message. Outdoors it is
+    skipped entirely (`if(!is_out()) draw_targeting_line()`).
+  - *Gotcha*: town targeting's overlay is gated on `current_pat[4][4] != 0` —
+    a pattern with an empty centre gets no crosshair.
+  - `current_spell_range` is a flat **8** for every town spell, set by
+    `do_mage_spell` (boe.party.cpp:631) and `do_priest_spell` (:893) before they
+    hand over; it is not the spell's own range and it doesn't gate the cast.
+    It lives on `TownTarget.range` now.
+  - The `+19`/`+7` constants in `draw_targeting_line`'s rect maths are just the
+    terrain view's origin (`win_to_rects[WINRECT_TERVIEW]` is `{7,19,358,298}`),
+    which is why this port's panel-relative `terrainSpotPos` matches it.
+  - `verify-screen.mjs` gained a step that hovers three squares east, checks the
+    crosshair appears, clicks, and asserts the barrier landed on **that** square
+    rather than the adjacent one.
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
