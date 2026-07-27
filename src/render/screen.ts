@@ -1261,8 +1261,13 @@ export class Screen {
     // are re-applied after wrapping, which strips them.
     const visible: string[] = [];
     const maxLines = Math.floor(height(area) / TRANSCRIPT_LINE_HEIGHT);
-    for (let i = session.univ.transcript.length - 1; i >= 0 && visible.length < maxLines; i--) {
-      const message = session.univ.transcript[i]!;
+    // Lines ride the animation timeline like the sounds and the hit sprites do:
+    // "Guard takes 3" belongs to the moment the flame lands, not the moment it
+    // was cast. Everything the game has said is in `transcript`; this is the
+    // part whose moment has come.
+    const said = session.univ.visibleTranscript(performance.now());
+    for (let i = said.length - 1; i >= 0 && visible.length < maxLines; i--) {
+      const message = said[i]!;
       const indent = message.slice(0, message.length - message.trimStart().length);
       const lines = wrapLines(this.ctx, message, maxWidth - indent.length * 4, style);
       for (let j = lines.length - 1; j >= 0; j--) visible.unshift(indent + lines[j]!);

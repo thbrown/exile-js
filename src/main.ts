@@ -113,6 +113,9 @@ async function main(): Promise<void> {
     animSchedule(() => sound.play(which), animAt());
   };
   setLivingSound(playSound);
+  // Transcript lines wait for their slot too, for the same reason: the C++
+  // repaints the pane after the animation, not during it.
+  univ.transcriptClock = animAt;
   session.startNewGame();
   const screen = new Screen(ctx, store);
 

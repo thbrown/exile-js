@@ -34,6 +34,7 @@ import { GameMode } from './modes';
 import { getSummonMonster, summonMonster } from './monsterPlace';
 import { Attitude } from '../data/monster';
 import { runAMissile } from './missileAnim';
+import { runBoomAnim, startBoomAnim } from './booms';
 import { hitSpace } from './processFields';
 import { placeSpellPattern } from './spellPatterns';
 import { makeTownHostile } from './townAttitude';
@@ -324,7 +325,12 @@ export function doCombatCast(session: GameSession, target: Location): void {
    */
   const missiles: QueuedMissile[] = [];
   const shared = { sound: 0 };
+  // Open the volley: from here until `runBoomAnim` the hit sprites are
+  // collected rather than shown, so they can't beat the projectile onto the
+  // screen. `start_missile_anim` does this in the C++.
+  startBoomAnim();
 
+  try {
   for (let i = 0; i < targets.length; i++) {
     const at = targets[i]!;
     if (!costTaken && !freebie) {
@@ -372,9 +378,17 @@ export function doCombatCast(session: GameSession, target: Location): void {
   // queued flies now, faster when there's a volley of them than for one shot.
   flyMissiles(missiles, caster.combatPos, shared.sound, targets.length > 1 ? 35 : 60);
 
-  // The held-back damage lands now, all of it at once.
+  // The held-back damage lands now, all of it at once. Still inside the volley,
+  // so its explosions join the rest — as in the C++, where these `hit_space`
+  // calls sit between do_missile_anim and do_explosion_anim (:1412 and :1435).
   for (const d of deferred) {
     hitSpace(session, d.at, d.dam, d.type, 1, 0, who);
+  }
+  } finally {
+    // do_explosion_anim: play the collected hits, after the missiles. In a
+    // `finally` because a handler that throws must not leave the queue open —
+    // every later boom in the session would be swallowed.
+    runBoomAnim();
   }
 }
 

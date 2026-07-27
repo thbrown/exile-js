@@ -1204,6 +1204,39 @@ const combatSpell = await page.evaluate(async () => {
   };
 });
 console.log('COMBAT SPELL:', JSON.stringify(combatSpell));
+
+// The explosion must not beat the projectile onto the screen. Fireball is the
+// case that broke: it damages inside its own arm, so its boom used to be
+// created before the shared volley booked the missile's slot.
+const boomOrder = await page.evaluate(async () => {
+  const s = window.__session;
+  const sc = window.__screen;
+  const tgt = await import('/src/game/spellCombatTarget.ts');
+  const sp = await import('/src/data/spell.ts');
+  if (s.mode !== 9) s.startCombat(s.univ.party.direction);
+  const pc = s.univ.party.pcs[3];
+  s.univ.curPc = 3;
+  pc.curSp = 50;
+  pc.ap = 10;
+  s.center = { ...pc.combatPos };
+  sc.missiles.length = 0;
+  sc.booms.length = 0;
+  const at = { x: pc.combatPos.x + 3, y: pc.combatPos.y };
+  const monst = s.univ.town.monsters.find((m) => m.isAlive);
+  if (monst) { monst.curLoc = { ...at }; monst.attitude = 2; monst.health = 500; }
+  tgt.startSpellTargeting(s, sp.Spell.FIREBALL, false, 1);
+  tgt.doCombatCast(s, at);
+  return {
+    missiles: sc.missiles.map((m) => m.started),
+    booms: sc.booms.map((b) => b.starts),
+  };
+});
+console.log('BOOM ORDER:', JSON.stringify(boomOrder));
+if (boomOrder.missiles.length === 0 || boomOrder.booms.length === 0)
+  throw new Error(`Fireball produced ${JSON.stringify(boomOrder)}`);
+if (!boomOrder.booms.every((b) => b >= Math.max(...boomOrder.missiles) + 200))
+  throw new Error(`the explosion beat the projectile: ${JSON.stringify(boomOrder)}`);
+await page.evaluate(() => { if (window.__session.mode === 9) window.__session.endCombat(); });
 if (!combatSpell.scroll.moved || combatSpell.scroll.scrolled.x !== combatSpell.scroll.before.x - 1)
   throw new Error('clicking the terrain border did not scroll the view');
 // Squares genuinely behind a wall stay dark, so the test isn't "all 81 draw" —
@@ -1218,7 +1251,6 @@ if (combatSpell.missiles.length !== 1 || combatSpell.missiles[0].type !== 2)
 if (!(combatSpell.hpAfter < combatSpell.hpBefore))
   throw new Error('Flame did no damage');
 await shot('02c5-combat-spell');
-await page.evaluate(() => { if (window.__session.mode === 9) window.__session.endCombat(); });
 
 if (!hovering) throw new Error('the targeting crosshair did not follow the cursor');
 if (!landed.at.some((p) => p.x === 23 && p.y === 20))

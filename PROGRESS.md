@@ -715,6 +715,44 @@ Notes for M2 implementer:
     is *not* "all 81 draw": squares genuinely behind a wall stay dark, which is
     the point of the line-of-sight test.
 
+- **`boom_anim_active`: why the explosion beat the projectile (2026-07-27)**.
+  Reported from play-testing, and the root cause turned out to be a piece of
+  the C++'s drawing architecture this port had never had.
+  - **What was wrong.** Only the arms that call `do_missile_anim` *inside*
+    themselves (Flame, Spark, Wound, Kill, the summons) had the right order,
+    because they book the missile's slot before doing their damage. Everything
+    on the **shared volley** — Fireball, Firestorm, Icy Rain, Divine Thud, the
+    arrow spells — and the **whole single-target family** damages first and
+    queues its missile afterwards, so the boom took `animAt()` before the
+    missile had booked anything and appeared at cast time. Measured: with
+    Fireball the explosion was on screen 27ms in, with the missile still flying.
+  - **How the C++ avoids it.** `start_missile_anim` sets `boom_anim_active`
+    (boe.newgraph.cpp:258). While it's set, **`boom_space` draws nothing**
+    (boe.graphics.cpp:1506) and `damage_monst`/`damage_pc` take a completely
+    different path: they add to the victim's `marked_damage`, queue an
+    `add_explosion`, and **return early without applying damage or printing
+    anything** (boe.specials.cpp:1503, boe.party.cpp:2634). Then
+    `do_missile_anim` flies the missiles, `do_explosion_anim` plays the
+    collected explosions, and `handle_marked_damage` applies the damage for
+    real. Three phases, and the port only had one.
+  - **What landed**: the drawing half. `booms.ts` gains `startBoomAnim` /
+    `runBoomAnim` and the queue, with `add_explosion`'s dedupe (one explosion
+    per square, keeping the larger number, thirty max). `doCombatCast` opens the
+    volley, and closes it in a `finally` — a handler that throws must not leave
+    the queue open, or every later boom in the session is swallowed.
+  - **Still open, and it is the visible remainder**: `handle_marked_damage`,
+    already carrying a `TODO(M5b)`. Because damage is still *applied* during the
+    volley, the transcript line and the HP change still lead the projectile even
+    though the sprite no longer does. Porting `marked_damage` means changing the
+    damage pipeline itself, not just the drawing, which is why it is called out
+    rather than bundled in here.
+  - Transcript lines now ride the timeline as sounds and sprites do
+    (`Universe.transcriptAt` + `visibleTranscript`, stamped by a
+    `transcriptClock` the host sets to `animAt`). That fixes the text for the
+    arms that book before they damage; the rest waits on `marked_damage`.
+  - `verify-screen.mjs` casts Fireball and asserts every boom starts at or after
+    the missile's launch plus its flight time.
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page

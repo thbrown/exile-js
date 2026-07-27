@@ -229,10 +229,43 @@ export class Universe {
     return [this.getStr(type, which1) ?? '', this.getStr(type, which2) ?? ''];
   }
 
+  /**
+   * When each transcript line becomes *visible*, on the shared animation
+   * timeline — `transcriptAt[i]` goes with `transcript[i]`.
+   *
+   * The C++ needs nothing like this: `add_string_to_buf` fills a buffer and the
+   * pane is only repainted later, and because `do_missile_anim` blocks, a line
+   * added after it cannot appear until the missile has landed. This port runs
+   * the game logic straight through and repaints every frame, so "Guard takes
+   * 3" would otherwise be on screen while the flame is still in the air.
+   */
+  transcriptAt: number[] = [];
+
+  /**
+   * Supplies the moment a new line should become visible. The host sets this to
+   * the animation timeline; left alone it stamps 0, which is always in the
+   * past, so tests and headless runs see every line immediately.
+   */
+  transcriptClock: () => number = () => 0;
+
   /** add_string_to_buf (boe.text.cpp) — one line into the transcript pane. */
   addStringToBuf(text: string): void {
     this.transcript.push(text);
-    if (this.transcript.length > TRANSCRIPT_MAX)
-      this.transcript.splice(0, this.transcript.length - TRANSCRIPT_MAX);
+    this.transcriptAt.push(this.transcriptClock());
+    if (this.transcript.length > TRANSCRIPT_MAX) {
+      const drop = this.transcript.length - TRANSCRIPT_MAX;
+      this.transcript.splice(0, drop);
+      this.transcriptAt.splice(0, drop);
+    }
+  }
+
+  /**
+   * The lines the pane may show right now. Everything the game has said is in
+   * `transcript`; this is the prefix whose moment has come.
+   */
+  visibleTranscript(now: number): string[] {
+    let end = this.transcript.length;
+    while (end > 0 && (this.transcriptAt[end - 1] ?? 0) > now) end--;
+    return this.transcript.slice(0, end);
   }
 }

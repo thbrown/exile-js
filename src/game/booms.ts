@@ -39,6 +39,8 @@ export interface Boom {
   type: number;
   /** Printed over the sprite; 0 prints nothing. */
   damage: number;
+  /** The sound *file* to play with it; 0 for none. */
+  sound: number;
   /** When this boom appears, on the shared animation timeline. */
   starts: number;
   /** When it stops being drawn. */
@@ -52,12 +54,66 @@ export function setBoomSink(fn: ((boom: Boom) => void) | null): void {
 }
 
 /**
+ * `boom_anim_active` (boe.main.cpp:190) — true while a volley of missiles and
+ * explosions is being assembled.
+ *
+ * This is the piece that keeps a spell's explosion from appearing before its
+ * projectile. In the C++, `boom_space` returns immediately while the flag is
+ * set (boe.graphics.cpp:1506) and the damage routines queue an `add_explosion`
+ * instead; the whole set is then played by `do_explosion_anim` *after*
+ * `do_missile_anim` has flown the missiles. Without it, a spell that damages
+ * inside its own arm — Fireball, and the whole single-target family, whose
+ * `add_missile` comes after the switch — booms at cast time and only then
+ * launches.
+ */
+let boomAnimActive = false;
+let queued: Boom[] = [];
+
+/** start_missile_anim (boe.newgraph.cpp:258) — open a volley. */
+export function startBoomAnim(): void {
+  boomAnimActive = true;
+  queued = [];
+}
+
+/**
+ * do_explosion_anim (boe.newgraph.cpp:556) — close the volley and play
+ * everything it collected, now that the missiles have landed.
+ */
+export function runBoomAnim(): void {
+  const toPlay = queued;
+  boomAnimActive = false;
+  queued = [];
+  // `animAt()` is read now, so these sit after whatever the missiles booked.
+  const starts = animAt();
+  for (const boom of toPlay) {
+    if (boom.sound > 0) livingSound(boom.sound);
+    if (boom.type < 0 || boom.type > 6) continue;
+    sink?.({ ...boom, starts, expires: starts + BOOM_MS });
+  }
+}
+
+/**
  * boom_space — show a hit on `where` and play its sound. `soundType` is an
  * index into SOUND_LOOKUP unless it's negative, in which case it's a file.
  */
 export function boomSpace(
   where: Location, type: number, damage: number, soundType: number,
 ): void {
+  if (boomAnimActive) {
+    const file = soundType < 0 ? -soundType : (SOUND_LOOKUP[soundType] ?? 0);
+    // add_explosion (boe.newgraph.cpp:320) drops a second explosion on a square
+    // that already has one, but takes the larger damage number, and holds 30.
+    const already = queued.find((b) => b.where.x === where.x && b.where.y === where.y);
+    if (already) {
+      if (damage > already.damage) already.damage = damage;
+      return;
+    }
+    if (queued.length >= 30) return;
+    queued.push({
+      where: { ...where }, type, damage, sound: file, starts: 0, expires: 0,
+    });
+    return;
+  }
   const file = soundType < 0 ? -soundType : (SOUND_LOOKUP[soundType] ?? 0);
   // The sound is raised here, as the C++ does, but the *host* decides when it
   // is actually heard — see the sink in main.ts. The C++ gets the timing for
@@ -69,5 +125,5 @@ export function boomSpace(
   // several blows in one turn land together, but a hit that follows a missile
   // still waits for the missile to arrive.
   const starts = animAt();
-  sink?.({ where: { ...where }, type, damage, starts, expires: starts + BOOM_MS });
+  sink?.({ where: { ...where }, type, damage, sound: file, starts, expires: starts + BOOM_MS });
 }
