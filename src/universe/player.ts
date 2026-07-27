@@ -52,6 +52,18 @@ const TRAIT_XP_COST: number[] = [
   -10, // ANAMA
 ];
 
+/**
+ * `cPlayer::basic_spells` (pc.cpp:28) — `numeric_limits<uint32_t>::max() >> 2`,
+ * which is bits 0..29. So every PC, pregen or newly made, starts out knowing
+ * the first **30** spells on each list, and learns the rest from books and
+ * scenario nodes.
+ */
+export const BASIC_SPELLS = 30;
+
+function basicSpells(): boolean[] {
+  return Array.from({ length: NUM_SPELLS }, (_, i) => i < BASIC_SPELLS);
+}
+
 /** skill_bonus (shop.cpp:43) — the stat bonus table, indexed by skill level. */
 const SKILL_BONUS = [
   -3, -3, -2, -1, 0, 0, 1, 1, 1, 2,
@@ -77,9 +89,12 @@ export class Player extends Living {
   items: Item[] = Array.from({ length: NUM_INVEN_SLOTS }, () => defaultItem());
   /** Which slots are currently worn/wielded (cPlayer::equip). */
   equip: boolean[] = new Array<boolean>(NUM_INVEN_SLOTS).fill(false);
-  /** Which spells this PC knows (cPlayer::mage_spells / priest_spells). */
-  mageSpells: boolean[] = new Array<boolean>(NUM_SPELLS).fill(false);
-  priestSpells: boolean[] = new Array<boolean>(NUM_SPELLS).fill(false);
+  /**
+   * Which spells this PC knows (cPlayer::mage_spells / priest_spells). Every
+   * PC starts knowing `basic_spells` on both lists — see BASIC_SPELLS.
+   */
+  mageSpells: boolean[] = basicSpells();
+  priestSpells: boolean[] = basicSpells();
   /**
    * Where this PC stands in combat. Negative means "not placed", and
    * `getLoc` then falls back to the party's own square (pc.cpp:395).

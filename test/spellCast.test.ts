@@ -18,7 +18,7 @@ import { buildOpcodeTable } from '../src/fileio/specialParse';
 import { GameMode } from '../src/game/modes';
 import { GameSession } from '../src/game/session';
 import { CastStatus, castableSpells, pcCanCastSpell, pcCanCastType } from '../src/game/spellCast';
-import { PartyPreset, Player } from '../src/universe/player';
+import { BASIC_SPELLS, PartyPreset, Player } from '../src/universe/player';
 import { MainStatus, Skill, Status, Trait } from '../src/universe/skills';
 import { Universe } from '../src/universe/universe';
 
@@ -279,6 +279,46 @@ describe('pc_can_cast_spell, for a whole skill', () => {
     const pc = archmage(s);
     pc.status[Status.DUMB] = 8;
     expect(pcCanCastType(s, pc, Skill.MAGE_SPELLS)).toBe(CastStatus.NO_DUMBFOUNDED);
+  });
+});
+
+describe('the party a new game starts with', () => {
+  it('knows the basic spells, so somebody can actually cast', () => {
+    // The regression this pins: the pregen party was created with *no* spells
+    // known, so the spell picker reported "Nobody can cast a mage spell". The
+    // C++ sets basic_spells in the cPlayer constructor, which every preset
+    // runs through.
+    const s = inTown();
+    for (const pc of s.univ.party.pcs) {
+      expect(pc.mageSpells.filter(Boolean).length).toBe(BASIC_SPELLS);
+      expect(pc.priestSpells.filter(Boolean).length).toBe(BASIC_SPELLS);
+    }
+    const mages = s.univ.party.pcs.filter(
+      (pc) => pcCanCastType(s, pc, Skill.MAGE_SPELLS) === CastStatus.OK);
+    const priests = s.univ.party.pcs.filter(
+      (pc) => pcCanCastType(s, pc, Skill.PRIEST_SPELLS) === CastStatus.OK);
+    expect(mages.length).toBeGreaterThan(0);
+    expect(priests.length).toBeGreaterThan(0);
+  });
+
+  it('the starting caster has a non-empty spell list', () => {
+    const s = inTown();
+    const mage = s.univ.party.pcs.find(
+      (pc) => pcCanCastType(s, pc, Skill.MAGE_SPELLS) === CastStatus.OK)!;
+    const list = castableSpells(s, mage, Skill.MAGE_SPELLS);
+    expect(list).toContain(Spell.LIGHT);
+    // Nothing beyond their skill or their spell points should be offered.
+    for (const spell of list) {
+      expect(SPELLS[spell]!.level ?? 0).toBeLessThanOrEqual(mage.skill(Skill.MAGE_SPELLS));
+      expect(SPELLS[spell]!.cost ?? 0).toBeLessThanOrEqual(mage.curSp);
+    }
+  });
+
+  it('the last 32 spells still have to be learned', () => {
+    const s = inTown();
+    const pc = s.univ.party.pcs[0]!;
+    expect(pc.mageSpells[BASIC_SPELLS]).toBe(false);
+    expect(pc.mageSpells[NUM_NORMAL_SPELLS - 1]).toBe(false);
   });
 });
 

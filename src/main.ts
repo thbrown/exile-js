@@ -751,6 +751,11 @@ async function main(): Promise<void> {
         } else if (btn.btn === ToolbarButton.SHIELD) {
           // handle_parry — spend what's left of the turn on defence.
           if (session.mode === GameMode.COMBAT) session.parry();
+        } else if (btn.btn === ToolbarButton.MAGE || btn.btn === ToolbarButton.PRIEST) {
+          // The two spellbook buttons are the same flow as the 'm' and 'p'
+          // keys — handle_spell_button dispatches on which book.
+          void castSpellFlow(btn.btn === ToolbarButton.MAGE
+            ? Skill.MAGE_SPELLS : Skill.PRIEST_SPELLS);
         } else if (btn.btn === ToolbarButton.ACT) {
           // handle_toggle_active — pin the turn to this PC, or release it.
           if (session.mode === GameMode.COMBAT) session.toggleActivePc();

@@ -449,6 +449,20 @@ Notes for M2 implementer:
     `display_monst`'s dialog. `cast_spell_on_space` — a TARGET-context special
     node intercepting a spell — needs `eSpecCtx::TARGET`, TODO(M6).
 
+- **Two spellcasting bugs from the first play-test of it (2026-07-26)**:
+  - **"Nobody can cast a mage/priest spell."** The pregen party was built with
+    *no spells known at all* — `mageSpells`/`priestSpells` were initialised to
+    all-false and nothing ever filled them in. The C++ sets
+    `cPlayer::basic_spells` in the base `cPlayer` constructor
+    (pc.cpp:28, :1023), which every preset runs through:
+    `numeric_limits<uint32_t>::max() >> 2`, i.e. bits 0..29, so **every PC
+    starts knowing the first 30 spells of each list** and learns the rest from
+    books and scenario nodes. Now `BASIC_SPELLS` in `universe/player.ts`, with
+    a regression test that the starting party can actually cast something.
+  - **The MAGE and PRIEST toolbar buttons said "not implemented yet."** Only
+    the `m`/`p` keys had been wired; the buttons fell through to the
+    catch-all. Both now run the same `castSpellFlow`.
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
