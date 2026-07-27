@@ -32,6 +32,7 @@ import { FieldType } from '../data/fields';
 import { hasAbilEquip } from '../universe/inventory';
 import { focusOn } from './anim';
 import { doPoison, handleAcid, handleDisease } from './increaseAge';
+import { processFields } from './processFields';
 import { placeSpellPattern } from './spellPatterns';
 import type { GameSession } from './session';
 
@@ -779,13 +780,15 @@ export function doMonsterTurn(session: GameSession): void {
  * end-of-round upkeep: the clock, the light burning down, and every timed
  * status ticking toward zero.
  *
- * TODO(M5c): process_fields belongs here — quickfire spreading and clouds
- * doing their damage.
  * TODO(M6): dump_gold and the OCCASIONAL_STATUS item effects.
  */
 export function combatRunMonst(session: GameSession): void {
   const univ = session.univ;
   doMonsterTurn(session);
+
+  // The fields act right after the monsters do, before the clock and the
+  // statuses tick — a wall of fire burns you on the same turn it was cast.
+  processFields(session);
 
   univ.party.lightLevel = moveToZero(univ.party.lightLevel);
   const lighting = univ.townRecord?.lightingType ?? 0;

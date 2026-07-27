@@ -35,6 +35,15 @@ export class CurTown {
    * without the 32-bit ceiling.
    */
   fields: Set<FieldType>[][];
+  /**
+   * `cCurTown::quickfire_present` — this town has quickfire in it, so
+   * `process_fields` has to do the expensive spread pass. The C++ latches it in
+   * three places (town setup, save loading, and `place_quickfire`); this port
+   * latches it in `setField` instead, which is the one road they all take. It
+   * is never cleared, exactly as in the C++: quickfire that burns out still
+   * leaves the flag set until the town is re-entered.
+   */
+  quickfirePresent = false;
 
   constructor(readonly record: Town) {
     const grid = (): Uint8Array[] =>
@@ -50,7 +59,12 @@ export class CurTown {
       if (!this.isOnMap(x, y)) continue;
       if (field.type === FieldType.SPECIAL_ROAD) this.roads[x]![y] = 1;
       else if (field.type === FieldType.SPECIAL_SPOT) this.specialSpots[x]![y] = 1;
-      else this.fields[x]![y]!.add(field.type);
+      else {
+        this.fields[x]![y]!.add(field.type);
+        // The C++ latches this over the whole map after town setup
+        // (boe.town.cpp:367); preset fields don't go through setField.
+        if (field.type === FieldType.FIELD_QUICKFIRE) this.quickfirePresent = true;
+      }
     }
   }
 
@@ -61,8 +75,10 @@ export class CurTown {
 
   setField(x: number, y: number, which: FieldType, on = true): void {
     if (!this.isOnMap(x, y)) return;
-    if (on) this.fields[x]![y]!.add(which);
-    else this.fields[x]![y]!.delete(which);
+    if (on) {
+      this.fields[x]![y]!.add(which);
+      if (which === FieldType.FIELD_QUICKFIRE) this.quickfirePresent = true;
+    } else this.fields[x]![y]!.delete(which);
   }
 
   // The real `dispel_fields` is `game/fieldEffects.ts` — it rolls a save per

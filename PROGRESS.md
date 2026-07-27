@@ -309,6 +309,40 @@ Notes for M2 implementer:
   what the assertion always meant. Worth remembering: that array is the whole
   screen's projectiles, not one actor's.
 
+- **`process_fields` — what fields do over time (M5c, 2026-07-26)**:
+  `game/processFields.ts` ports `process_fields` (boe.combat.cpp:5099) and the
+  four helpers under it — `hit_space`/`hit_pcs_in_space` (:4315),
+  `monst_inflict_fields` (boe.monster.cpp:802), `sync_force_cages` (:1751) and
+  `process_force_cage` (:5059). Fields are no longer scenery: a wall of fire
+  burns whoever stands in it every turn and rolls to go out, quickfire creeps
+  outwards (four times a turn in combat) and burns through crumbling barriers,
+  stinking clouds curse, sleep clouds put you under, webs catch monsters and
+  are used up doing it, and force cages tick down while their occupants roll to
+  break out. Wired at both C++ call sites: `combat_run_monst` right after the
+  monsters act, and `increase_age` in town — which runs *before* `do_monsters`
+  (boe.actions.cpp:1266), so the order is the original's.
+  `startCombatRound` now opens with `sync_force_cages`, as `combat_next_step`
+  does.
+  - *Gotcha*: the RADIATE check in `monst_inflict_fields` reads backwards. A
+    monster is only hurt by a field if it radiates *some other* field, so a
+    monster that radiates nothing walks through walls of blades untouched.
+    Quickfire is the exception and always burns. Kept.
+  - *Gotcha*: every arm of `monst_inflict_fields` ends in a `break`, so a
+    monster only ever suffers the **first** field on its square, in source
+    order. The C++ has a TODO wondering about that; kept as-is.
+  - *Gotcha*: `processing_fields` and `monsters_going` are dead letters inside
+    `process_fields`. Everything there goes through `hit_pcs_in_space`, which
+    adds 10 to `hit_all` and turns monster-hitting off entirely — monsters take
+    their field damage from `monst_inflict_fields`. This port passes
+    attribution as an argument rather than keeping the globals, matching how
+    the rest of the combat code already does it.
+  - `cCurTown.quickfirePresent` is latched in `setField` rather than in the
+    three places the C++ latches it, since that is the one road they all take.
+    Never cleared, as in the C++.
+  - Still not ported: `place_quickfire`'s own placement rules (it refuses
+    blocking terrain, rolls against antimagic, and clears other fields first).
+    Quickfire currently goes down through plain `setField`.
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
@@ -316,7 +350,7 @@ Notes for M2 implementer:
 - [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅, inventory panel ✅, fields overlay ✅; replay driver still open
 - [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅, shops ✅, sell/identify/recharge ✅, training ✅, inns ✅; item Use, enchanting, and full dialogxml still open
 - [x] **M4 — Specials interpreter (breadth-first)**: VM core (pointers, queueing, messages) + all seven opcode groups; triggers wired for movement, look, town entry/exit, use-space, call-special terrain and the two talk nodes. Opcodes needing combat/fields/timers/quests report themselves and wait for M5/M6.
-- [ ] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b nearly done (monster turns, melee AI, town *and outdoor* encounters, the `uAbility` port, missiles on both sides, breath, summons, touch abilities and the on-hit weapon abilities ✅; monster spells still open); M5c (spells, patterns, field behaviours) still open
+- [ ] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b nearly done (monster turns, melee AI, town *and outdoor* encounters, the `uAbility` port, missiles on both sides, breath, summons, touch abilities and the on-hit weapon abilities ✅; monster spells still open); M5c under way (spell patterns ✅, `process_fields` ✅; the spell list and `cast_spell` still open)
 - [ ] **M6 — Specials depth + party ops** (valleydy completable)
 - [ ] **M7 — Save/load (.exg) + startup flow**
 - [ ] **M8 — Fidelity hardening** (replay golden masters)
@@ -667,13 +701,13 @@ Smaller things outstanding, all independent of M5:
    the on-hit weapon abilities, outdoor encounters, the projectile animation
    and the rest of `monst_fire_missile`.
 2. M5c is under way. **`place_spell_pattern` and the field helpers landed**
-   2026-07-26 (see above), which unblocked exploding weapons, monster FIELD and
-   RADIATE. What's left, in the order that unblocks the most:
-   a. **`process_fields`** — what fields do over time: quickfire spreading,
-      clouds damaging whoever stands in them, webs slowing. Hook is marked in
-      `combat_run_monst` (`monsterTurn.ts`).
-   b. **The spell list itself** (`cSpell`, the mage and priest tables) and
-      `cast_spell` — after which monster spellcasting closes out M5b too.
+   2026-07-26, and **`process_fields` landed** the same day (both above), so
+   fields now both land and persist. What's left:
+   a. **The spell list itself** (`cSpell`, the mage and priest tables) and
+      `cast_spell` — after which monster spellcasting closes out M5b too. This
+      is now the only thing standing between the port and a playable M5.
+      `hit_space` is already ported (`processFields.ts`) and is what
+      `cast_spell`'s damage will go through.
 3. (The MAP overlay and `place_treasure` both landed 2026-07-26.)
 4. M2's last leftover is the replay driver.
 5. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in

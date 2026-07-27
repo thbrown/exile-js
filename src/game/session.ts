@@ -32,6 +32,7 @@ import {
 } from './wandering';
 import { startOutdoorCombat } from './outCombat';
 import { increaseAgeEffects } from './increaseAge';
+import { processFields, syncForceCages } from './processFields';
 import { LoadedMissile, fireMissile, isLoaded, loadMissile } from './missiles';
 import { CurTown } from '../universe/curTown';
 import {
@@ -274,6 +275,10 @@ export class GameSession {
     // increase_age's upkeep — poison biting, wounds closing, blessings running
     // out. Without this a status effect is only ever a line in the transcript.
     increaseAgeEffects(this);
+    // The fields do their work here, before the monsters move — increase_age
+    // runs ahead of do_monsters in town (boe.actions.cpp:1266). Outdoors there
+    // are no fields, which is why the C++ gates this on is_town().
+    if (this.mode === GameMode.TOWN) processFields(this);
     // increase_age (boe.actions.cpp:3586) cancels a half-finished trade-places
     // every turn, so a stray first click doesn't swap someone a minute later.
     this.currentSwitch = NO_ONE;
@@ -1563,6 +1568,10 @@ export class GameSession {
    * decay, then the party gets a fresh set of moves.
    */
   startCombatRound(): void {
+    // combat_next_step (boe.combat.cpp:1786) opens by reconciling the cage
+    // barriers with the FORCECAGE statuses, so anyone who walked into one is
+    // caught before they get their moves.
+    syncForceCages(this);
     combatRunMonst(this);
     setPcMoves(this.univ);
     pickNextPc(this.univ, this.combatActivePc);
