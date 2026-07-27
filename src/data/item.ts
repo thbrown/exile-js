@@ -4,6 +4,9 @@
  * (item.cpp:206).
  */
 
+import { SPELLS, Spell, SpellWhen } from './spell';
+import { PartyStatus, Status } from '../universe/skills';
+
 export enum ItemType {
   NO_ITEM = 0,
   ONE_HANDED = 1,
@@ -275,4 +278,95 @@ export function interestingString(item: Item): string {
     out += `Uses: ${item.charges}`;
   }
   return out.length > 0 ? `${out}.` : out;
+}
+
+// --- Which items can be Used, and where (item.cpp:1354) --------------------
+
+const USE_COMBAT = 1;
+const USE_TOWN = 2;
+const USE_OUTDOORS = 4;
+const USE_MAGIC = 8;
+
+/**
+ * `abil_chart` (item.cpp:1356) — for each *usable* ability, where it may be
+ * used and whether using it counts as magic (which a magically inept PC can't
+ * do). Any ability not in here can't be Used at all, which is how `can_use`
+ * answers no for the sixty-odd passive abilities without listing them.
+ */
+const ABIL_CHART: Partial<Record<ItemAbil, number>> = {
+  [ItemAbil.POISON_WEAPON]: USE_TOWN | USE_COMBAT,
+  // The default; several statuses widen it to outdoors in use_outdoors below.
+  [ItemAbil.AFFECT_STATUS]: USE_TOWN | USE_COMBAT | USE_MAGIC,
+  // No `when` bits of its own — they come from the spell it casts.
+  [ItemAbil.CAST_SPELL]: USE_MAGIC,
+  [ItemAbil.BLISS_DOOM]: USE_TOWN | USE_COMBAT | USE_MAGIC,
+  [ItemAbil.AFFECT_EXPERIENCE]: USE_TOWN | USE_COMBAT | USE_OUTDOORS | USE_MAGIC,
+  [ItemAbil.AFFECT_SKILL_POINTS]: USE_TOWN | USE_COMBAT | USE_OUTDOORS | USE_MAGIC,
+  [ItemAbil.AFFECT_HEALTH]: USE_TOWN | USE_COMBAT | USE_OUTDOORS | USE_MAGIC,
+  [ItemAbil.AFFECT_SPELL_POINTS]: USE_TOWN | USE_COMBAT | USE_OUTDOORS | USE_MAGIC,
+  [ItemAbil.LIGHT]: USE_TOWN | USE_COMBAT,
+  [ItemAbil.AFFECT_PARTY_STATUS]: USE_TOWN | USE_COMBAT | USE_MAGIC,
+  [ItemAbil.HEALTH_POISON]: USE_TOWN | USE_COMBAT | USE_OUTDOORS | USE_MAGIC,
+  [ItemAbil.CALL_SPECIAL]: USE_TOWN | USE_COMBAT | USE_OUTDOORS | USE_MAGIC,
+  [ItemAbil.SUMMONING]: USE_TOWN | USE_COMBAT | USE_MAGIC,
+  [ItemAbil.MASS_SUMMONING]: USE_TOWN | USE_COMBAT | USE_MAGIC,
+  [ItemAbil.QUICKFIRE]: USE_TOWN | USE_COMBAT | USE_MAGIC,
+  [ItemAbil.MESSAGE]: USE_TOWN | USE_COMBAT | USE_OUTDOORS,
+};
+
+/** cItem::abil_harms (item.cpp:194) — is this a hostile use type? */
+export function abilHarms(item: Item): boolean {
+  return item.magicUseType === ItemUse.HARM_ONE || item.magicUseType === ItemUse.HARM_ALL;
+}
+
+/** cItem::abil_group (item.cpp:200) — does it hit the whole party? */
+export function abilGroup(item: Item): boolean {
+  return item.magicUseType === ItemUse.HELP_ALL || item.magicUseType === ItemUse.HARM_ALL;
+}
+
+/** The `when` bits of the spell a CAST_SPELL item casts. */
+function spellWhen(item: Item): number {
+  return SPELLS[item.abilData as Spell]?.when ?? 0;
+}
+
+/** cItem::use_in_combat (item.cpp:1375). */
+export function useInCombat(item: Item): boolean {
+  if (item.ability === ItemAbil.CAST_SPELL) return (spellWhen(item) & SpellWhen.COMBAT) !== 0;
+  // Flight is the one party status that's outdoors-only.
+  if (item.ability === ItemAbil.AFFECT_PARTY_STATUS
+    && item.abilData === PartyStatus.FLIGHT) return false;
+  return ((ABIL_CHART[item.ability] ?? 0) & USE_COMBAT) !== 0;
+}
+
+/** cItem::use_in_town (item.cpp:1385). */
+export function useInTown(item: Item): boolean {
+  if (item.ability === ItemAbil.CAST_SPELL) return (spellWhen(item) & SpellWhen.TOWN) !== 0;
+  if (item.ability === ItemAbil.AFFECT_PARTY_STATUS
+    && item.abilData === PartyStatus.FLIGHT) return false;
+  return ((ABIL_CHART[item.ability] ?? 0) & USE_TOWN) !== 0;
+}
+
+/** cItem::use_outdoors (item.cpp:1395). */
+export function useOutdoors(item: Item): boolean {
+  if (item.ability === ItemAbil.CAST_SPELL) return (spellWhen(item) & SpellWhen.OUTDOORS) !== 0;
+  if (item.ability === ItemAbil.AFFECT_PARTY_STATUS && item.abilData === PartyStatus.FLIGHT)
+    return true;
+  if (item.ability === ItemAbil.AFFECT_STATUS) {
+    // Four statuses widen AFFECT_STATUS past its chart entry: the two that are
+    // afflictions you'd want to cure on the road, and the two long-lived buffs.
+    const s = item.abilData as Status;
+    if (s === Status.POISON || s === Status.DISEASE
+      || s === Status.HASTE_SLOW || s === Status.BLESS_CURSE) return true;
+  }
+  return ((ABIL_CHART[item.ability] ?? 0) & USE_OUTDOORS) !== 0;
+}
+
+/** cItem::use_magic (item.cpp:1410) — does Using it count as casting? */
+export function useMagic(item: Item): boolean {
+  return ((ABIL_CHART[item.ability] ?? 0) & USE_MAGIC) !== 0;
+}
+
+/** cItem::can_use (item.cpp:1414) — usable *somewhere*. */
+export function canUse(item: Item): boolean {
+  return useInTown(item) || useInCombat(item) || useOutdoors(item);
 }

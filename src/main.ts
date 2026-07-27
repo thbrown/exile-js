@@ -3,6 +3,8 @@
  * the classic 605x430 screen.
  */
 
+import { useItem } from './game/itemUse';
+import type { SpecialHost } from './game/specials/context';
 import { Location, shiftLoc } from './core/location';
 import { SpellPat } from './data/pattern';
 import { statusName } from './data/statusIcons';
@@ -206,7 +208,7 @@ async function main(): Promise<void> {
    * blocking on a dialog is a promise here.
    */
   session.onRedraw = () => redraw();
-  session.attachSpecials({
+  const specialHost: SpecialHost = {
     message: async (str1, str2, title, pic, picType) => {
       const text = [str1, str2].filter((s) => s.length > 0).join('\n\n');
       await dialogs.runQueued({
@@ -248,7 +250,8 @@ async function main(): Promise<void> {
     endScenario: () => {
       univ.addStringToBuf('*** The scenario is over. ***');
     },
-  });
+  };
+  session.attachSpecials(specialHost);
 
   /**
    * Training (spend_xp in mode 1, pc.editors.cpp:644): pick who trains, then
@@ -439,12 +442,16 @@ async function main(): Promise<void> {
   /** A click on an inventory row: equip/unequip, give, drop, describe, or sell. */
   const handleInventoryClick = async (
     row: number,
-    part: 'name' | 'give' | 'drop' | 'info' | 'spec',
+    part: 'name' | 'use' | 'give' | 'drop' | 'info' | 'spec',
   ): Promise<void> => {
     const pc = univ.party.pcs[screen.itemPage];
     const item = pc?.items[row];
     if (!pc || !item || item.variety === 0) return;
-    if (part === 'spec') {
+    if (part === 'use') {
+      // handle_use_item (boe.actions.cpp:1099) — only the acting PC's own pack,
+      // and it costs the turn (use_item itself decides whether it worked).
+      await useItem(session, screen.itemPage, row, specialHost);
+    } else if (part === 'spec') {
       session.useItemShop(screen.itemPage, row);
     } else if (part === 'name' && session.itemShop) {
       // While a shopkeeper is waiting, the name isn't an equip toggle.

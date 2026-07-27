@@ -373,6 +373,68 @@ const gotItem = await page.evaluate(async () => {
 console.log('GOT ITEM:', JSON.stringify(gotItem));
 await shot('01e-inventory');
 
+// 2e2. Using an item: put a healing potion in a magically apt PC's pack, check
+// the USE button is drawn on its row, and click it. PC 3 (Adrianna) is used
+// because PC 0 in the pregen party is magically inept and refuses magic items.
+const usedItem = await page.evaluate(async () => {
+  const s = window.__session;
+  const sc = window.__screen;
+  const pc = s.univ.party.pcs[3];
+  // A potion of healing: AFFECT_HEALTH, HELP_ONE, two doses.
+  pc.items[0] = {
+    ...pc.items[0],
+    variety: 7, itemLevel: 0, charges: 2, ability: 76, abilStrength: 3,
+    magicUseType: 0, graphicNum: 0, name: 'test potion', fullName: 'test potion',
+    ident: true, rechargeable: false, weight: 5, desc: '',
+  };
+  pc.equip[0] = false;
+  pc.curHealth = 1;
+  sc.itemPage = 3;
+  s.univ.curPc = 3;
+  window.__redraw();
+
+  // The Use button's rect, in screen coordinates, and what a click there hits.
+  return { before: { hp: pc.curHealth, charges: pc.items[0].charges }, page: sc.itemPage };
+});
+// Click the Use button on row 0 by walking the panel for the hit rect.
+const useClick = await page.evaluate(() => {
+  const sc = window.__screen;
+  // Scan the inventory panel for the point that reports part 'use' on row 0.
+  for (let y = 0; y < 430; y++)
+    for (let x = 0; x < 605; x++) {
+      const h = sc.inventoryHit(x, y);
+      if (h && h.row === 0 && h.part === 'use') return { x, y };
+    }
+  return null;
+});
+if (useClick) {
+  // Map canvas coordinates to page coordinates through the element's real
+  // bounding box, since the canvas is CSS-scaled.
+  const at = await page.evaluate(({ x, y }) => {
+    const canvas = document.querySelector('canvas');
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: r.left + (x + 0.5) * (r.width / canvas.width),
+      y: r.top + (y + 0.5) * (r.height / canvas.height),
+    };
+  }, useClick);
+  await page.mouse.click(at.x, at.y);
+  await page.waitForTimeout(300);
+}
+const useResult = await page.evaluate(() => {
+  const pc = window.__session.univ.party.pcs[3];
+  return {
+    hp: pc.curHealth,
+    charges: pc.items[0].charges,
+    tail: window.__session.univ.transcript.slice(-2),
+  };
+});
+console.log('USE ITEM:', JSON.stringify({ ...usedItem, at: useClick, after: useResult }));
+if (!useClick) throw new Error('the USE button was not drawn on a usable item');
+if (useResult.charges !== 1) throw new Error('using the potion did not spend a charge');
+if (useResult.hp <= 1) throw new Error('using the potion did not heal');
+await shot('01e2-item-use');
+
 // 2d. Signs: looking at an adjacent sign opens a dialog with its text.
 const sign = await page.evaluate(async () => {
   const s = window.__session;

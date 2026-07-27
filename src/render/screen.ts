@@ -6,7 +6,7 @@
  */
 
 import { Direction } from '../core/location';
-import { ItemAbil, ItemType } from '../data/item';
+import { ItemAbil, ItemType, canUse } from '../data/item';
 import { variety } from '../data/itemVariety';
 import { groundFromTer, terFromGround } from '../data/scenario';
 import { TerSpec, TrimType, blocksMove } from '../data/terrain';
@@ -917,8 +917,8 @@ export class Screen {
    * whichever PC's page is showing, with equipped items italicised and coloured
    * by kind.
    *
-   * TODO(M3): the Use/Give/Info buttons, the bottom row of page buttons, and
-   * scrolling past the first eight slots.
+   * TODO(M3): the bottom row of page buttons, and scrolling past the first
+   * eight slots.
    */
   private drawInventory(session: GameSession): void {
     const panel = WIN_RECTS.inven;
@@ -1012,6 +1012,11 @@ export class Screen {
           icon(ITEM_BTN_ICONS.give, at(row.give));
           icon(ITEM_BTN_ICONS.drop, at(row.drop));
           icon(ITEM_BTN_ICONS.info, at(row.info));
+          // Use only appears where it would work (boe.text.cpp:370): the item
+          // has to be usable somewhere, and a rechargeable one has to have
+          // something left in it.
+          if (canUse(item) && (item.rechargeable ? item.charges > 0 : true))
+            icon(ITEM_BTN_ICONS.use, at(row.use));
         }
       }
     }
@@ -1023,7 +1028,7 @@ export class Screen {
   /** The inventory row and part a click landed on, if any. */
   inventoryHit(
     x: number, y: number, service = false,
-  ): { row: number; part: 'name' | 'give' | 'drop' | 'info' | 'spec' } | null {
+  ): { row: number; part: 'name' | 'use' | 'give' | 'drop' | 'info' | 'spec' } | null {
     const panel = WIN_RECTS.inven;
     const lx = x - panel.left;
     const ly = y - panel.top;
@@ -1035,6 +1040,7 @@ export class Screen {
       if (service) {
         if (inside(row.spec)) return { row: i, part: 'spec' };
       } else {
+        if (inside(row.use)) return { row: i, part: 'use' };
         if (inside(row.give)) return { row: i, part: 'give' };
         if (inside(row.drop)) return { row: i, part: 'drop' };
         if (inside(row.info)) return { row: i, part: 'info' };

@@ -11,10 +11,11 @@
  */
 
 import { Direction, Location, loc } from '../core/location';
+import { GameRng } from '../core/rng';
 import { Job, JobBank, makeJobBank } from '../data/quest';
 import { SpecCtxType } from '../game/specials/context';
 import { OutdoorCreature } from './outdoorCreature';
-import { PartyStatus } from './skills';
+import { PartyStatus, Skill, Status } from './skills';
 
 /**
  * cTimer (special.hpp:125) as the party stores it: a countdown, the node to
@@ -140,6 +141,85 @@ export class Party {
    * numbering in a save file stays put.
    */
   partyEventTimers: PartyTimer[] = [];
+
+  // --- cParty's iLiving half (party.cpp:426-570) ---------------------------
+  //
+  // The party is itself an iLiving in the C++, and every one of these just
+  // forwards to all six PCs — which is what "affects the whole party" means for
+  // an item or a spell. The ones the PC versions need an rng for take one here;
+  // the C++ reaches for the global instead.
+
+  applyStatusAll(which: Status, howMuch: number): void {
+    for (const pc of this.pcs) pc.applyStatus(which, howMuch);
+  }
+
+  healAll(howMuch: number): void {
+    for (const pc of this.pcs) pc.heal(howMuch);
+  }
+
+  restoreSpAll(howMuch: number): void {
+    for (const pc of this.pcs) pc.restoreSp(howMuch);
+  }
+
+  poisonAll(howMuch: number, rng: GameRng): void {
+    for (const pc of this.pcs) pc.poison(howMuch, rng);
+  }
+
+  cureAll(howMuch: number): void {
+    for (const pc of this.pcs) pc.cure(howMuch);
+  }
+
+  acidAll(howMuch: number): void {
+    for (const pc of this.pcs) pc.acid(howMuch);
+  }
+
+  curseAll(howMuch: number): void {
+    for (const pc of this.pcs) pc.curse(howMuch);
+  }
+
+  slowAll(howMuch: number): void {
+    for (const pc of this.pcs) pc.slow(howMuch);
+  }
+
+  webAll(howMuch: number): void {
+    for (const pc of this.pcs) pc.web(howMuch);
+  }
+
+  diseaseAll(howMuch: number, rng: GameRng): void {
+    for (const pc of this.pcs) pc.disease(howMuch, rng);
+  }
+
+  dumbfoundAll(howMuch: number, rng: GameRng): void {
+    for (const pc of this.pcs) pc.dumbfound(howMuch, rng);
+  }
+
+  /**
+   * cParty::sleep (party.cpp:532). Forcecage is the exception that proves the
+   * rule: a cage traps the *party*, not six people separately, so the best
+   * lore-and-spells PC makes the one saving roll and everyone else is given
+   * whatever they ended up with. Every other status just goes round the six.
+   */
+  sleepAll(whatType: Status, howMuch: number, adj: number, rng: GameRng): void {
+    if (whatType === Status.FORCECAGE) {
+      let who = 0;
+      let best = 0;
+      for (let i = 0; i < this.pcs.length; i++) {
+        const pc = this.pcs[i]!;
+        const cur = pc.skill(Skill.MAGE_LORE) + pc.skill(Skill.MAGE_SPELLS)
+          + pc.skill(Skill.PRIEST_SPELLS);
+        if (pc.isAlive && cur > best) {
+          best = cur;
+          who = i;
+        }
+      }
+      const chosen = this.pcs[who];
+      if (!chosen) return;
+      chosen.sleep(whatType, howMuch, adj, rng);
+      for (const pc of this.pcs) pc.status[Status.FORCECAGE] = chosen.status[Status.FORCECAGE] ?? 0;
+      return;
+    }
+    for (const pc of this.pcs) pc.sleep(whatType, howMuch, adj, rng);
+  }
 
   /** The job bank numbered `which`, creating it (and any gap) if need be. */
   jobBank(which: number): JobBank {

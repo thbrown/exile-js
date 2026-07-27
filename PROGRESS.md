@@ -31,7 +31,7 @@
 
 ## Current state
 
-**M2 done bar the replay driver, M3 nearly done, M4 and M5 complete, M6 begun (2026-07-27): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; projectiles fly across the screen; and `place_spell_pattern` works, so exploding weapons blast, monsters lay fields and a protective circle raises four rings of wall. **M5 is closed**: monster spellcasting, the 147-spell list, `process_fields` and the real casting dialog all landed 2026-07-26. **M6 has started**: quests, job banks, special items and the town/scenario/party timers work as of 2026-07-27, so a scripted deadline can expire and a timed node can fire.
+**M2 done bar the replay driver, M3 nearly done, M4 and M5 complete, M6 begun (2026-07-27): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; projectiles fly across the screen; and `place_spell_pattern` works, so exploding weapons blast, monsters lay fields and a protective circle raises four rings of wall. **M5 is closed**: monster spellcasting, the 147-spell list, `process_fields` and the real casting dialog all landed 2026-07-26. **M6 has started**: quests, job banks, special items and the town/scenario/party timers work as of 2026-07-27, so a scripted deadline can expire and a timed node can fire — and **items can be Used**: the USE button on an inventory row drinks the potion, fires the wand and reads the book.
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -538,17 +538,63 @@ Notes for M2 implementer:
     is what would call `generateJobBank`), `RECEIVE_QUEST`, and the quest pane
     of the item window.
 
+- **Using an item (M6 / M3's last leftover, 2026-07-27)**: `game/itemUse.ts`
+  ports `use_item` (boe.specials.cpp:585, ~620 lines) with `poison_weapon`
+  (boe.party.cpp:442) and `drain_pc` (:390) under it, and `data/item.ts` gains
+  `abil_chart` plus `can_use` / `use_in_town` / `use_in_combat` /
+  `use_outdoors` / `use_magic` / `abil_harms` / `abil_group`. The **USE button
+  is now drawn on every inventory row that can take one** and clicking it works:
+  potions heal and poison, wands and staves cast their spell, scrolls and books
+  open their text, rings light the room, and the summoning and quickfire items
+  do their thing. `Party` grew cParty's iLiving half (the `*All` methods) since
+  a HELP_ALL item hits all six PCs, and `inventory.ts` gained `removeCharge`.
+  - **The shape to know**: `takeCharge` starts true and every refusal turns it
+    off, so an item that couldn't be used doesn't lose a dose. It's also how
+    three *successful-looking* branches decline to charge — a failed
+    `poison_weapon`, a Flight cast while already flying, and a CALL_SPECIAL
+    chain that returns `a`.
+  - `abil_chart` is the whole gate on what's usable: an ability not in that
+    table can't be Used at all, which is how `can_use` says no to the sixty-odd
+    passive abilities without listing them.
+  - *Gotcha*: the group arm of AFFECT_STATUS / POISONED_WEAPON reads
+    `takeCharge = takeCharge || poison_weapon(i, ...)`, so **once one PC's
+    weapon is poisoned the `||` short-circuits and nobody else's is**. Kept.
+  - *Gotcha*: MESSAGE (a book) sets `takeCharge = false` outright — reading is
+    always free, which is also why `put_item_screen` hides the charge count on
+    one.
+  - *Gotcha*: cancelling Flight can **kill the whole party**. If the square
+    below blocks movement you plummet to your deaths; otherwise you take
+    `get_ran(current, 1, 12)` unless the effect had one turn left.
+  - *Gotcha*: MASS_SUMMONING rolls `get_ran(str,1,4)` and throws it away (the
+    C++ has its own "why is this here?" comment), then passes the *count* of
+    summons as each one's duration rather than the item's strength. Both kept.
+  - *Gotcha*: the AFFECT_SPELL_POINTS and AFFECT_STATUS/ACID harm arms write
+    the pool or the status **directly** rather than through `drain_sp` / the
+    status call, so neither caster resistance nor the usual clamping applies.
+  - *Divergence, invisible*: `poison_weapon`'s C++ loop reads `equip[...]` one
+    past the end of the pack when nothing poisonable is found at all, which is
+    undefined there; this port's search simply runs out and reports "No weapon
+    equipped", which is what that code was trying to do.
+  - *Worth knowing for tests*: **PC 0 of the pregen party (Jenneke) is
+    magically inept**, so she refuses every magic item — and the pregens carry
+    no gear at all, so a `poison_weapon` test has to equip a weapon first. Both
+    cost a round of confusing test failures.
+  - `verify-screen.mjs` gained a step that finds the USE button by hit-testing
+    the panel, clicks it for real through the canvas's bounding box, and checks
+    the potion healed and lost a dose.
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
 - [x] **M1 — Scenario loads, outdoor walkabout**: XML/.map/.spec parsers, terrain view, outdoor movement (gzip+tar for packed .boes deferred to file-upload work; items/monsters XML land with M2)
 - [ ] **M2 — Towns + full 605×430 shell**: town enter/exit ✅, UI chrome ✅, pregen party ✅, GameSession/Universe ✅, sound ✅, line-of-sight fog + lighting ✅, terrain trim + roads ✅, floor items ✅, inventory panel ✅, fields overlay ✅; replay driver still open
-- [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅, shops ✅, sell/identify/recharge ✅, training ✅, inns ✅; item Use, enchanting, and full dialogxml still open
+- [ ] **M3 — Dialog toolkit + talk + shops**: talking ✅, minimal async modal dialog ✅, doors + look + signs ✅, item/equip model + inventory panel ✅, shops ✅, sell/identify/recharge ✅, training ✅, inns ✅, **item Use ✅ (2026-07-27)**; enchanting and full dialogxml still open
 - [x] **M4 — Specials interpreter (breadth-first)**: VM core (pointers, queueing, messages) + all seven opcode groups; triggers wired for movement, look, town entry/exit, use-space, call-special terrain and the two talk nodes. Opcodes needing combat/fields/timers/quests report themselves and wait for M5/M6.
 - [x] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b ✅ (monster turns, melee AI, town *and outdoor* encounters, the `uAbility` port, missiles on both sides, breath, summons, touch abilities, on-hit weapon abilities, **monster spellcasting**); M5c ✅ (spell patterns, `process_fields`, the 147-spell table, `pc_can_cast_spell`, town/combat/targeted/multi-target casting, and the real casting dialog). Remaining odds and ends: `record_monst` (Capture Soul/Simulacrum), `do_mindduel`, and the SPECIAL monster ability.
 - [ ] **M6 — Specials depth + party ops** (valleydy completable): quests,
-      job banks, special items and the three timer kinds ✅ (2026-07-27);
-      alchemy, traps, boats/horses, job-bank dialog and end-scenario open
+      job banks, special items, the three timer kinds and **item Use** ✅
+      (2026-07-27); alchemy, traps, boats/horses, job-bank dialog and
+      end-scenario open
 - [ ] **M7 — Save/load (.exg) + startup flow**
 - [ ] **M8 — Fidelity hardening** (replay golden masters)
 
@@ -1061,8 +1107,8 @@ playthrough will hit it:
 2. **The job-bank board**: the JOB_BANK talk node and its dialog, which is the
    only caller of `generateJobBank`; `RECEIVE_QUEST` alongside it. The data
    behind both is ported.
-3. **Alchemy** (`A`), which needs the recipe table and its two ingredients, and
-   **item Use** — M3's last real leftover.
+3. **Alchemy** (`A`), which needs the recipe table and its two ingredients.
+   (Item Use landed 2026-07-27.)
 4. **`increase_age`'s remaining upkeep**: hunger and the autosave.
 5. **The dialogxml toolkit**, still M3's long-term item: `give_pc_info`'s
    character sheet, `story_dialog`'s pagination, `display_monst`, and the ~210

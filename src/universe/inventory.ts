@@ -248,3 +248,15 @@ export function takeItemFrom(pc: Player, slot: number): Item | null {
   takeItem(pc, slot);
   return item;
 }
+
+/**
+ * cPlayer::remove_charge (pc.cpp:938) — spend one use. An item that runs out
+ * and can't be recharged is gone; a rechargeable one stays in the pack at zero
+ * so a shop can fill it again.
+ */
+export function removeCharge(pc: Player, slot: number): void {
+  const item = pc.items[slot];
+  if (!item || item.charges <= 0) return;
+  item.charges--;
+  if (item.charges === 0 && !item.rechargeable) takeItem(pc, slot);
+}
