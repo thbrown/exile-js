@@ -9,6 +9,8 @@ import { statusName } from './data/statusIcons';
 import { SPELLS, Spell, spellName } from './data/spell';
 import { CastStatus, castableSpells, pcCanCastType } from './game/spellCast';
 import { castSpell } from './game/spellTown';
+import { combatCastSpell } from './game/spellCombat';
+import { takeAp } from './game/combat';
 import { castTownSpell, startTownTargeting } from './game/spellTarget';
 import { placeSpellPattern } from './game/spellPatterns';
 import { GameMode, isCombat } from './game/modes';
@@ -33,7 +35,7 @@ import { CHROME_SHEETS, Screen } from './render/screen';
 import { ShopHit, shopItemInfo } from './render/shopScreen';
 import { SheetStore } from './render/sheets';
 import { itemWeight } from './universe/inventory';
-import { PartyPreset } from './universe/player';
+import { PartyPreset, Player } from './universe/player';
 import { HP_PER_LEVEL, TrainingState, trainCost } from './game/training';
 import { doRest } from './game/rest';
 import { MainStatus, NUM_SKILLS, Skill, Status } from './universe/skills';
@@ -376,6 +378,37 @@ async function main(): Promise<void> {
       : '  No effects on this PC.');
   };
 
+  /** `print_cast_status` (boe.party.cpp) — why a PC can't cast, in words. */
+  const castStatusLine = (status: CastStatus, kind: string, who: string): string => {
+    switch (status) {
+      case CastStatus.NO_SKILL: return `Cast: ${who} has no ${kind} training.`;
+      case CastStatus.NO_ANAMA: return "Cast: You're an Anama!";
+      case CastStatus.NO_ANTIMAGIC: return 'Cast: Not in antimagic field.';
+      case CastStatus.NO_SP: return `Cast: ${who} has no spell points.`;
+      case CastStatus.NO_ENCUMBERED: return `Cast: ${who} is too encumbered.`;
+      case CastStatus.NO_DUMBFOUNDED: return `Cast: ${who} is dumbfounded.`;
+      case CastStatus.NO_PARALYZED: return `Cast: ${who} is paralyzed.`;
+      case CastStatus.NO_ASLEEP: return `Cast: ${who} is asleep.`;
+      default: return `Cast: ${who} can't cast that.`;
+    }
+  };
+
+  /** The spell grid, shared by the town and combat paths. */
+  const pickSpell = async (pc: Player, spells: Spell[]): Promise<Spell | null> => {
+    const chosen = await dialogs.run({
+      text: `${pc.name} casts which spell?  (${pc.curSp} spell points)`,
+      rows: spells.map((spell, i) => ({
+        name: String(spell),
+        key: i < 9 ? String(i + 1) : undefined,
+        label: `${spellName(spell)}  (${SPELLS[spell]?.cost ?? 0} sp)`,
+      })),
+      escapeButton: 'cancel',
+      buttons: [{ name: 'cancel', label: 'Cancel', key: 'c' }],
+    });
+    if (chosen === 'cancel' || chosen === null) return null;
+    return Number(chosen) as Spell;
+  };
+
   /**
    * `cast_spell`'s front end: pick who casts, then what they cast.
    *
@@ -388,6 +421,34 @@ async function main(): Promise<void> {
     const kind = type === Skill.MAGE_SPELLS ? 'mage' : 'priest';
     if (!session.primeTime) {
       univ.addStringToBuf('Cast: Finish what you are doing first.');
+      setStatus();
+      redraw();
+      return;
+    }
+    // In combat there is no caster to choose: combat_cast_*_spell calls
+    // pick_spell(univ.cur_pc), which sets can_choose_caster false, so the
+    // active PC casts and an encumbered mage loses the AP for trying.
+    const inFight = isCombat(session.mode);
+    if (inFight) {
+      const status = pcCanCastType(session, univ.currentPc, type);
+      if (status !== CastStatus.OK) {
+        univ.addStringToBuf(castStatusLine(status, kind, univ.currentPc.name));
+        // Trying to cast a mage spell in armour costs the turn anyway.
+        if (status === CastStatus.NO_ENCUMBERED) takeAp(univ, 6);
+        setStatus();
+        redraw();
+        return;
+      }
+      const spells = castableSpells(session, univ.currentPc, type);
+      if (spells.length === 0) {
+        univ.addStringToBuf(`Cast: ${univ.currentPc.name} has no ${kind} spell to cast here.`);
+        setStatus();
+        redraw();
+        return;
+      }
+      const chosen = await pickSpell(univ.currentPc, spells);
+      if (chosen === null) { redraw(); return; }
+      combatCastSpell(session, chosen);
       setStatus();
       redraw();
       return;
@@ -426,18 +487,9 @@ async function main(): Promise<void> {
       redraw();
       return;
     }
-    const chosen = await dialogs.run({
-      text: `${pc.name} casts which spell?  (${pc.curSp} spell points)`,
-      rows: spells.map((spell, i) => ({
-        name: String(spell),
-        key: i < 9 ? String(i + 1) : undefined,
-        label: `${spellName(spell)}  (${SPELLS[spell]?.cost ?? 0} sp)`,
-      })),
-      escapeButton: 'cancel',
-      buttons: [{ name: 'cancel', label: 'Cancel', key: 'c' }],
-    });
-    if (chosen === 'cancel' || chosen === null) { redraw(); return; }
-    castSpell(session, who, Number(chosen) as Spell);
+    const chosen = await pickSpell(pc, spells);
+    if (chosen === null) { redraw(); return; }
+    castSpell(session, who, chosen);
     setStatus();
     redraw();
   };

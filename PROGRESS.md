@@ -463,6 +463,36 @@ Notes for M2 implementer:
     the `m`/`p` keys had been wired; the buttons fell through to the
     catch-all. Both now run the same `castSpellFlow`.
 
+- **Casting in combat (M5c, 2026-07-26)**: `game/spellCombat.ts` ports
+  `combat_cast_mage_spell`/`combat_cast_priest_spell` (boe.combat.cpp:4517,
+  :4745) and the two `combat_immed_*_cast` functions under them (:4596, :4798),
+  plus `do_shockwave` (:4261).
+  - **In combat there is no caster to choose.** The C++ calls
+    `pick_spell(univ.cur_pc, …)`, which sets `can_choose_caster` false — the
+    active PC casts, full stop. Out of combat `cast_spell` passes 6 instead,
+    and *that* is what opens the caster buttons. `main.ts` now follows this:
+    pressing `m`/`p` in a fight goes straight to the spell list.
+  - `combat_cast_*_spell` is a dispatcher on the spell's `refer`: `REFER_YES`
+    hands off to the town implementation (after 6 AP), `REFER_IMMED` resolves
+    at once, and `REFER_TARGET`/`REFER_FANCY` want a square.
+  - *Play-test fix*: **every combat spell used to report "not implemented for
+    town mode"**, because `m` routed straight to `do_mage_spell`, whose switch
+    only covers the town arms. The immediate spells now work (haste, bless,
+    strength, envenom, resist magic, the group slows/fears/paralyses, the two
+    auras, shockwave), and the targeted ones say they need combat targeting
+    instead of talking about towns — and spend neither points nor AP.
+  - *Gotcha*: an encumbered mage who tries to cast **loses 6 AP anyway**
+    (`combat_cast_mage_spell` takes the AP on NO_CAST_ENCUMBERED).
+  - *Gotcha*: `HASTE_SLOW` and `BLESS_CURSE` are single signed statuses, so
+    Haste is `slow(-n)` and Strength is `curse(-n)`. A slowed monster's
+    `HASTE_SLOW` goes *below* zero.
+  - *Gotcha*: the priest group spells (Curse All, Mass Charm, Pestilence) do
+    **not** check line of sight, while the mage ones do. The C++ has a TODO
+    asking whether that is right; kept.
+  - Still open: `start_spell_targeting`/`start_fancy_spell_targeting`
+    (:4910, :4961) and `do_combat_cast` (:839, ~600 lines) — the targeted
+    combat spells, which is the bulk of the offensive list.
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
