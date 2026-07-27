@@ -1224,11 +1224,15 @@ const boomOrder = await page.evaluate(async () => {
   const at = { x: pc.combatPos.x + 3, y: pc.combatPos.y };
   const monst = s.univ.town.monsters.find((m) => m.isAlive);
   if (monst) { monst.curLoc = { ...at }; monst.attitude = 2; monst.health = 500; }
+  const linesBefore = s.univ.visibleTranscript(performance.now()).length;
   tgt.startSpellTargeting(s, sp.Spell.FIREBALL, false, 1);
   tgt.doCombatCast(s, at);
   return {
     missiles: sc.missiles.map((m) => m.started),
     booms: sc.booms.map((b) => b.starts),
+    // handle_marked_damage: the damage line must not be on screen yet either.
+    linesNow: s.univ.visibleTranscript(performance.now()).length - linesBefore,
+    linesEventually: s.univ.visibleTranscript(Infinity).length - linesBefore,
   };
 });
 console.log('BOOM ORDER:', JSON.stringify(boomOrder));
@@ -1236,6 +1240,10 @@ if (boomOrder.missiles.length === 0 || boomOrder.booms.length === 0)
   throw new Error(`Fireball produced ${JSON.stringify(boomOrder)}`);
 if (!boomOrder.booms.every((b) => b >= Math.max(...boomOrder.missiles) + 200))
   throw new Error(`the explosion beat the projectile: ${JSON.stringify(boomOrder)}`);
+if (boomOrder.linesEventually <= 0)
+  throw new Error('Fireball said nothing at all, so the text test proves nothing');
+if (boomOrder.linesNow !== 0)
+  throw new Error(`the damage text beat the projectile: ${JSON.stringify(boomOrder)}`);
 await page.evaluate(() => { if (window.__session.mode === 9) window.__session.endCombat(); });
 if (!combatSpell.scroll.moved || combatSpell.scroll.scrolled.x !== combatSpell.scroll.before.x - 1)
   throw new Error('clicking the terrain border did not scroll the view');

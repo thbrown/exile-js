@@ -28,7 +28,7 @@ import { livingSound } from '../universe/living';
 import { Player } from '../universe/player';
 import { Race, Skill, Status, Trait } from '../universe/skills';
 import { takeAp } from './combat';
-import { damageMonst, damagePc, hitChance } from './damage';
+import { damageMonst, damagePc, handleMarkedDamage, hitChance } from './damage';
 import { targetThere } from './missiles';
 import { GameMode } from './modes';
 import { getSummonMonster, summonMonster } from './monsterPlace';
@@ -385,10 +385,13 @@ export function doCombatCast(session: GameSession, target: Location): void {
     hitSpace(session, d.at, d.dam, d.type, 1, 0, who);
   }
   } finally {
-    // do_explosion_anim: play the collected hits, after the missiles. In a
-    // `finally` because a handler that throws must not leave the queue open —
-    // every later boom in the session would be swallowed.
+    // do_explosion_anim, then handle_marked_damage (boe.combat.cpp:1435/1439):
+    // play the collected hits, then apply the damage they stood for. In a
+    // `finally` because a handler that throws must not leave the volley open —
+    // every later boom in the session would be swallowed, and the damage with
+    // it.
     runBoomAnim();
+    handleMarkedDamage(univ, session);
   }
 }
 

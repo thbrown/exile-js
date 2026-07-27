@@ -21,7 +21,7 @@ import { Creature, CreatureStatus } from '../universe/creature';
 import { getProtLevel, hasAbilEquip, takeItem } from '../universe/inventory';
 import { SpellNote, livingSound } from '../universe/living';
 import { MonstAbil } from '../data/monsterAbility';
-import { boomSpace } from './booms';
+import { boomAnimActive, boomSpace } from './booms';
 import { findClearSpot, placeMonster } from './monsterPlace';
 import { placeGlands, placeTreasure } from './loot';
 import { NUM_INVEN_SLOTS, Player } from '../universe/player';
@@ -191,6 +191,17 @@ export function damagePc(
     howMuch = Math.trunc(howMuch / (fullProt >= 7 ? 4 : 2));
   }
 
+  // The PC half of the same marked-damage branch (boe.party.cpp:2634). Note it
+  // booms at the *party's* square in town rather than the PC's, which only
+  // differs outside combat.
+  if (boomAnimActive()) {
+    if (howMuch < 0) howMuch = 0;
+    pc.markedDamage += howMuch;
+    boomSpace(hitLocation(univ, pc), boomType(damType), howMuch,
+      getSoundType(damType, options.soundType ?? -1));
+    return howMuch;
+  }
+
   if (howMuch <= 0) {
     // The "clang off the armour" sound, which really is file 2.
     if (ARMOUR_RESISTS.has(damType)) livingSound(2);
@@ -342,6 +353,17 @@ export function damageMonst(
     let r1 = univ.rng.getRan(1, 0, Math.trunc((victim.mon.armor * 5) / 4));
     r1 += Math.trunc(victim.mon.level / 4);
     howMuch -= r1;
+  }
+
+  // Inside a volley (boe.specials.cpp:1503) the damage is *marked*, not dealt:
+  // it accumulates on the victim, the explosion is queued, and nothing is
+  // printed. `handleMarkedDamage` applies the total once the projectiles have
+  // landed, which is what keeps "Guard takes 4" from beating the fireball.
+  if (boomAnimActive()) {
+    if (howMuch < 0) howMuch = 0;
+    victim.markedDamage += howMuch;
+    boomSpace(victim.curLoc, boomType(damType), howMuch, getSoundType(damType));
+    return howMuch;
   }
 
   if (howMuch <= 0) {
@@ -577,6 +599,29 @@ export function hitParty(
   for (const pc of univ.party.pcs) {
     if (!pc.isAlive) continue;
     damagePc(univ, pc, howMuch, damType, Race.UNKNOWN, { soundType });
+  }
+}
+
+/**
+ * handle_marked_damage (boe.combat.cpp:1445) — apply what a volley marked up,
+ * now that its projectiles and explosions have played. `MARKED` is a damage
+ * type of its own so the second pass skips the reductions already taken (easy
+ * mode, toughness, luck) and doesn't boom again — the explosion has been seen.
+ */
+export function handleMarkedDamage(univ: Universe, session?: GameSession): void {
+  for (const pc of univ.party.pcs) {
+    if (pc.markedDamage > 0) {
+      const marked = pc.markedDamage;
+      pc.markedDamage = 0;
+      damagePc(univ, pc, marked, DamageType.MARKED, Race.UNKNOWN);
+    }
+  }
+  for (const monst of univ.town?.monsters ?? []) {
+    if (monst.markedDamage > 0) {
+      const marked = monst.markedDamage;
+      monst.markedDamage = 0;
+      damageMonst(univ, monst, univ.curPc, marked, DamageType.MARKED, { session });
+    }
   }
 }
 

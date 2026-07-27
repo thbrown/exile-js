@@ -854,5 +854,8 @@ export function combatRunMonst(session: GameSession): void {
   if (univ.party.age % 2 === 0) doPoison(session);
   if (univ.party.age % 3 === 0) handleDisease(session);
   handleAcid(session);
-  // TODO(M5b): handle_marked_damage.
+  // `handle_marked_damage` is ported (game/damage.ts) but is not called here:
+  // combat_run_monst's copy exists for the volleys a *monster* fires, and
+  // nothing on the monster side opens one yet. `doCombatCast` is the only
+  // caller so far. TODO(M6): open a volley around monst_fire_missile too.
 }

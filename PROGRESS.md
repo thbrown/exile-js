@@ -740,18 +740,32 @@ Notes for M2 implementer:
     per square, keeping the larger number, thirty max). `doCombatCast` opens the
     volley, and closes it in a `finally` — a handler that throws must not leave
     the queue open, or every later boom in the session is swallowed.
-  - **Still open, and it is the visible remainder**: `handle_marked_damage`,
-    already carrying a `TODO(M5b)`. Because damage is still *applied* during the
-    volley, the transcript line and the HP change still lead the projectile even
-    though the sprite no longer does. Porting `marked_damage` means changing the
-    damage pipeline itself, not just the drawing, which is why it is called out
-    rather than bundled in here.
-  - Transcript lines now ride the timeline as sounds and sprites do
+  - **The damage half landed too.** `damage_monst` and `damage_pc` now take the
+    C++'s marked branch while a volley is open: clamp to zero, add to the
+    victim's `marked_damage`, queue the explosion, and **return without
+    applying damage or printing anything**. `handleMarkedDamage`
+    (boe.combat.cpp:1445) applies the totals once the volley closes, passing
+    `DamageType.MARKED` so the second pass skips the reductions already taken
+    (easy mode, toughness, luck) and doesn't boom again. Those `MARKED` guards
+    were already in this port's damage functions, waiting for a caller.
+  - Transcript lines ride the timeline as sounds and sprites do
     (`Universe.transcriptAt` + `visibleTranscript`, stamped by a
-    `transcriptClock` the host sets to `animAt`). That fixes the text for the
-    arms that book before they damage; the rest waits on `marked_damage`.
+    `transcriptClock` the host sets to `animAt`). Between that and the marked
+    damage, **"Guard takes 4" now appears with the explosion**, not with the
+    cast.
+  - *Remaining artifact, and it is subtle*: the marked damage is applied when
+    `doCombatCast` returns, which is immediately — the C++ gets there ~200ms
+    later only because `do_missile_anim` and `do_explosion_anim` block. So a
+    monster killed by a fireball vanishes from the terrain as the missile
+    launches. Deferring that would mean deferring `killMonst` and everything
+    downstream of it, which is a change to how the whole port runs rather than
+    to how it draws.
   - `verify-screen.mjs` casts Fireball and asserts every boom starts at or after
-    the missile's launch plus its flight time.
+    the missile's launch plus its flight time, **and** that no transcript line
+    has appeared yet at that moment.
+  - Only `doCombatCast` opens a volley so far. `combat_run_monst` has its own
+    `handle_marked_damage` call for the volleys a *monster* fires; wiring
+    `monst_fire_missile` the same way is a TODO(M6).
 
 ## Milestones (Part 1: BoE player)
 

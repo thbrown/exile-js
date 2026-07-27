@@ -66,12 +66,17 @@ export function setBoomSink(fn: ((boom: Boom) => void) | null): void {
  * `add_missile` comes after the switch — booms at cast time and only then
  * launches.
  */
-let boomAnimActive = false;
+let volleyOpen = false;
 let queued: Boom[] = [];
+
+/** Whether a volley is open, so damage should be marked rather than dealt. */
+export function boomAnimActive(): boolean {
+  return volleyOpen;
+}
 
 /** start_missile_anim (boe.newgraph.cpp:258) — open a volley. */
 export function startBoomAnim(): void {
-  boomAnimActive = true;
+  volleyOpen = true;
   queued = [];
 }
 
@@ -81,7 +86,7 @@ export function startBoomAnim(): void {
  */
 export function runBoomAnim(): void {
   const toPlay = queued;
-  boomAnimActive = false;
+  volleyOpen = false;
   queued = [];
   // `animAt()` is read now, so these sit after whatever the missiles booked.
   const starts = animAt();
@@ -99,7 +104,7 @@ export function runBoomAnim(): void {
 export function boomSpace(
   where: Location, type: number, damage: number, soundType: number,
 ): void {
-  if (boomAnimActive) {
+  if (volleyOpen) {
     const file = soundType < 0 ? -soundType : (SOUND_LOOKUP[soundType] ?? 0);
     // add_explosion (boe.newgraph.cpp:320) drops a second explosion on a square
     // that already has one, but takes the larger damage number, and holds 30.
