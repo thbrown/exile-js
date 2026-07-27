@@ -13,7 +13,7 @@ import { groundFromTer, terFromGround } from '../data/scenario';
 import { TerSpec, TrimType, blocksMove } from '../data/terrain';
 import { Lighting } from '../data/town';
 import { GameSession } from '../game/session';
-import { GameMode, isCombat } from '../game/modes';
+import { GameMode, isCombat, isScrollable } from '../game/modes';
 import { Boom } from '../game/booms';
 import { MISSILE_MS, Missile, getMissileDirection } from '../game/missileAnim';
 import { MAIN_STATUS_LABEL, MainStatus, Status } from '../universe/skills';
@@ -31,6 +31,7 @@ import {
   SPEC_BTN_ICONS,
   FIGHT_BUTTONS,
   OUT_BUTTONS,
+  POINTING_ARROWS,
   PANEL_IMAGES,
   PC_PANEL,
   PC_ROWS,
@@ -49,6 +50,7 @@ import {
   buttonIconRect,
   height,
   placeButtons,
+  pointingArrowRects,
   terrainSpotPos,
   width,
 } from './layout';
@@ -231,8 +233,57 @@ export class Screen {
     this.drawMissiles(session);
     // redraw_screen draws these over the finished terrain (boe.graphics.cpp:637
     // and :1077), which is why they come after everything else.
+    this.drawPointingArrows(session);
     this.drawTargets(session);
     this.drawTargetingLine(session);
+  }
+
+  /**
+   * draw_pointing_arrows (boe.graphics.cpp:1634) — the twelve little arrows
+   * around the terrain view that scroll it while you're aiming, so a spell can
+   * reach a target the party can't currently see on screen. Drawn only in
+   * `scrollableModes`, and never while the monsters are moving.
+   */
+  private drawPointingArrows(session: GameSession): void {
+    if (!isScrollable(session.mode)) return;
+    const sheet = this.store.get('invenbtns');
+    if (!sheet) return;
+    for (const [dir, pos] of POINTING_ARROWS) {
+      const { src, dest } = pointingArrowRects(dir, pos);
+      this.ctx.drawImage(
+        sheet, src.left, src.top, width(src), height(src),
+        dest.left, dest.top, width(dest), height(dest),
+      );
+    }
+  }
+
+  /**
+   * Which way a click at (x, y) scrolls the view, or null. The C++ doesn't
+   * hit-test the arrows themselves — it asks whether the point is inside the
+   * terrain *panel* but outside the 9x9 grid inset 13px within it
+   * (boe.actions.cpp:1711), so the whole border is live and the arrows are
+   * only a hint about where to click. Kept, since a player who aims for the
+   * border rather than the 8px arrow should still get the scroll.
+   */
+  scrollBorderAt(x: number, y: number): { dx: number; dy: number } | null {
+    const panel = WIN_RECTS.terView;
+    if (x < panel.left || x >= panel.right || y < panel.top || y >= panel.bottom) return null;
+    const grid = {
+      top: panel.top + TER_INSET_Y,
+      left: panel.left + TER_INSET_X,
+      bottom: panel.bottom - TER_INSET_Y,
+      right: panel.right - TER_INSET_X,
+    };
+    if (x >= grid.left && x < grid.right && y >= grid.top && y < grid.bottom) return null;
+    // Each of the four tests is independent, so a corner scrolls diagonally.
+    let dx = 0;
+    let dy = 0;
+    if (y < grid.top) dy = -1;
+    if (y >= grid.bottom) dy = 1;
+    if (x < grid.left) dx = -1;
+    if (x >= grid.right) dx = 1;
+    if (dx === 0 && dy === 0) return null;
+    return { dx, dy };
   }
 
   /**

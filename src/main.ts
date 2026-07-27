@@ -20,7 +20,7 @@ import { castTownSpell, startTownTargeting } from './game/spellTarget';
 import { CastDialog } from './dialogs/castDialog';
 import { GetItemsDialog } from './dialogs/getItemsDialog';
 import { placeSpellPattern } from './game/spellPatterns';
-import { GameMode, isCombat } from './game/modes';
+import { GameMode, isCombat, isScrollable } from './game/modes';
 import { setBoomSink } from './game/booms';
 import { FocusEvent, animPending, setFocusSink } from './game/anim';
 import { MISSILE_MS, setMissileSink } from './game/missileAnim';
@@ -592,6 +592,17 @@ async function main(): Promise<void> {
   const isAiming = (): boolean => session.missile !== null
     || session.spellTargeting !== null || session.townTarget !== null;
 
+  /**
+   * Put the view back where the game keeps it — on the acting PC in combat, on
+   * the party in town. Scrolling with the border arrows moves it away, and
+   * every targeting mode restores it when it resolves.
+   */
+  const recentre = (): void => {
+    session.center = isCombat(session.mode)
+      ? { ...univ.currentPc.combatPos }
+      : { ...univ.party.townLoc };
+  };
+
   /** Act on a target space according to what the player asked for. */
   const actOn = (target: { x: number; y: number }): void => {
     const what = pending;
@@ -617,8 +628,13 @@ async function main(): Promise<void> {
     // Targeting a combat spell: the click is where it lands. A multi-target
     // spell collects squares instead, and fires itself once the last is picked.
     if (session.spellTargeting !== null) {
-      if (session.mode === GameMode.FANCY_TARGET) placeTarget(session, target);
+      const fancy = session.mode === GameMode.FANCY_TARGET;
+      if (fancy) placeTarget(session, target);
       else doCombatCast(session, target);
+      // The view snaps back to the caster once the spell goes off
+      // (boe.actions.cpp:888) — but not while a multi-target spell is still
+      // collecting squares, or scrolling would be undone between each pick.
+      if (!fancy) recentre();
       setStatus();
       redraw();
       return;
@@ -628,6 +644,7 @@ async function main(): Promise<void> {
     // is the one the party is in outside combat.
     if (session.townTarget !== null) {
       castTownSpell(session, target);
+      recentre();
       setStatus();
       redraw();
       return;
@@ -635,6 +652,7 @@ async function main(): Promise<void> {
     // Targeting a missile: the click (or arrow key) is the shot, not a move.
     if (session.missile !== null) {
       session.fireMissileAt(target);
+      recentre();
       setStatus();
       redraw();
       return;
@@ -786,6 +804,17 @@ async function main(): Promise<void> {
         redraw();
         return;
       }
+      // The border around the terrain grid scrolls the view while aiming —
+      // that's what the little arrows around the edge are pointing at
+      // (boe.actions.cpp:1711). Checked before the grid, since it's outside it.
+      if (isScrollable(session.mode)) {
+        const shift = screen.scrollBorderAt(x, y);
+        if (shift) {
+          session.screenShift(shift.dx, shift.dy);
+          redraw();
+          return;
+        }
+      }
       const cell = screen.terrainCellAt(x, y);
       if (cell) {
         // Any combat mode aims from the active PC, not just COMBAT itself —
@@ -916,8 +945,10 @@ async function main(): Promise<void> {
           break;
         case 's': case 'S':
           // 's' arms a missile and 's' again cancels, as in the original.
-          if (session.missile !== null) session.cancelMissile();
-          else session.startMissile();
+          if (session.missile !== null) {
+            session.cancelMissile();
+            recentre();
+          } else session.startMissile();
           break;
         case ' ':
           // start_fancy_spell_targeting's "(Hit space to cast.)".
@@ -926,8 +957,10 @@ async function main(): Promise<void> {
         case 'm': case 'M': case 'p': case 'P':
           // While a spell is in the air the same key cancels it, which is what
           // start_spell_targeting's "(Hit 'm' to cancel.)" refers to.
-          if (session.spellTargeting !== null) cancelSpellTargeting(session);
-          else {
+          if (session.spellTargeting !== null) {
+            cancelSpellTargeting(session);
+            recentre();
+          } else {
             void castSpellFlow(key === 'm' || key === 'M'
               ? Skill.MAGE_SPELLS : Skill.PRIEST_SPELLS);
           }
@@ -957,11 +990,13 @@ async function main(): Promise<void> {
       }
       if (key === 'Escape' && session.spellTargeting !== null) {
         cancelSpellTargeting(session);
+        recentre();
         setStatus();
         redraw();
       }
       if (key === 'Escape' && session.missile !== null) {
         session.cancelMissile();
+        recentre();
         setStatus();
         redraw();
       }

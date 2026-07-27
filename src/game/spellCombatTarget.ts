@@ -33,6 +33,7 @@ import { targetThere } from './missiles';
 import { GameMode } from './modes';
 import { getSummonMonster, summonMonster } from './monsterPlace';
 import { Attitude } from '../data/monster';
+import { runAMissile } from './missileAnim';
 import { hitSpace } from './processFields';
 import { placeSpellPattern } from './spellPatterns';
 import { makeTownHostile } from './townAttitude';
@@ -236,6 +237,43 @@ export function castCollected(session: GameSession): void {
  * the action points are each taken **once**, on the first target that gets as
  * far as resolving.
  */
+/** One entry of `store_missiles` — what `add_missile` queues up. */
+interface QueuedMissile {
+  dest: Location;
+  type: number;
+  pathType: number;
+  xAdj: number;
+  yAdj: number;
+}
+
+/**
+ * `add_missile` (boe.newgraph.cpp:278) — queue a projectile for the volley that
+ * `do_missile_anim` will fly. Two rules worth keeping: a second missile aimed
+ * at a square that already has one is **dropped** (so a spell that hits the
+ * same square twice only draws one), and the queue holds thirty.
+ */
+function addMissile(
+  queue: QueuedMissile[], dest: Location, type: number, pathType = 1, xAdj = 0, yAdj = 0,
+): void {
+  if (queue.some((m) => m.dest.x === dest.x && m.dest.y === dest.y)) return;
+  if (queue.length >= 30) return;
+  queue.push({ dest: { ...dest }, type, pathType, xAdj, yAdj });
+}
+
+/**
+ * `do_missile_anim` (boe.newgraph.cpp:347) — fly everything queued, all from
+ * the same origin. `numSteps` is both the frame count and the arc divisor; the
+ * C++ passes 35 for a volley and 60 for a single shot.
+ */
+function flyMissiles(
+  queue: QueuedMissile[], from: Location, sound: number, numSteps: number,
+): void {
+  for (const m of queue) {
+    runAMissile(from, m.dest, m.type, m.pathType, sound, m.xAdj, m.yAdj, numSteps);
+  }
+  queue.length = 0;
+}
+
 export function doCombatCast(session: GameSession, target: Location): void {
   const armed = session.spellTargeting;
   if (!armed) return;
@@ -278,6 +316,14 @@ export function doCombatCast(session: GameSession, target: Location): void {
    * a volley of arrows lands together rather than one at a time.
    */
   const deferred: { at: Location; type: DamageType; dam: number }[] = [];
+  /**
+   * `store_missiles` and `store_sound`. Most arms only queue their projectile
+   * and let the shared `do_missile_anim` at the end of `do_combat_cast` fly it;
+   * a handful (Flame, Spark, Wound, Kill, Flash Step) fire theirs on the spot,
+   * which is why the flight happens before their damage does.
+   */
+  const missiles: QueuedMissile[] = [];
+  const shared = { sound: 0 };
 
   for (let i = 0; i < targets.length; i++) {
     const at = targets[i]!;
@@ -318,9 +364,13 @@ export function doCombatCast(session: GameSession, target: Location): void {
     }
 
     resolveOne(session, spell, at, i, {
-      pattern: armed.pattern, level, bonus, who, rng, min, deferred,
+      pattern: armed.pattern, level, bonus, who, rng, min, deferred, missiles, shared,
     });
   }
+
+  // The trailing do_missile_anim (boe.combat.cpp:1412): whatever is still
+  // queued flies now, faster when there's a volley of them than for one shot.
+  flyMissiles(missiles, caster.combatPos, shared.sound, targets.length > 1 ? 35 : 60);
 
   // The held-back damage lands now, all of it at once.
   for (const d of deferred) {
@@ -338,13 +388,24 @@ function resolveOne(
     pattern: SpellPat; level: number; bonus: number; who: number;
     rng: GameSession['univ']['rng']; min: typeof Math.min;
     deferred: { at: Location; type: DamageType; dam: number }[];
+    missiles: QueuedMissile[];
+    shared: { sound: number };
   },
 ): void {
   const { univ } = session;
   const town = univ.town;
   if (!town) return;
   const caster = univ.currentPc;
-  const { pattern: pat, level, bonus, who, rng, min, deferred } = ctx;
+  const { pattern: pat, level, bonus, who, rng, min, deferred, missiles, shared } = ctx;
+
+  /** add_missile aimed at this square. */
+  const missile = (type: number, xAdj = 0, yAdj = 0): void => {
+    addMissile(missiles, target, type, 1, xAdj, yAdj);
+  };
+  /** The arms that don't wait for the shared volley: fly what's queued now. */
+  const flyNow = (sound: number): void => {
+    flyMissiles(missiles, caster.combatPos, sound, 100);
+  };
 
   const field = (which: FieldType): void => {
     placeSpellPattern(session, pat, target, { field: which, whoHit: who });
@@ -407,6 +468,8 @@ function resolveOne(
 
     // --- things that fly at a square ---------------------------------------
     case Spell.DIVINE_THUD:
+      missile(9);
+      shared.sound = 11;
       blast(DamageType.MAGIC, min(18, Math.trunc((level * 7) / 10) + 2 * bonus),
         SpellPat.RADIUS_2);
       return;
@@ -414,6 +477,8 @@ function resolveOne(
     case Spell.ICE_BOLT: {
       const dam = spell === Spell.SPARK
         ? rng.getRan(2, 1, 4) : rng.getRan(min(20, level + bonus), 1, 4);
+      missile(6);
+      flyNow(11);
       hitSpace(session, target, dam,
         spell === Spell.SPARK ? DamageType.MAGIC : DamageType.COLD, 1, 0, who);
       return;
@@ -421,9 +486,11 @@ function resolveOne(
     // These three hold their damage back so a whole volley lands together —
     // `boom_dam` in the C++, applied after the target loop.
     case Spell.ARROWS_FLAME:
+      missile(4);
       deferred.push({ at: target, type: DamageType.FIRE, dam: rng.getRan(2, 1, 4) });
       return;
     case Spell.SMITE:
+      missile(6);
       deferred.push({ at: target, type: DamageType.COLD, dam: rng.getRan(2, 1, 5) });
       return;
     case Spell.WOUND:
@@ -431,16 +498,24 @@ function resolveOne(
       const dam = spell === Spell.WRACK
         ? rng.getRan(2 + Math.trunc(bonus / 2), 1, 4)
         : rng.getRan(min(7, 2 + bonus + Math.trunc(level / 2)), 1, 4);
+      missile(14);
+      flyNow(24);
       hitSpace(session, target, dam, DamageType.UNBLOCKABLE, 1, 0, who);
       return;
     }
-    case Spell.FLAME:
-      hitSpace(session, target,
-        rng.getRan(min(10, 1 + Math.trunc(level / 3) + bonus), 1, 6),
-        DamageType.FIRE, 1, 0, who);
+    case Spell.FLAME: {
+      const dam = rng.getRan(min(10, 1 + Math.trunc(level / 3) + bonus), 1, 6);
+      missile(2);
+      flyNow(11);
+      hitSpace(session, target, dam, DamageType.FIRE, 1, 0, who);
       return;
+    }
     case Spell.FIREBALL:
     case Spell.FLAMESTRIKE: {
+      // Queued, not flown: the C++ comments its do_missile_anim out here and
+      // lets the shared volley at the end carry it.
+      missile(2);
+      shared.sound = 11;
       let dam = min(9, 1 + Math.trunc((level * 2) / 3) + bonus) + 1;
       if (spell === Spell.FLAMESTRIKE) dam = Math.trunc((dam * 14) / 10);
       else if (dam > 10) dam = Math.trunc((dam * 8) / 10);
@@ -450,6 +525,9 @@ function resolveOne(
     }
     case Spell.FIRESTORM:
     case Spell.ICY_RAIN: {
+      // Fire throws a flame, ice a frost bolt; both ride the shared volley.
+      missile(spell === Spell.FIRESTORM ? 2 : 6);
+      shared.sound = 11;
       let dam = min(12, 1 + Math.trunc((level * 2) / 3) + bonus) + 2;
       if (dam > 20) dam = Math.trunc((dam * 8) / 10);
       blast(spell === Spell.FIRESTORM ? DamageType.FIRE : DamageType.COLD,
@@ -457,10 +535,14 @@ function resolveOne(
       return;
     }
     case Spell.KILL:
+      missile(9);
+      flyNow(11);
       hitSpace(session, target, 40 + rng.getRan(3, 0, 10) + caster.level * 2,
         DamageType.MAGIC, 1, 0, who);
       return;
     case Spell.ARROWS_DEATH:
+      missile(9);
+      shared.sound = 11;
       deferred.push({
         at: target, type: DamageType.MAGIC,
         dam: rng.getRan(3, 0, 10) + caster.level + 3 * bonus,
@@ -474,6 +556,10 @@ function resolveOne(
     case Spell.DEMON: case Spell.SUMMON_RAT: case Spell.SUMMON_SPIRIT:
     case Spell.STICKS_TO_SNAKES: case Spell.SUMMON_HOST:
     case Spell.SUMMON_GUARDIAN: {
+      // Every summon (and Flash Step) throws the same sparkle first, at half
+      // the usual length and with its own sound.
+      missile(8);
+      flyMissiles(missiles, caster.combatPos, 61, 50);
       const adj = caster.statAdj(Skill.INTELLIGENCE);
       let which = 0;
       let dice = 3;
@@ -508,6 +594,8 @@ function resolveOne(
     }
 
     case Spell.FLASH_STEP:
+      missile(8);
+      flyMissiles(missiles, caster.combatPos, 61, 50);
       if (session.isBlocked(target)) univ.addStringToBuf('  Teleport failed.');
       else {
         univ.addStringToBuf('  Flash step!');
@@ -534,6 +622,16 @@ function resolveOne(
     makeTownHostile(session);
   }
 
+  /**
+   * `store_m_type` — the missile each single-target spell throws. It defaults
+   * to **2** (the flame bolt) at the top of `do_combat_cast`, so a spell whose
+   * arm never sets it still draws one; the arms that set -1 draw nothing.
+   * `store_sound` goes with it, and both are used by the one `add_missile`
+   * after the switch (boe.combat.cpp:1394).
+   */
+  let storeMType = SINGLE_TARGET_MISSILE[spell] ?? 2;
+  shared.sound = SINGLE_TARGET_SOUND[spell] ?? shared.sound;
+
   switch (spell) {
     case Spell.ACID_SPRAY: victim.acid(level); livingSound(24); break;
     case Spell.PARALYZE_BEAM: victim.sleep(Status.PARALYZED, 500, 0, rng); break;
@@ -546,6 +644,7 @@ function resolveOne(
     }
     case Spell.SCRY_MONSTER:
       if (!monst) { univ.addStringToBuf('  Nobody there.'); break; }
+      storeMType = -1;
       livingSound(52);
       univ.party.mNoted.add(monst.number);
       univ.addStringToBuf(`  ${monst.mon.name} noted.`);
@@ -556,6 +655,7 @@ function resolveOne(
       univ.addStringToBuf('  Capture Soul is not in yet.');
       break;
     case Spell.MINDDUEL:
+      storeMType = -1;
       // TODO(M6): do_mindduel, which also wants a smoky crystal.
       univ.addStringToBuf('  Mindduel is not in yet.');
       break;
@@ -607,6 +707,7 @@ function resolveOne(
       const race = monst ? monst.mon.race : (victim as Player).race;
       if (race !== Race.UNDEAD && race !== Race.SKELETAL) {
         univ.addStringToBuf('  Not undead.');
+        storeMType = -1;
         break;
       }
       const roll = rng.getRan(1, 0, 90);
@@ -627,6 +728,7 @@ function resolveOne(
       const race = monst ? monst.mon.race : (victim as Player).race;
       if (race !== Race.DEMON) {
         univ.addStringToBuf('  Not a demon.');
+        storeMType = -1;
         break;
       }
       const roll = rng.getRan(1, 1, 100);
@@ -652,4 +754,70 @@ function resolveOne(
         `  Error: Spell not implemented for combat mode. ${spellName(spell)}`);
       break;
   }
+
+  // The one add_missile for this whole family (boe.combat.cpp:1394). The x/y
+  // adjustment centres the sprite on a big creature rather than on its
+  // top-left square.
+  if (storeMType >= 0) {
+    const w = monst ? monst.xWidth : 1;
+    const h = monst ? monst.yWidth : 1;
+    addMissile(missiles, target, storeMType, 1, 14 * (w - 1), 18 * (h - 1));
+  }
 }
+
+/**
+ * `store_m_type` per spell, for the single-target family (boe.combat.cpp:1191
+ * onwards). Anything not listed keeps the default of 2, the flame bolt.
+ */
+const SINGLE_TARGET_MISSILE: Partial<Record<Spell, number>> = {
+  [Spell.ACID_SPRAY]: 0,
+  [Spell.PARALYZE_BEAM]: 9,
+  [Spell.UNHOLY_RAVAGING]: 14,
+  [Spell.CAPTURE_SOUL]: 15,
+  [Spell.CHARM_FOE]: 14,
+  [Spell.DISEASE]: 0,
+  [Spell.STRENGTHEN_TARGET]: 14,
+  [Spell.DUMBFOUND]: 14,
+  [Spell.SCARE]: 11,
+  [Spell.FEAR]: 11,
+  [Spell.SLOW]: 11,
+  [Spell.POISON_MINOR]: 11,
+  [Spell.ARROWS_VENOM]: 4,
+  [Spell.PARALYZE]: 9,
+  [Spell.POISON]: 11,
+  [Spell.POISON_MAJOR]: 11,
+  [Spell.STUMBLE]: 8,
+  [Spell.CURSE]: 8,
+  [Spell.HOLY_SCOURGE]: 8,
+  [Spell.TURN_UNDEAD]: 8,
+  [Spell.DISPEL_UNDEAD]: 8,
+  [Spell.RAVAGE_SPIRIT]: 8,
+};
+
+/** `store_sound` for the same family. */
+const SINGLE_TARGET_SOUND: Partial<Record<Spell, number>> = {
+  [Spell.ACID_SPRAY]: 24,
+  [Spell.PARALYZE_BEAM]: 24,
+  [Spell.UNHOLY_RAVAGING]: 53,
+  [Spell.SCRY_MONSTER]: 25,
+  [Spell.CAPTURE_SOUL]: 25,
+  [Spell.MINDDUEL]: 24,
+  [Spell.CHARM_FOE]: 24,
+  [Spell.DISEASE]: 24,
+  [Spell.STRENGTHEN_TARGET]: 55,
+  [Spell.DUMBFOUND]: 53,
+  [Spell.SCARE]: 54,
+  [Spell.FEAR]: 54,
+  [Spell.SLOW]: 25,
+  [Spell.POISON_MINOR]: 55,
+  [Spell.ARROWS_VENOM]: 55,
+  [Spell.PARALYZE]: 25,
+  [Spell.POISON]: 55,
+  [Spell.POISON_MAJOR]: 55,
+  [Spell.STUMBLE]: 24,
+  [Spell.CURSE]: 24,
+  [Spell.HOLY_SCOURGE]: 24,
+  [Spell.TURN_UNDEAD]: 24,
+  [Spell.DISPEL_UNDEAD]: 24,
+  [Spell.RAVAGE_SPIRIT]: 24,
+};

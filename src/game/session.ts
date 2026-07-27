@@ -1053,6 +1053,38 @@ export class GameSession {
     return { a: result.a, b: result.b };
   }
 
+  /**
+   * screen_shift (boe.actions.cpp:1465) — slide the view one square without
+   * moving the party, so a spell or a shot can reach past the edge of what's
+   * on screen. Bounded by the town's own rect *and* by the 9x9 view's half
+   * width, so the grid never runs off the map. Town and combat only, since the
+   * C++ dereferences `univ.town` here.
+   */
+  screenShift(dx: number, dy: number): boolean {
+    const town = this.univ.town;
+    if (!town || (dx === 0 && dy === 0)) return false;
+    const rect = town.record.inTownRect;
+    const maxDim = town.record.maxDim;
+    let moved = false;
+    if (dy < 0 && this.center.y > rect.top && this.center.y > 4) {
+      this.center.y--;
+      moved = true;
+    }
+    if (dy > 0 && this.center.y < rect.bottom && this.center.y < maxDim - 5) {
+      this.center.y++;
+      moved = true;
+    }
+    if (dx < 0 && this.center.x > rect.left && this.center.x > 4) {
+      this.center.x--;
+      moved = true;
+    }
+    if (dx > 0 && this.center.x < rect.right && this.center.x < maxDim - 5) {
+      this.center.x++;
+      moved = true;
+    }
+    return moved;
+  }
+
   /** Set by the host so a special that changes the world can repaint. */
   onRedraw: (() => void) | null = null;
 

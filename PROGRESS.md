@@ -618,6 +618,53 @@ Notes for M2 implementer:
     crosshair appears, clicks, and asserts the barrier landed on **that** square
     rather than the adjacent one.
 
+- **The viewport arrows and the spells you couldn't see (2026-07-27)**. Two
+  more from the same play-test.
+  - **The pointing arrows.** `draw_pointing_arrows` /
+    `draw_one_pointing_arrow` (boe.graphics.cpp:1601) had never been ported:
+    twelve little arrows around the terrain view, two per edge and one per
+    corner, drawn from invenbtns. They appear in `scrollableModes`
+    (boe.consts.hpp:44) — SPELL_TARGET, FIRING, THROWING, FANCY_TARGET and the
+    two Look modes — and clicking them scrolls the view so a spell can reach
+    something off screen. `session.screenShift` ports `screen_shift`
+    (boe.actions.cpp:1465) with its bounds, and the view snaps back to the
+    caster once the spell resolves or is cancelled (:888).
+    - *Gotcha*: **TOWN_TARGET is not in `scrollableModes`** — a town spell
+      can't scroll the view. Only combat targeting, missiles and Look can.
+    - *Gotcha*: the C++ doesn't hit-test the arrows at all. It asks whether the
+      click is inside the terrain *panel* but outside the 9x9 grid inset 13px
+      within it, so **the whole border is live** and the arrows are only a hint
+      about where to click. Each of the four edge tests is independent, so a
+      corner scrolls diagonally. Kept.
+    - This port's Look is a `pending` flag rather than a mode, so LOOK_TOWN and
+      LOOK_COMBAT are in the set for fidelity but never reached yet.
+  - **The missing projectiles.** `do_combat_cast` dropped every `add_missile`
+    call, so Flame, Spark, Kill, the arrow spells and the summons all did their
+    damage with nothing on screen. `spellCombatTarget.ts` now ports
+    `add_missile` (boe.newgraph.cpp:278) and the `do_missile_anim` call sites.
+    - The shape: most arms only *queue* their projectile and let the shared
+      `do_missile_anim` at the end of `do_combat_cast` (:1412) fly the lot —
+      35 steps for a volley, 60 for a single shot. Five arms (Spark/Ice Bolt,
+      Wound/Wrack, Flame, Kill, and the summons' sparkle) fire theirs on the
+      spot instead, which is why their flight happens *before* their damage.
+      Fireball and Firestorm have their `do_missile_anim` commented out in the
+      C++ and ride the shared volley; that's kept.
+    - The whole single-target family shares one `add_missile` after its switch,
+      driven by `store_m_type` — which **defaults to 2** (the flame bolt), so a
+      spell whose arm never sets it still throws one. Ported as
+      `SINGLE_TARGET_MISSILE` / `SINGLE_TARGET_SOUND`, with the arms that set
+      -1 (Scry, Mindduel, and a Turn Undead or Ravage Spirit aimed at the wrong
+      race) drawing nothing.
+    - *Gotcha*: `add_missile` **drops a second missile aimed at a square that
+      already has one**, so a spell that hits the same square twice only draws
+      one projectile. The queue holds thirty.
+    - The x/y adjustment on that call (`14 * (w - 1)`, `18 * (h - 1)`) centres
+      the sprite on a big creature rather than on its top-left square.
+  - `verify-screen.mjs` gained a step that arms Flame in a fight, checks the
+    border scroll moves the centre, casts at a monster three squares away and
+    asserts both that a type-2 projectile is on screen and that the monster
+    lost health.
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page

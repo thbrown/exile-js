@@ -69,3 +69,26 @@ export function isTown(mode: GameMode, pre?: PreModes): boolean {
 export function isCombat(mode: GameMode): boolean {
   return (mode >= GameMode.COMBAT && mode < GameMode.TALKING) || mode === GameMode.LOOK_COMBAT;
 }
+
+/**
+ * `scrollableModes` (boe.consts.hpp:44) — the modes in which the view can be
+ * scrolled away from the party: while aiming something, or while looking. The
+ * pointing arrows are drawn in exactly these modes, and clicking the border
+ * around the terrain grid shifts the centre.
+ *
+ * Note **TOWN_TARGET is not in the set**: a town spell can't scroll the view.
+ * This port's Look is a pending flag rather than a mode, so LOOK_TOWN and
+ * LOOK_COMBAT are listed for fidelity but never actually reached yet.
+ */
+const SCROLLABLE_MODES = new Set<GameMode>([
+  GameMode.SPELL_TARGET,
+  GameMode.FIRING,
+  GameMode.THROWING,
+  GameMode.FANCY_TARGET,
+  GameMode.LOOK_COMBAT,
+  GameMode.LOOK_TOWN,
+]);
+
+export function isScrollable(mode: GameMode): boolean {
+  return SCROLLABLE_MODES.has(mode);
+}

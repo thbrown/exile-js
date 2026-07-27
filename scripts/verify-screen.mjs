@@ -1144,6 +1144,56 @@ const landed = await page.evaluate(() => {
   return { mode: window.__session.mode, at };
 });
 console.log('SPELL TARGETING:', JSON.stringify({ ...targeting, hovering, landed }));
+
+// The viewport arrows, and the projectile a combat spell throws. Both were
+// missing: draw_pointing_arrows had never been ported, and do_combat_cast
+// dropped every add_missile, so Flame did damage with nothing visible.
+const combatSpell = await page.evaluate(async () => {
+  const s = window.__session;
+  const sc = window.__screen;
+  const tgt = await import('/src/game/spellCombatTarget.ts');
+  const sp = await import('/src/data/spell.ts');
+  if (s.mode !== 9) s.startCombat(s.univ.party.direction);
+  const pc = s.univ.party.pcs[3];
+  s.univ.curPc = 3;
+  pc.curSp = 50;
+  pc.ap = 10;
+  s.center = { ...pc.combatPos };
+  tgt.startSpellTargeting(s, sp.Spell.FLAME, false, 1);
+  window.__redraw();
+  // The arrows only exist in scrollableModes, and the border scrolls the view.
+  const shift = sc.scrollBorderAt(22, 190);
+  const before = { ...s.center };
+  const moved = shift ? s.screenShift(shift.dx, shift.dy) : false;
+  const scrolled = { ...s.center };
+  s.center = { ...pc.combatPos };
+
+  // Now the spell itself, at a monster three squares east.
+  sc.missiles.length = 0;
+  const at = { x: pc.combatPos.x + 3, y: pc.combatPos.y };
+  const monst = s.univ.town.monsters.find((m) => m.isAlive);
+  if (monst) { monst.curLoc = { ...at }; monst.attitude = 2; }
+  const hpBefore = monst ? monst.health : null;
+  tgt.startSpellTargeting(s, sp.Spell.FLAME, false, 1);
+  tgt.doCombatCast(s, at);
+  window.__redraw();
+  return {
+    scroll: { shift, moved, before, scrolled },
+    hpBefore,
+    hpAfter: monst ? monst.health : null,
+    missiles: sc.missiles.map((m) => ({ type: m.type, from: m.from, dest: m.dest })),
+  };
+});
+console.log('COMBAT SPELL:', JSON.stringify(combatSpell));
+if (!combatSpell.scroll.moved || combatSpell.scroll.scrolled.x !== combatSpell.scroll.before.x - 1)
+  throw new Error('clicking the terrain border did not scroll the view');
+if (combatSpell.missiles.length !== 1 || combatSpell.missiles[0].type !== 2)
+  throw new Error(`Flame threw no projectile: ${JSON.stringify(combatSpell.missiles)}`);
+if (!(combatSpell.hpAfter < combatSpell.hpBefore))
+  throw new Error('Flame did no damage');
+await shot('02c5-combat-spell');
+await page.evaluate(() => { if (window.__session.mode === 9) window.__session.endCombat(); });
+
 if (!hovering) throw new Error('the targeting crosshair did not follow the cursor');
 if (!landed.at.some((p) => p.x === 23 && p.y === 20))
   throw new Error(`the spell missed the square clicked: ${JSON.stringify(landed.at)}`);

@@ -167,6 +167,59 @@ export const ITEM_BTN_ICONS = {
   info: r(12, 42, 24, 56),
 } as const;
 
+/**
+ * `draw_one_pointing_arrow` (boe.graphics.cpp:1601) — the little arrows around
+ * the terrain view that scroll it while you're aiming. `dir` is
+ * 0 down, 1 left, 2 right, 3 up, 4 down-left, 5 up-left, 6 up-right,
+ * 7 down-right; `pos` is which row or column to centre it in (ignored for the
+ * four diagonals, which sit in the corners).
+ *
+ * Returns the source rect in invenbtns and where it lands on screen, both in
+ * absolute canvas coordinates.
+ */
+export function pointingArrowRects(dir: number, pos: number): { src: UiRect; dest: UiRect } {
+  const src = {
+    top: 62 + 9 * Math.floor(dir / 4),
+    left: 61 + 9 * (dir % 4),
+    bottom: 70 + 9 * Math.floor(dir / 4),
+    right: 69 + 9 * (dir % 4),
+  };
+  const view = WIN_RECTS.terView;
+  let left = view.left;
+  let top = view.top;
+  // Left-pointing arrows hug the left edge, right-pointing ones the right.
+  if (dir === 1 || dir === 4 || dir === 5) left = view.left + 2;
+  if (dir === 2 || dir === 6 || dir === 7) left = view.right - 10;
+  if (dir === 3 || dir === 5 || dir === 6) top = view.top + 2;
+  if (dir === 0 || dir === 4 || dir === 7) top = view.bottom - 10;
+  // The up/down arrows slide along the top and bottom edges by column, and the
+  // left/right ones along the sides by row.
+  if (dir === 0 || dir === 3) left = view.left + 23 + pos * 28;
+  if (dir === 1 || dir === 2) top = view.top + 23 + pos * 36;
+  return { src, dest: { top, left, bottom: top + 8, right: left + 8 } };
+}
+
+/**
+ * The twelve arrows `draw_pointing_arrows` places (boe.graphics.cpp:1634), as
+ * [dir, pos] pairs: two each on the four edges, and one in each corner.
+ */
+export const POINTING_ARROWS: [number, number][] = [
+  [0, 3], [0, 5], [1, 3], [1, 5], [2, 3], [2, 5], [3, 3], [3, 5],
+  [4, 0], [5, 0], [6, 0], [7, 0],
+];
+
+/** Which way each `dir` scrolls the view. */
+export const ARROW_DELTAS: Record<number, { dx: number; dy: number }> = {
+  0: { dx: 0, dy: 1 },
+  1: { dx: -1, dy: 0 },
+  2: { dx: 1, dy: 0 },
+  3: { dx: 0, dy: -1 },
+  4: { dx: -1, dy: 1 },
+  5: { dx: -1, dy: -1 },
+  6: { dx: 1, dy: -1 },
+  7: { dx: 1, dy: 1 },
+};
+
 /** The transcript pane's text area, relative to its panel. */
 export const TRANSCRIPT_TEXT = r(2, 2, 136, 255);
 export const TRANSCRIPT_LINE_HEIGHT = 12;
