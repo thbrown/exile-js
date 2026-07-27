@@ -34,6 +34,7 @@ import { startOutdoorCombat } from './outCombat';
 import { increaseAgeEffects } from './increaseAge';
 import { processFields, syncForceCages } from './processFields';
 import type { TownTarget } from './spellTarget';
+import type { SpellTarget } from './spellCombatTarget';
 import { LoadedMissile, fireMissile, isLoaded, loadMissile } from './missiles';
 import { CurTown } from '../universe/curTown';
 import {
@@ -129,6 +130,12 @@ export class GameSession {
    * nothing at all.
    */
   spellTarget = 6;
+
+  /**
+   * The spell waiting for a square while the game is in SPELL_TARGET mode
+   * (`start_spell_targeting`); null the rest of the time.
+   */
+  spellTargeting: SpellTarget | null = null;
 
   /**
    * The spell waiting for a square while the game is in TOWN_TARGET mode

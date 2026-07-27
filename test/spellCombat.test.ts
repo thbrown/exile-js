@@ -14,8 +14,10 @@ import { GameMode } from '../src/game/modes';
 import { GameSession } from '../src/game/session';
 import { castableSpells } from '../src/game/spellCast';
 import { combatCastSpell, combatImmedMageCast, doShockwave } from '../src/game/spellCombat';
+import { cancelSpellTargeting, doCombatCast } from '../src/game/spellCombatTarget';
+import { FieldType } from '../src/data/fields';
 import { PartyPreset, Player } from '../src/universe/player';
-import { MainStatus, Skill, Status, Trait } from '../src/universe/skills';
+import { MainStatus, Race, Skill, Status, Trait } from '../src/universe/skills';
 import { Universe } from '../src/universe/universe';
 
 const opcodes = buildOpcodeTable(
@@ -72,13 +74,14 @@ describe('every combat-castable spell is accounted for', () => {
     expect(bad).toEqual([]);
   });
 
-  it('the targeted ones say what they need, rather than talking about towns', () => {
+  it('a targeted one goes into targeting rather than resolving', () => {
     const { s } = inCombat();
     // Spark is REFER_TARGET: it wants a square.
     expect(SPELLS[Spell.SPARK]?.refer).toBe(SpellRefer.TARGET);
     combatCastSpell(s, Spell.SPARK);
-    expect(s.univ.transcript.at(-1)).toContain('needs combat targeting');
-    expect(s.univ.transcript.at(-1)).not.toContain('town mode');
+    expect(s.mode).toBe(GameMode.SPELL_TARGET);
+    expect(s.spellTargeting?.spell).toBe(Spell.SPARK);
+    expect(s.univ.transcript.at(-1)).toContain("'m' to cancel");
   });
 
   it('a targeted spell spends neither points nor action points yet', () => {
@@ -183,5 +186,109 @@ describe('combat_immed_mage_cast', () => {
     doShockwave(s, pc.combatPos);
     expect(pc.curHealth).toBe(200);
     expect(other.curHealth).toBeLessThan(200);
+  });
+});
+
+describe('do_combat_cast', () => {
+  /** Arm `spell` and fire it at a square `dx` east of the caster. */
+  function cast(s: GameSession, pc: Player, spell: Spell, dx = 2) {
+    pc.curSp = 500;
+    pc.ap = 20;
+    s.mode = GameMode.COMBAT;
+    combatCastSpell(s, spell);
+    const at = { x: pc.combatPos.x + dx, y: pc.combatPos.y };
+    doCombatCast(s, at);
+    return at;
+  }
+
+  it('Spark hurts whatever is on the square', () => {
+    const { s, pc } = inCombat();
+    const monst = s.univ.town!.monsters.find((m) => m.isAlive)!;
+    const at = { x: pc.combatPos.x + 2, y: pc.combatPos.y };
+    monst.curLoc = { ...at };
+    monst.health = monst.maxHealth = 200;
+    // The start town's guards resist magic, and Spark's 2d4 can be resisted
+    // away entirely ("Guard undamaged"), so neutralise resistances first —
+    // this test is about the spell reaching the square, not about the table.
+    monst.mon.resist = monst.mon.resist.map(() => 100);
+    cast(s, pc, Spell.SPARK);
+    expect(monst.health).toBeLessThan(200);
+    expect(s.mode).toBe(GameMode.COMBAT);
+    expect(s.spellTargeting).toBeNull();
+  });
+
+  it('a field spell lays its pattern down', () => {
+    const { s, pc } = inCombat();
+    const at = cast(s, pc, Spell.WEB);
+    expect(s.univ.town!.hasField(at.x, at.y, FieldType.FIELD_WEB)).toBe(true);
+  });
+
+  it('Quickfire lights exactly its square', () => {
+    const { s, pc } = inCombat();
+    const at = cast(s, pc, Spell.QUICKFIRE);
+    expect(s.univ.town!.hasField(at.x, at.y, FieldType.FIELD_QUICKFIRE)).toBe(true);
+  });
+
+  it('the cost and 5 action points are spent when it resolves', () => {
+    const { s, pc } = inCombat();
+    pc.curSp = 500;
+    pc.ap = 20;
+    combatCastSpell(s, Spell.SPARK);
+    // Nothing spent while it is merely in the air.
+    expect(pc.curSp).toBe(500);
+    expect(pc.ap).toBe(20);
+    doCombatCast(s, { x: pc.combatPos.x + 2, y: pc.combatPos.y });
+    expect(pc.curSp).toBe(500 - (SPELLS[Spell.SPARK]?.cost ?? 0));
+    // Five, not the six an untargeted spell pays.
+    expect(pc.ap).toBe(15);
+  });
+
+  it('refuses a square out of range, and says so', () => {
+    const { s, pc } = inCombat();
+    const range = SPELLS[Spell.SPARK]?.range ?? 0;
+    cast(s, pc, Spell.SPARK, range + 3);
+    expect(s.univ.transcript.at(-1)).toBe('  Target out of range.');
+  });
+
+  it('a spell that needs a victim says when there is none', () => {
+    const { s, pc } = inCombat();
+    const at = { x: pc.combatPos.x + 2, y: pc.combatPos.y };
+    for (const m of s.univ.town!.monsters) {
+      if (m.curLoc.x === at.x && m.curLoc.y === at.y) m.curLoc = { x: at.x + 9, y: at.y + 9 };
+    }
+    cast(s, pc, Spell.SCARE);
+    expect(s.univ.transcript.at(-1)).toBe('  Nobody there.');
+  });
+
+  it('Scare frightens whoever is standing there', () => {
+    const { s, pc } = inCombat();
+    const monst = s.univ.town!.monsters.find((m) => m.isAlive)!;
+    const at = { x: pc.combatPos.x + 2, y: pc.combatPos.y };
+    monst.curLoc = { ...at };
+    const before = monst.morale;
+    cast(s, pc, Spell.SCARE);
+    expect(monst.morale).not.toBe(before);
+  });
+
+  it('Turn Undead refuses anything that is not undead', () => {
+    const { s, pc } = inCombat();
+    const monst = s.univ.town!.monsters.find((m) => m.isAlive)!;
+    const at = { x: pc.combatPos.x + 2, y: pc.combatPos.y };
+    monst.curLoc = { ...at };
+    monst.mon.race = Race.HUMANOID;
+    cast(s, pc, Spell.TURN_UNDEAD);
+    expect(s.univ.transcript.at(-1)).toBe('  Not undead.');
+  });
+
+  it('cancelling gives the turn back', () => {
+    const { s, pc } = inCombat();
+    pc.curSp = 500;
+    pc.ap = 20;
+    combatCastSpell(s, Spell.SPARK);
+    cancelSpellTargeting(s);
+    expect(s.mode).toBe(GameMode.COMBAT);
+    expect(s.spellTargeting).toBeNull();
+    expect(pc.curSp).toBe(500);
+    expect(pc.ap).toBe(20);
   });
 });

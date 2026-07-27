@@ -882,6 +882,36 @@ Smaller things outstanding, all independent of M5:
   - `GameSession.takeItem` returns a message on success *and* on refusal, so
     this judges success by whether the item actually left `town.items`.
 
+- **Targeted spells in combat — `do_combat_cast` (M5c, 2026-07-26)**:
+  `game/spellCombatTarget.ts` ports `start_spell_targeting` (boe.combat.cpp:4910)
+  and `do_combat_cast` (:839). `combat_cast_*_spell` hands off here for anything
+  with `REFER_TARGET`: the game drops into `MODE_SPELL_TARGET` and the next
+  click is where the spell lands. **The offensive spell list works now** —
+  Spark, Flame, Fireball, Firestorm, Ice Bolt, Icy Rain, Kill, Wound, Wrack,
+  Divine Thud, Flamestrike, the field spells (web, goo, flame cloud, stink,
+  sleep, ice, force, blades, antimagic, quickfire, spray fields), the barriers,
+  the dispels, the summons, Flash Step, and everything that lands on a victim
+  (scare, fear, slow, poison, curse, charm, dumbfound, paralyse, acid, disease,
+  turn undead, ravage spirit, unholy ravaging, scry).
+  - *Gotcha*: a **targeted** spell costs **5** AP, where a REFER_YES or
+    REFER_IMMED one pays 6 through `combat_cast_*_spell`.
+  - *Gotcha*: `level` inside `do_combat_cast` is **not** the caster's level —
+    it's `1 + level/2`, a spell-power figure every damage roll leans on.
+  - *Gotcha*: the spell **cost is taken before the visibility check**, so a shot
+    into the dark still costs the points. The *action points* are only taken on
+    a target that resolves. Both faithful.
+  - *Gotcha*: both barriers scorch their square as they go up, and both do it
+    with **fire** damage — the force barrier included, which reads like a slip
+    and is kept.
+  - *Bug found and fixed in the click wiring*: the terrain-click handler chose
+    its origin with `mode === COMBAT`, but `SPELL_TARGET` and `FIRING` are
+    combat modes too, so a targeting click was measured from the party's stale
+    *town* square and landed somewhere else entirely. Now `isCombat(mode)`.
+  - Still open: `start_fancy_spell_targeting` (:4961) — the multi-target spells
+    (Smite, Sticks to Snakes, Summon Host) that collect up to eight squares
+    before resolving; `record_monst` for Capture Soul/Simulacrum; and
+    `do_mindduel`.
+
 ## Dialog fidelity: the two screens that don't look like the original
 
 Reported from play-testing 2026-07-26. Both are real divergences, and both are

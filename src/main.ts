@@ -10,6 +10,7 @@ import { SPELLS, Spell, spellName } from './data/spell';
 import { CastStatus, castableSpells, pcCanCastType } from './game/spellCast';
 import { castSpell } from './game/spellTown';
 import { combatCastSpell } from './game/spellCombat';
+import { cancelSpellTargeting, doCombatCast } from './game/spellCombatTarget';
 import { takeAp } from './game/combat';
 import { castTownSpell, startTownTargeting } from './game/spellTarget';
 import { CastDialog } from './dialogs/castDialog';
@@ -595,6 +596,13 @@ async function main(): Promise<void> {
       })();
       return;
     }
+    // Targeting a combat spell: the click is where it lands.
+    if (session.spellTargeting !== null) {
+      doCombatCast(session, target);
+      setStatus();
+      redraw();
+      return;
+    }
     // Targeting a town spell: the click is the square the spell lands on.
     // Checked before the missile, since the two modes never overlap and this
     // is the one the party is in outside combat.
@@ -760,7 +768,10 @@ async function main(): Promise<void> {
       }
       const cell = screen.terrainCellAt(x, y);
       if (cell) {
-        const from = session.mode === GameMode.COMBAT || session.missile !== null
+        // Any combat mode aims from the active PC, not just COMBAT itself —
+        // SPELL_TARGET and FIRING are combat modes too, and using the party's
+        // town square there sends the click to the wrong place entirely.
+        const from = isCombat(session.mode) || session.missile !== null
           ? univ.currentPc.combatPos
           : session.inTown ? univ.party.townLoc : univ.party.outLoc;
         const clicked = { x: from.x + cell.q - 4, y: from.y + cell.r - 4 };
@@ -868,8 +879,13 @@ async function main(): Promise<void> {
           else session.startMissile();
           break;
         case 'm': case 'M': case 'p': case 'P':
-          void castSpellFlow(key === 'm' || key === 'M'
-            ? Skill.MAGE_SPELLS : Skill.PRIEST_SPELLS);
+          // While a spell is in the air the same key cancels it, which is what
+          // start_spell_targeting's "(Hit 'm' to cancel.)" refers to.
+          if (session.spellTargeting !== null) cancelSpellTargeting(session);
+          else {
+            void castSpellFlow(key === 'm' || key === 'M'
+              ? Skill.MAGE_SPELLS : Skill.PRIEST_SPELLS);
+          }
           break;
         case 'i': case 'z': case 'Z':
           univ.addStringToBuf("(The inventory panel is always on screen; 1-6 switches whose)");
@@ -893,6 +909,11 @@ async function main(): Promise<void> {
       if (key === 'Escape' && pending) {
         pending = null;
         setStatus();
+      }
+      if (key === 'Escape' && session.spellTargeting !== null) {
+        cancelSpellTargeting(session);
+        setStatus();
+        redraw();
       }
       if (key === 'Escape' && session.missile !== null) {
         session.cancelMissile();

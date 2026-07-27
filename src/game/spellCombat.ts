@@ -28,6 +28,7 @@ import { takeAp } from './combat';
 import { damageMonst, damagePc } from './damage';
 import { placeSpellPattern } from './spellPatterns';
 import { doMageSpell, doPriestSpell } from './spellTown';
+import { startSpellTargeting } from './spellCombatTarget';
 import { SIGHT_BLOCKED } from '../core/sight';
 import type { GameSession } from './session';
 
@@ -319,12 +320,16 @@ export function combatCastSpell(
       else combatImmedMageCast(session, pcNum, spellNum, freebie);
       break;
 
+    case SpellRefer.TARGET:
+      startSpellTargeting(session, spellNum, freebie);
+      break;
+
     default:
-      // TODO(M5c): start_spell_targeting (boe.combat.cpp:4910) and its FANCY
-      // variant (:4961), then do_combat_cast (:839) to resolve the square.
-      // Nothing is spent, so the turn isn't wasted on a spell that can't land.
+      // TODO(M5c): start_fancy_spell_targeting (boe.combat.cpp:4961) — the
+      // multi-target spells (Smite, Sticks to Snakes, Summon Host) which
+      // collect up to eight squares before resolving.
       univ.addStringToBuf(
-        `  ${spellName(spellNum)} needs combat targeting, which is not in yet.`);
+        `  ${spellName(spellNum)} needs multi-target casting, which is not in yet.`);
       break;
   }
 }
