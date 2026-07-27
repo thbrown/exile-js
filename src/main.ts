@@ -6,6 +6,10 @@
 import { Location, shiftLoc } from './core/location';
 import { SpellPat } from './data/pattern';
 import { statusName } from './data/statusIcons';
+import { SPELLS, Spell, spellName } from './data/spell';
+import { CastStatus, castableSpells, pcCanCastType } from './game/spellCast';
+import { castSpell } from './game/spellTown';
+import { castTownSpell, startTownTargeting } from './game/spellTarget';
 import { placeSpellPattern } from './game/spellPatterns';
 import { GameMode, isCombat } from './game/modes';
 import { setBoomSink } from './game/booms';
@@ -372,6 +376,72 @@ async function main(): Promise<void> {
       : '  No effects on this PC.');
   };
 
+  /**
+   * `cast_spell`'s front end: pick who casts, then what they cast.
+   *
+   * The C++ opens one dialog with the caster buttons down the side and the
+   * spell grid in the middle; this is the same two choices in sequence, which
+   * the dialog toolkit can express today. A spell that needs a square puts the
+   * game into targeting mode and the next click finishes it.
+   */
+  const castSpellFlow = async (type: Skill): Promise<void> => {
+    const kind = type === Skill.MAGE_SPELLS ? 'mage' : 'priest';
+    if (!session.primeTime) {
+      univ.addStringToBuf('Cast: Finish what you are doing first.');
+      setStatus();
+      redraw();
+      return;
+    }
+    // Who can cast at all — pc_can_cast_spell's per-skill form, which is also
+    // what greys out the caster buttons in the original.
+    const casters = univ.party.pcs
+      .map((pc, i) => ({ pc, i, status: pcCanCastType(session, pc, type) }))
+      .filter((c) => c.status === CastStatus.OK);
+    if (casters.length === 0) {
+      univ.addStringToBuf(`Cast: Nobody can cast a ${kind} spell.`);
+      setStatus();
+      redraw();
+      return;
+    }
+    let who = casters[0]!.i;
+    if (casters.length > 1) {
+      const picked = await dialogs.run({
+        text: `Who will cast a ${kind} spell?`,
+        rows: casters.map((c) => ({
+          name: String(c.i),
+          key: String(c.i + 1),
+          label: `${c.pc.name}  (${c.pc.curSp}/${c.pc.maxSp} sp)`,
+        })),
+        escapeButton: 'cancel',
+        buttons: [{ name: 'cancel', label: 'Cancel', key: 'c' }],
+      });
+      if (picked === 'cancel' || picked === null) { redraw(); return; }
+      who = Number(picked);
+    }
+    const pc = univ.party.pcs[who]!;
+    const spells = castableSpells(session, pc, type);
+    if (spells.length === 0) {
+      univ.addStringToBuf(`Cast: ${pc.name} has no ${kind} spell to cast here.`);
+      setStatus();
+      redraw();
+      return;
+    }
+    const chosen = await dialogs.run({
+      text: `${pc.name} casts which spell?  (${pc.curSp} spell points)`,
+      rows: spells.map((spell, i) => ({
+        name: String(spell),
+        key: i < 9 ? String(i + 1) : undefined,
+        label: `${spellName(spell)}  (${SPELLS[spell]?.cost ?? 0} sp)`,
+      })),
+      escapeButton: 'cancel',
+      buttons: [{ name: 'cancel', label: 'Cancel', key: 'c' }],
+    });
+    if (chosen === 'cancel' || chosen === null) { redraw(); return; }
+    castSpell(session, who, Number(chosen) as Spell);
+    setStatus();
+    redraw();
+  };
+
   /** A click on an inventory row: equip/unequip, give, drop, describe, or sell. */
   const handleInventoryClick = async (
     row: number,
@@ -532,6 +602,15 @@ async function main(): Promise<void> {
         setStatus();
         redraw();
       })();
+      return;
+    }
+    // Targeting a town spell: the click is the square the spell lands on.
+    // Checked before the missile, since the two modes never overlap and this
+    // is the one the party is in outside combat.
+    if (session.townTarget !== null) {
+      castTownSpell(session, target);
+      setStatus();
+      redraw();
       return;
     }
     // Targeting a missile: the click (or arrow key) is the shot, not a move.
@@ -793,7 +872,8 @@ async function main(): Promise<void> {
           else session.startMissile();
           break;
         case 'm': case 'M': case 'p': case 'P':
-          univ.addStringToBuf('(Spells need M5c)');
+          void castSpellFlow(key === 'm' || key === 'M'
+            ? Skill.MAGE_SPELLS : Skill.PRIEST_SPELLS);
           break;
         case 'i': case 'z': case 'Z':
           univ.addStringToBuf("(The inventory panel is always on screen; 1-6 switches whose)");
@@ -898,6 +978,8 @@ async function main(): Promise<void> {
     // The protective circle, for the verifier's place_spell_pattern check.
     __placePattern: (at: Location) =>
       placeSpellPattern(session, SpellPat.PROT, at, { whoHit: univ.curPc }),
+    // Arms a town-targeting spell, so the verifier can drive the click path.
+    __startTownTargeting: (spell: Spell) => startTownTargeting(session, spell, univ.curPc),
     // Lets the headless verifier watch which sound files actually get played.
     __setLivingSound: (fn: ((which: number) => void) | null) =>
       setLivingSound(fn ?? ((which: number) => { sound.play(which); })),

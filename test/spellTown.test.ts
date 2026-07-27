@@ -12,6 +12,7 @@ import { SPELLS, Spell } from '../src/data/spell';
 import { loadScenario } from '../src/fileio/loadScenario';
 import { FsSource } from '../src/fileio/source';
 import { buildOpcodeTable } from '../src/fileio/specialParse';
+import { GameMode } from '../src/game/modes';
 import { GameSession } from '../src/game/session';
 import { castSpell, doMageSpell, doPriestSpell, giveFood, increaseLight } from '../src/game/spellTown';
 import { PartyPreset, Player } from '../src/universe/player';
@@ -153,12 +154,15 @@ describe('do_mage_spell', () => {
     expect(s.univ.transcript.at(-1)).toBe('  Party protected.');
   });
 
-  it('a spell that wants a square says so and charges nothing', () => {
+  it('a spell that wants a square goes into targeting, charging nothing yet', () => {
     const s = inTown();
     const pc = caster(s);
     const sp = pc.curSp;
     doMageSpell(s, 0, Spell.UNLOCK);
-    expect(s.univ.transcript.at(-1)).toContain('needs a target');
+    expect(s.univ.transcript.at(-1)).toBe('  Target spell.');
+    expect(s.mode).toBe(GameMode.TOWN_TARGET);
+    expect(s.townTarget?.spell).toBe(Spell.UNLOCK);
+    // The cost is spent in cast_town_spell, once a square is picked.
     expect(pc.curSp).toBe(sp);
   });
 

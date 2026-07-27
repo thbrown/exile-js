@@ -105,7 +105,7 @@ export function bashDoor(
  * Swap a locked door for its unlocked form and remember it, so re-entering the
  * town doesn't re-lock it (start_town_mode replays door_unlocked).
  */
-function unlockDoor(univ: Universe, where: Location, terrain: number): void {
+export function unlockDoor(univ: Universe, where: Location, terrain: number): void {
   const town = univ.town!;
   town.record.terrain[where.x]![where.y] = univ.terrainType(terrain).flag1;
   town.record.doorUnlocked.push({ ...where });

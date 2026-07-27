@@ -418,6 +418,37 @@ Notes for M2 implementer:
   longer to reach it. Now compared with a 0.001 slack, which still catches the
   bug those tests pin (a spacing of *zero*).
 
+- **Town targeting, and spells you can actually cast (M5c, 2026-07-26)**:
+  `game/spellTarget.ts` ports `start_town_targeting` (boe.party.cpp:2269) and
+  `cast_town_spell` (:1293), so the dozen spells that ask for a square work:
+  Unlock, Dispel Barrier, the fire and force barriers, Quickfire, Antimagic,
+  Scry Monster, the three Dispels, and both Move Mountains. `GameSession`
+  gained `townTarget`, which mirrors how `missile` already drives FIRING mode,
+  and a click in `TOWN_TARGET` resolves it (`main.ts`).
+  **`m` and `p` now open a real spell picker** — caster first when more than
+  one can cast, then the spells that PC can cast *here*, with costs, out of
+  `castableSpells`. The old "(Spells need M5c)" stub is gone.
+  - *Ordering that matters*: the cost is spent in `cast_town_spell`, not when
+    targeting starts. Cancelling out of targeting is free; a spell that fails
+    its roll has still been paid for.
+  - *Gotcha*: the in-town bounds test is strict on all four sides
+    (`where.x <= rect.left`, etc.), so the town's outermost ring of squares
+    can't be targeted at all.
+  - *Gotcha*: `start_town_targeting` silently substitutes PAT_SINGLE for a
+    rotatable pattern, because town targeting can't ask which way a wall faces.
+    Its own TODO wants an error instead; kept silent.
+  - *Gotcha*: the barrier arms set the field and then *read it straight back*
+    to decide which message to print, because `set_*_barr` can refuse.
+  - *Gotcha*: Antimagic's cloud is radius 2 with the corners cut off
+    (`|dx| < 2 || |dy| < 2`) — a plus sign with shoulders, not a 5x5 block.
+  - `combat_percent` (boe.party.cpp:56) lands here as `COMBAT_PERCENT`; note it
+    *falls* with level and the callers subtract it from a constant, so a higher
+    level is a wider target.
+  - Still reporting rather than doing: Capture Soul needs `record_monst`, and
+    Scry Monster notes the monster (which is the lasting part) but doesn't open
+    `display_monst`'s dialog. `cast_spell_on_space` — a TARGET-context special
+    node intercepting a spell — needs `eSpecCtx::TARGET`, TODO(M6).
+
 ## Milestones (Part 1: BoE player)
 
 - [x] **M0 — Skeleton**: Vite+TS(strict)+Vitest scaffold; `core/` (mt19937 rng, location) with tests; assets copied to `public/data`; tile-grid demo page
@@ -784,13 +815,14 @@ Smaller things outstanding, all independent of M5:
       - `do_combat_cast` (boe.combat.cpp:839) and
         `combat_immed_mage_cast`/`combat_immed_priest_cast` (:4596, :4798) —
         the combat half of the same two lists.
-      - The targeting modes everything above hands off to:
-        `start_town_targeting` + `cast_town_spell` (boe.party.cpp:1293),
-        `start_spell_targeting` and `start_fancy_spell_targeting`
-        (boe.combat.cpp:4910, :4961). This is the single biggest unblocker
-        left — a dozen already-written spell arms are waiting on it.
+      - The *combat* targeting modes: `start_spell_targeting` and
+        `start_fancy_spell_targeting` (boe.combat.cpp:4910, :4961). Town
+        targeting landed 2026-07-26 (`game/spellTarget.ts`) and is the model to
+        follow.
       - The caster/target dialog, which is why the town spells currently treat
-        the caster as their own target (see the divergence noted above).
+        the caster as their own target (see the divergence noted above). The
+        `m`/`p` picker in `main.ts` already chooses the *caster*; what's
+        missing is choosing a *target PC* for the heals and protections.
       - Then `monst_cast_mage`/`monst_cast_priest` closes out M5b.
       `hit_space` and `place_spell_pattern` are already ported and are what
       most of the damage will go through.

@@ -33,6 +33,7 @@ import {
 import { startOutdoorCombat } from './outCombat';
 import { increaseAgeEffects } from './increaseAge';
 import { processFields, syncForceCages } from './processFields';
+import type { TownTarget } from './spellTarget';
 import { LoadedMissile, fireMissile, isLoaded, loadMissile } from './missiles';
 import { CurTown } from '../universe/curTown';
 import {
@@ -121,6 +122,12 @@ export class GameSession {
    * casting). 6 means nobody, and then everyone acts in turn as normal.
    */
   combatActivePc = NO_ONE;
+  /**
+   * The spell waiting for a square while the game is in TOWN_TARGET mode
+   * (`start_town_targeting`); null the rest of the time.
+   */
+  townTarget: TownTarget | null = null;
+
   /** The armed missile while the game is in FIRING or THROWING mode. */
   missile: LoadedMissile | null = null;
   /**

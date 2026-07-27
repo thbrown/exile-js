@@ -30,6 +30,8 @@ import { crumbleWall } from './fieldEffects';
 import { summonMonster, getSummonMonster } from './monsterPlace';
 import { Attitude } from '../data/monster';
 import { GameMode } from './modes';
+import { SpellPat } from '../data/pattern';
+import { startTownTargeting } from './spellTarget';
 import type { GameSession } from './session';
 
 /** `increase_light` (boe.party.cpp:288) — brighten the party's own lantern. */
@@ -60,17 +62,6 @@ function minmax(lo: number, hi: number, x: number): number {
   return Math.max(lo, Math.min(hi, x));
 }
 
-/**
- * The arms that hand off to `start_town_targeting`. The C++ drops into a
- * targeting mode and finishes the spell in `cast_town_spell` once a square is
- * picked; until that mode exists these say so rather than silently doing
- * nothing, and no points are spent.
- */
-function needsTargeting(session: GameSession, spell: Spell): void {
-  // TODO(M5c): start_town_targeting + cast_town_spell (boe.party.cpp:1293).
-  session.univ.addStringToBuf(
-    `  ${spellName(spell)} needs a target; targeting is not in yet.`);
-}
 
 /** Spend the spell's cost unless this casting is free. */
 function spendSp(pc: Player, spell: Spell, freebie: boolean): void {
@@ -278,8 +269,14 @@ export function doMageSpell(
     }
 
     // --- the ones that want a square, or an item screen --------------------
+    // Dispel Square lays a 3x3, Antimagic a radius-2 cloud; the rest are
+    // single squares.
     case Spell.DISPEL_SQUARE:
+      startTownTargeting(session, spellNum, pcNum, freebie, SpellPat.SQUARE, storeItemSpellLevel);
+      break;
     case Spell.ANTIMAGIC:
+      startTownTargeting(session, spellNum, pcNum, freebie, SpellPat.RADIUS_2, storeItemSpellLevel);
+      break;
     case Spell.SCRY_MONSTER:
     case Spell.UNLOCK:
     case Spell.CAPTURE_SOUL:
@@ -287,7 +284,7 @@ export function doMageSpell(
     case Spell.BARRIER_FIRE:
     case Spell.BARRIER_FORCE:
     case Spell.QUICKFIRE:
-      needsTargeting(session, spellNum);
+      startTownTargeting(session, spellNum, pcNum, freebie, SpellPat.SINGLE, storeItemSpellLevel);
       break;
 
     case Spell.IDENTIFY:
@@ -652,16 +649,20 @@ export function doPriestSpell(
     // --- the ones that want a square ---------------------------------------
     case Spell.RITUAL_SANCTIFY:
       univ.addStringToBuf('  Sanctify which space?');
-      needsTargeting(session, spellNum);
+      startTownTargeting(session, spellNum, pcNum, freebie, SpellPat.SINGLE, storeItemSpellLevel);
       break;
     case Spell.MOVE_MOUNTAINS:
     case Spell.MOVE_MOUNTAINS_MASS:
       univ.addStringToBuf('  Destroy what?');
-      needsTargeting(session, spellNum);
+      startTownTargeting(session, spellNum, pcNum, freebie,
+        spellNum === Spell.MOVE_MOUNTAINS ? SpellPat.SINGLE : SpellPat.SQUARE,
+        storeItemSpellLevel);
       break;
     case Spell.DISPEL_SPHERE:
     case Spell.DISPEL_FIELD:
-      needsTargeting(session, spellNum);
+      startTownTargeting(session, spellNum, pcNum, freebie,
+        spellNum === Spell.DISPEL_SPHERE ? SpellPat.RADIUS_2 : SpellPat.SINGLE,
+        storeItemSpellLevel);
       break;
 
     case Spell.WORD_RECALL:

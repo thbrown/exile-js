@@ -68,6 +68,11 @@ export class Party {
   /** Special items the party has acquired, by index (cParty::spec_items). */
   specItems = new Set<number>();
   /**
+   * `cParty::m_noted` — monster types Scry Monster has identified, which is
+   * what unlocks their entry in the monster-info menu.
+   */
+  mNoted = new Set<number>();
+  /**
    * Monsters the party's own items can summon that don't come from this
    * scenario (cParty::summons). A monster number >= 10000 indexes this list
    * with 10000 subtracted; it stays empty until a save file or an item fills
