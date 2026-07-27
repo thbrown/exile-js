@@ -188,6 +188,19 @@ async function main(): Promise<void> {
     return choice === 'attack';
   };
 
+  /** boat-bridge.xml — a boat reaching a bridge: go under it, or come ashore. */
+  session.onConfirmBoatBridge = async () => {
+    const choice = await dialogs.run({
+      text: 'Sail under the bridge, or come ashore?',
+      escapeButton: 'land',
+      buttons: [
+        { name: 'land', label: 'Land', key: 'l' },
+        { name: 'under', label: 'Under', key: 'u' },
+      ],
+    });
+    return choice === 'under';
+  };
+
   /**
    * A locked door: ask what to do and who does it, then act. This is the async
    * replacement for the C++ blocking cChoiceDlog + select_pc pair.

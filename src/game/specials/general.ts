@@ -162,6 +162,24 @@ export async function generalSpec(
       ctx.host.sound(spec.ex1b ? spec.ex1a : -spec.ex1a);
       break;
 
+    case SpecType.CHANGE_HORSE_OWNER: {
+      checkMess = true;
+      const horse = party.horses[spec.ex1a];
+      // property=true means "not the party's"; ex2a==0 takes it away, any
+      // other value gives it to the party (boe.specials.cpp:2274).
+      if (!horse) univ.addStringToBuf('Horse out of range.');
+      else horse.property = spec.ex2a === 0;
+      break;
+    }
+
+    case SpecType.CHANGE_BOAT_OWNER: {
+      checkMess = true;
+      const boat = party.boats[spec.ex1a];
+      if (!boat) univ.addStringToBuf('Boat out of range.');
+      else boat.property = spec.ex2a === 0;
+      break;
+    }
+
     case SpecType.SET_TOWN_VISIBILITY: {
       checkMess = true;
       const town = univ.scenario.towns[spec.ex1a];
@@ -350,9 +368,7 @@ export async function generalSpec(
     case SpecType.FORCED_GIVE:
     case SpecType.BUY_ITEMS_OF_TYPE:
     case SpecType.SET_CAMP_FLAG:
-    case SpecType.CHANGE_HORSE_OWNER:
-    case SpecType.CHANGE_BOAT_OWNER:
-      // TODO(M6): quests, campaign flags, boats and horses.
+      // TODO(M6): quests and campaign flags.
       reportUnsupported(univ, spec.type);
       break;
 

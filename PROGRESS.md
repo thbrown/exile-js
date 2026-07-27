@@ -31,7 +31,7 @@
 
 ## Current state
 
-**M2 done bar the replay driver, M3 nearly done, M4 and M5 complete, M6 begun (2026-07-27): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: item Use (needs M5's abilities), enchanting (needs M5's enchantment table), job banks and boats/horses (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; projectiles fly across the screen; and `place_spell_pattern` works, so exploding weapons blast, monsters lay fields and a protective circle raises four rings of wall. **M5 is closed**: monster spellcasting, the 147-spell list, `process_fields` and the real casting dialog all landed 2026-07-26. **M6 has started**: quests, job banks, special items and the town/scenario/party timers work as of 2026-07-27, so a scripted deadline can expire and a timed node can fire — and **items can be Used**: the USE button on an inventory row drinks the potion, fires the wand and reads the book.
+**M2 done bar the replay driver, M3 nearly done, M4 and M5 complete, M6 begun (2026-07-27): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: enchanting (needs M5's enchantment table), job banks (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; projectiles fly across the screen; and `place_spell_pattern` works, so exploding weapons blast, monsters lay fields and a protective circle raises four rings of wall. **M5 is closed**: monster spellcasting, the 147-spell list, `process_fields` and the real casting dialog all landed 2026-07-26. **M6 has started**: quests, job banks, special items and the town/scenario/party timers work as of 2026-07-27, so a scripted deadline can expire and a timed node can fire — **items can be Used**: the USE button on an inventory row drinks the potion, fires the wand and reads the book — and **boats and horses work**: walk onto one to board it, dry land to leave it, Space to dismount or re-board, and `CHANGE_HORSE_OWNER`/`CHANGE_BOAT_OWNER` hand one to the party.
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -776,9 +776,9 @@ Notes for M2 implementer:
 - [x] **M4 — Specials interpreter (breadth-first)**: VM core (pointers, queueing, messages) + all seven opcode groups; triggers wired for movement, look, town entry/exit, use-space, call-special terrain and the two talk nodes. Opcodes needing combat/fields/timers/quests report themselves and wait for M5/M6.
 - [x] **M5 — Combat**: M5a ✅ (the iLiving seam, damage/status, combat mode, melee); M5b ✅ (monster turns, melee AI, town *and outdoor* encounters, the `uAbility` port, missiles on both sides, breath, summons, touch abilities, on-hit weapon abilities, **monster spellcasting**); M5c ✅ (spell patterns, `process_fields`, the 147-spell table, `pc_can_cast_spell`, town/combat/targeted/multi-target casting, and the real casting dialog). Remaining odds and ends: `record_monst` (Capture Soul/Simulacrum), `do_mindduel`, and the SPECIAL monster ability.
 - [ ] **M6 — Specials depth + party ops** (valleydy completable): quests,
-      job banks, special items, the three timer kinds and **item Use** ✅
-      (2026-07-27); alchemy, traps, boats/horses, job-bank dialog and
-      end-scenario open
+      job banks, special items, the three timer kinds, **item Use** ✅
+      (2026-07-27) and **boats/horses** ✅ (2026-07-27); alchemy, traps,
+      job-bank dialog and end-scenario open
 - [ ] **M7 — Save/load (.exg) + startup flow**
 - [ ] **M8 — Fidelity hardening** (replay golden masters)
 
@@ -1346,9 +1346,9 @@ banks, special items, the three timer kinds and `special_increase_age` — see
 the entry above). What M6 still owes, roughly in the order the valleydy
 playthrough will hit it:
 
-1. **Party ops**: boats and horses (`in_boat`/`in_horse`, the mount/dismount in
-   `use_space`, `CHANGE_BOAT_OWNER`/`CHANGE_HORSE_OWNER`), and `force_town_enter`
-   + `position_party`.
+1. ~~**Party ops**: boats and horses~~ — **done** (2026-07-27), see the entry
+   below. `force_town_enter` + `position_party` (a scripted teleport landing
+   the party on a specific town square) are still open.
 2. **The job-bank board**: the JOB_BANK talk node and its dialog, which is the
    only caller of `generateJobBank`; `RECEIVE_QUEST` alongside it. The data
    behind both is ported.
@@ -1364,3 +1364,49 @@ playthrough will hit it:
 7. M2's last leftover is the replay driver.
 8. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in
    parallel at any time.
+
+- **Boats and horses (M6, 2026-07-27)**: `data/vehicle.ts` ports `cVehicle`
+  (`loc`/`sector`/`whichTown`/`exists`/`property`/`pic`/`name`) plus
+  `resizeVehicles`, a faithful port of the `std::vector::resize` the loaders
+  use — it **truncates** the list if the new size is smaller, matching
+  `loadOutMapData`/`loadTownMapData`'s own footgun rather than "fixing" it
+  into a resize-to-at-least. Boat/horse map features (already parsed by
+  `mapParse.ts` but discarded since M1) now land in `Scenario.boats`/`horses`,
+  keyed by vehicle number; `Universe`'s constructor copies the existing ones
+  into `Party.boats`/`horses` (`enter_scenario`, universe.cpp:1396), and
+  `startTownMode` restores any a town re-entry finds missing (`start_town_mode`'s
+  "check horses"/"check boats" loop, boe.town.cpp:503).
+  - **Movement**: `outdMoveParty` and `townMoveParty` both got the C++'s
+    leave/board/bridge logic (boe.actions.cpp:4009/4159) — leaving a boat on
+    dry land, refusing a diagonal boat move, boarding a boat or horse waiting
+    on the destination square (refused with "Not your boat"/"Not your horses"
+    if `property` is true, i.e. the scenario hasn't given it to the party
+    yet), a horse refusing dangerous terrain or terrain flagged
+    `blockHorse`, and the "sail under, or come ashore?" prompt at a bridge
+    (`onConfirmBoatBridge`, the same host-callback shape as
+    `onConfirmAttackFriendly`). `pause()` (Space/W outside combat) gained the
+    dismount/re-board half of `handle_pause`: a horse always dismounts, a
+    boat only onto passable ground, and pausing again re-boards a boat you're
+    stranded on.
+  - **Drawing**: `Screen.drawPartySymbol` swaps to `vehicle.png` while
+    mounted — directional for a boat (N/S get their own frame, the rest split
+    east/west), east/west-only for a horse — porting `draw_party_symbol`'s
+    vehicle half (boe.graphutil.cpp:494).
+  - **Specials**: `CHANGE_HORSE_OWNER`/`CHANGE_BOAT_OWNER` now flip a
+    vehicle's `property` flag instead of reporting themselves; `IF_IN_BOAT`/
+    `IF_ON_HORSE` had already landed with M4. Not ported: `run_waterfalls`
+    (a boat riding a waterfall down) — noted as TODO(M6) at both move sites,
+    since no bundled scenario's boat sits next to one yet.
+  - *Gotcha*: a vehicle's own `loc`/`sector` fields go **stale while
+    boarded** — they're only written at boarding time and (for a horse, every
+    step; for a boat, only on dismount/pause). That's the C++'s own shape,
+    not a bug: the vehicle *is* the party's position while ridden.
+  - *Found by testing, not a play-test report*: the stealth scenario's town1
+    horses are placed **unowned** (`H`, not `h`) — boarding one without a
+    `CHANGE_HORSE_OWNER` special first correctly refuses with "Not your
+    horses.", which is what caught a first draft of the test assuming they'd
+    be free to ride.
+  - `test/vehicles.test.ts` covers scenario parsing (stealth's town1/town9/
+    town19/town20 place 5 horses and 9 boats total), the per-party copy,
+    boarding/dismounting a horse, the ownership refusal, and
+    `CHANGE_HORSE_OWNER`.

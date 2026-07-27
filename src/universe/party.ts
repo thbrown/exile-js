@@ -56,6 +56,14 @@ export class Party {
 
   inBoat = -1;
   inHorse = -1;
+  /**
+   * The party's own copies of the scenario's vehicle templates
+   * (`cParty::boats`/`horses`) — only the ones that `exist`, populated at
+   * `enter_scenario` and restored per-town on entry. `inBoat`/`inHorse` index
+   * into these.
+   */
+  boats: import('../data/vehicle').Vehicle[] = [];
+  horses: import('../data/vehicle').Vehicle[] = [];
   /** Halves every monster's health (cParty::easy_mode). */
   easyMode = false;
   /** Running totals the endgame summary reports (cParty::total_*). */

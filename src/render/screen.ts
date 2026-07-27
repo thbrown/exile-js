@@ -91,6 +91,7 @@ export const CHROME_SHEETS = [
   'booms',
   'missiles',
   'staticons',
+  'vehicle',
   ...MAP_SHEETS,
 ];
 
@@ -937,11 +938,26 @@ export class Screen {
       row += univ.party.townLoc.y - session.center.y;
       if (q < 0 || row < 0 || q >= TER_VIEW_TILES || row >= TER_VIEW_TILES) return;
     }
-    const g = pcGraphic(leader.whichGraphic, univ.party.direction);
+    const pos = terrainSpotPos(q, row);
+    const dir = univ.party.direction;
+    if (univ.party.inBoat >= 0 || univ.party.inHorse >= 0) {
+      // draw_party_symbol's vehicle half (boe.graphutil.cpp:494): the boat
+      // sheet is directional (N/S get their own frame, the rest split
+      // east/west); the horse sheet only ever splits east/west.
+      const img = this.store.get('vehicle');
+      if (!img) return;
+      const cell = univ.party.inBoat >= 0
+        ? { i: dir === Direction.N ? 2 : dir === Direction.S ? 3 : dir > Direction.S ? 1 : 0, j: 0 }
+        : { i: (dir > Direction.SE ? 1 : 0) + 2, j: 1 };
+      const r = calcRect(cell.i, cell.j);
+      this.ctx.drawImage(
+        img, r.left, r.top, r.width, r.height, pos.x, pos.y, TILE_W, TILE_H);
+      return;
+    }
+    const g = pcGraphic(leader.whichGraphic, dir);
     if (!g) return;
     const img = this.store.get(g.sheetName);
     if (!img) return;
-    const pos = terrainSpotPos(q, row);
     this.ctx.drawImage(
       img, g.rect.left, g.rect.top, g.rect.width, g.rect.height,
       pos.x, pos.y, TILE_W, TILE_H,

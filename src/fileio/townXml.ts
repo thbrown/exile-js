@@ -13,6 +13,7 @@ import {
 } from '../data/enumTags';
 import { Speech, emptySpeech, emptyTalkNode } from '../data/talking';
 import { Town, defaultPresetItem, defaultTownperson } from '../data/town';
+import { Vehicle, resizeVehicles } from '../data/vehicle';
 import { MapData, MapFeature } from './mapParse';
 import { readTimerFromXml } from './scenarioXml';
 import { children, intAttr, intText, locFromXml, rectFromXml, tag, text } from './xml';
@@ -197,7 +198,14 @@ export function readTownFromXml(root: Element, fname: string): Town {
 }
 
 /** loadTownMapData — apply the .map grid + features to the town. */
-export function loadTownMapData(data: MapData, town: Town, fname = ''): void {
+export function loadTownMapData(
+  data: MapData,
+  town: Town,
+  townIndex: number,
+  scenBoats: Vehicle[],
+  scenHorses: Vehicle[],
+  fname = '',
+): void {
   for (let x = 0; x < town.maxDim; x++) {
     for (let y = 0; y < town.maxDim; y++) {
       town.terrain[x]![y] = data.get(x, y);
@@ -239,9 +247,17 @@ export function loadTownMapData(data: MapData, town: Town, fname = ''): void {
               town.creatures[feat.value]!.startLoc = { x, y };
             break;
           case MapFeature.Boat:
-          case MapFeature.Horse:
-            // Scenario-level vehicle lists — deferred with the party model.
+          case MapFeature.Horse: {
+            const list = feat.feature === MapFeature.Boat ? scenBoats : scenHorses;
+            const idx = Math.abs(feat.value) - 1;
+            resizeVehicles(list, idx + 1);
+            const v = list[idx]!;
+            v.whichTown = townIndex;
+            v.loc = { x, y };
+            v.property = feat.value < 0;
+            v.exists = true;
             break;
+          }
           default:
             break;
         }

@@ -3,8 +3,10 @@
  * (fileio_scen.cpp:1732) and loadOutMapData (fileio_scen.cpp:2130).
  */
 
+import { Location } from '../core/location';
 import { FieldType } from '../data/fields';
 import { AmbientSound, OutWandering, SECTOR_SIZE, Sector } from '../data/outdoors';
+import { Vehicle, resizeVehicles } from '../data/vehicle';
 import { MapData, MapFeature } from './mapParse';
 import { children, intText, locFromXml, rectFromXml, tag, text } from './xml';
 
@@ -97,7 +99,14 @@ export function readOutdoorsFromXml(root: Element, fname: string): Sector {
 }
 
 /** Apply a parsed .map grid + features to a sector (loadOutMapData). */
-export function loadOutMapData(data: MapData, out: Sector, fname = ''): void {
+export function loadOutMapData(
+  data: MapData,
+  out: Sector,
+  sectorLoc: Location,
+  scenBoats: Vehicle[],
+  scenHorses: Vehicle[],
+  fname = '',
+): void {
   for (let x = 0; x < SECTOR_SIZE; x++) {
     for (let y = 0; y < SECTOR_SIZE; y++) {
       out.terrain[x]![y] = data.get(x, y);
@@ -124,10 +133,21 @@ export function loadOutMapData(data: MapData, out: Sector, fname = ''): void {
             if (feat.value >= 0 && feat.value < 4) out.wanderingLocs[feat.value] = { x, y };
             break;
           case MapFeature.Boat:
-          case MapFeature.Horse:
-            // Vehicles land in scenario-level lists — deferred until the
-            // party/vehicle model exists (M2).
+          case MapFeature.Horse: {
+            const list = feat.feature === MapFeature.Boat ? scenBoats : scenHorses;
+            const idx = Math.abs(feat.value) - 1;
+            resizeVehicles(list, idx + 1);
+            const v = list[idx]!;
+            // 200 = TOWN_NUM_OUTDOORS (universe/party.ts) — outdoor vehicles
+            // live in scenario-level lists too, so the data layer can't
+            // import the constant without a cycle.
+            v.whichTown = 200;
+            v.sector = sectorLoc;
+            v.loc = { x, y };
+            v.property = feat.value < 0;
+            v.exists = true;
             break;
+          }
           default:
             break;
         }

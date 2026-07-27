@@ -291,5 +291,7 @@ export function emptyScenario(hdr: ScenarioHeader): Scenario {
     townTalk: [],
     outdoors: [],
     scenSpecials: new Map(),
+    boats: [],
+    horses: [],
   };
 }

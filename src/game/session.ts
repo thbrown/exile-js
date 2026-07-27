@@ -20,6 +20,7 @@ import { StepSound, Terrain, TerObstruct, TerSpec, TrimType, blocksMove } from '
 import { TalkNodeType } from '../data/talking';
 import { Lighting, Town } from '../data/town';
 import { OutWandering } from '../data/outdoors';
+import { Vehicle } from '../data/vehicle';
 import { Snd, SoundPlayer } from '../platform/sound';
 import { Creature, CreatureStatus, assignCreature } from '../universe/creature';
 import { DamageType } from '../data/monster';
@@ -46,7 +47,7 @@ import {
   takeItemFrom,
   unequipItem,
 } from '../universe/inventory';
-import { MainStatus, Race, Skill, Status } from '../universe/skills';
+import { MainStatus, PartyStatus, Race, Skill, Status } from '../universe/skills';
 import { boomSpace } from './booms';
 import { ShopItemType } from '../data/shop';
 import { ShopState, handleSale } from './shop';
@@ -435,6 +436,37 @@ export class GameSession {
     );
   }
 
+  /** town_boat_there / town_horse_there (boe.text.cpp:852/869). */
+  private townVehicleAt(list: Vehicle[], where: Location): Vehicle | null {
+    const townNum = this.univ.party.townNum;
+    for (const v of list) {
+      if (v.exists && v.whichTown === townNum && v.loc.x === where.x && v.loc.y === where.y) return v;
+    }
+    return null;
+  }
+
+  /**
+   * out_boat_there / out_horse_there (boe.text.cpp:859/876). `where` is a
+   * point in the 96x96 window, converted to sector-local coordinates the
+   * same way the vehicle's own `loc` is stored.
+   */
+  private outVehicleAt(list: Vehicle[], where: Location): Vehicle | null {
+    const { party } = this.univ;
+    const local = party.globalToLocal(where);
+    const sector = { x: party.outdoorCorner.x + party.iwc.x, y: party.outdoorCorner.y + party.iwc.y };
+    for (const v of list) {
+      if (!v.exists || v.whichTown !== TOWN_NUM_OUTDOORS) continue;
+      if (v.loc.x !== local.x || v.loc.y !== local.y) continue;
+      if (v.sector.x !== sector.x || v.sector.y !== sector.y) continue;
+      return v;
+    }
+    return null;
+  }
+
+  private get flying(): boolean {
+    return this.univ.party.partyStatus[PartyStatus.FLIGHT] > 0;
+  }
+
   /** outd_move_party (boe.actions.cpp:3942). */
   private async outdMoveParty(destination: Location): Promise<boolean> {
     const { party, out, scenario } = this.univ;
@@ -478,13 +510,13 @@ export class GameSession {
       return false;
     }
 
-    party.direction = setDirection(party.outLoc, destination);
-    const dirStr = DIR_NAMES[party.direction] ?? '';
-
-    // TODO(M6): boarding boats and horses happens here.
-    if (this.outdIsBlocked(realDest)) {
-      this.univ.addStringToBuf(`Blocked: ${dirStr}`);
-      // Undo any window shift the blocked move caused.
+    // The boat/horse block runs before `party.direction` is set in the C++
+    // too — a leave/board decision doesn't need it.
+    let forced = false;
+    const ter = out.at(realDest.x, realDest.y);
+    const terType = this.univ.terrainType(ter);
+    const diagonal = realDest.x !== party.outLoc.x && realDest.y !== party.outLoc.y;
+    const undoWindowShift = (): void => {
       if (storeCorner.x !== party.outdoorCorner.x || storeCorner.y !== party.outdoorCorner.y) {
         out.shift(
           (storeCorner.x - party.outdoorCorner.x) as -1 | 0 | 1,
@@ -492,6 +524,87 @@ export class GameSession {
         );
         party.iwc = storeIwc;
       }
+    };
+    if (party.inBoat >= 0) {
+      if (
+        !this.outdIsBlocked(realDest)
+        && (!terType.boatOver || diagonal)
+        && terType.special !== TerSpec.TOWN_ENTRANCE
+      ) {
+        this.univ.addStringToBuf('You leave the boat.');
+        party.inBoat = -1;
+      } else if (diagonal || (!forced && this.outVehicleAt(party.boats, destination))) {
+        this.univ.addStringToBuf("Move: Boat can't move diagonally.");
+        undoWindowShift();
+        return false;
+      } else if (
+        !this.outdIsBlocked(realDest)
+        && terType.boatOver
+        && terType.special !== TerSpec.TOWN_ENTRANCE
+      ) {
+        if ((await this.onConfirmBoatBridge?.()) ?? false) {
+          forced = true;
+        } else {
+          this.univ.addStringToBuf('You leave the boat.');
+          party.inBoat = -1;
+        }
+      } else if (terType.boatOver) {
+        forced = true;
+      }
+    }
+
+    party.direction = setDirection(party.outLoc, destination);
+    const dirStr = DIR_NAMES[party.direction] ?? '';
+
+    const boardBoat = party.inBoat < 0 && party.inHorse < 0
+      ? this.outVehicleAt(party.boats, realDest) : null;
+    const boardHorse = party.inBoat < 0 && party.inHorse < 0
+      ? this.outVehicleAt(party.horses, realDest) : null;
+    if (boardBoat) {
+      if (this.flying) {
+        this.univ.addStringToBuf('You land first.');
+        party.partyStatus[PartyStatus.FLIGHT] = 0;
+      }
+      this.univ.addStringToBuf('Move: You board the boat.');
+      party.inBoat = party.boats.indexOf(boardBoat);
+      party.outLoc = realDest;
+      party.iwc = { x: realDest.x > 48 ? 1 : 0, y: realDest.y > 48 ? 1 : 0 };
+      party.locInSec = party.globalToLocal(realDest);
+      return true;
+    } else if (boardHorse) {
+      if (this.flying) {
+        this.univ.addStringToBuf('Land before mounting horses.');
+        undoWindowShift();
+        return false;
+      }
+      this.univ.addStringToBuf('Move: You mount the horses.');
+      this.sound?.play(84);
+      party.inHorse = party.horses.indexOf(boardHorse);
+      party.outLoc = realDest;
+      party.iwc = { x: realDest.x > 48 ? 1 : 0, y: realDest.y > 48 ? 1 : 0 };
+      party.locInSec = party.globalToLocal(realDest);
+      return true;
+    } else if (this.outdIsBlocked(realDest) && !forced && !(this.flying && terType.flyOver)) {
+      this.univ.addStringToBuf(`Blocked: ${dirStr}`);
+      undoWindowShift();
+      return false;
+    }
+
+    if (party.inHorse >= 0) {
+      if (terType.special === TerSpec.DAMAGING || terType.special === TerSpec.DANGEROUS) {
+        this.univ.addStringToBuf('Your horses quite sensibly refuse.');
+        undoWindowShift();
+        return false;
+      }
+      if (terType.blockHorse) {
+        this.univ.addStringToBuf("You can't take horses there!");
+        undoWindowShift();
+        return false;
+      }
+    }
+    if (this.flying && terType.special === TerSpec.TOWN_ENTRANCE) {
+      this.univ.addStringToBuf('Moved: You have to land first.');
+      undoWindowShift();
       return false;
     }
 
@@ -511,6 +624,15 @@ export class GameSession {
     this.univ.addStringToBuf(`Moved: ${dirStr}`);
     this.moveSound(this.univ.out.at(realDest.x, realDest.y), this.numOutMoves);
     this.numOutMoves++;
+    // Waterfalls (run_waterfalls) aren't ported; TODO(M6) if a scenario needs them.
+    if (party.inHorse >= 0) {
+      party.horses[party.inHorse]!.whichTown = TOWN_NUM_OUTDOORS;
+      party.horses[party.inHorse]!.loc = party.locInSec;
+      party.horses[party.inHorse]!.sector = {
+        x: party.outdoorCorner.x + party.iwc.x,
+        y: party.outdoorCorner.y + party.iwc.y,
+      };
+    }
     return true;
   }
 
@@ -647,6 +769,17 @@ export class GameSession {
     // check_special_terrain for TOWN_MOVE (boe.specials.cpp:152).
     if (!this.checkSpecialTerrain(destination)) return false;
 
+    // town_move_party's boat/horse handling (boe.actions.cpp:4159): a leave,
+    // a diagonal refusal, a bridge prompt, or boarding a vehicle waiting on
+    // the destination square. Boarding returns straight away, same as the
+    // outdoor half; a bridge crossing sets `vehicleForced` to bypass the
+    // blocked-terrain test below, the same way a scenario's `forced` return
+    // does.
+    const vehicleStep = await this.townVehicleStep(destination);
+    if (vehicleStep === 'boarded') return true;
+    if (vehicleStep === 'blocked') return false;
+    const vehicleForced = vehicleStep === 'forced';
+
     const blockedTerrain = this.townIsBlocked(destination);
 
     // A special attached to the square runs before the step is committed, and
@@ -681,9 +814,26 @@ export class GameSession {
       }
     }
 
-    if (blockedTerrain) {
+    if (blockedTerrain && !vehicleForced) {
       this.univ.addStringToBuf(`Blocked: ${DIR_NAMES[party.direction] ?? ''}`);
       return false;
+    }
+
+    if (party.inHorse >= 0) {
+      const terSpec = this.univ.terrainType(
+        town.record.terrain[destination.x]![destination.y]!);
+      if (terSpec.special === TerSpec.DAMAGING || terSpec.special === TerSpec.DANGEROUS) {
+        this.univ.addStringToBuf('Your horses quite sensibly refuse.');
+        return false;
+      }
+      if (terSpec.blockHorse) {
+        this.univ.addStringToBuf("You can't take horses there!");
+        return false;
+      }
+      if (town.record.lightingType !== Lighting.LIGHT_NORMAL && this.univ.rng.getRan(1, 0, 1) === 0) {
+        this.univ.addStringToBuf('The darkness spooks your horses.');
+        return false;
+      }
     }
 
     party.townLoc = destination;
@@ -691,7 +841,82 @@ export class GameSession {
     this.moveSound(town.record.terrain[destination.x]![destination.y]!, this.numTownMoves++);
     town.makeExplored(destination.x, destination.y);
     this.updateExplored(this.univ.party.townLoc);
+    // Waterfalls (run_waterfalls) aren't ported; TODO(M6) if a scenario needs them.
+    if (party.inHorse >= 0) {
+      party.horses[party.inHorse]!.loc = { ...party.townLoc };
+      party.horses[party.inHorse]!.whichTown = party.townNum;
+    }
     return true;
+  }
+
+  /**
+   * The boat/horse block of town_move_party (boe.actions.cpp:4159-4232):
+   * leaving the boat on dry land, refusing a diagonal move, the "go under or
+   * land" bridge prompt, and boarding a boat or horse waiting on the
+   * destination square. Runs after check_special_terrain, same as the C++.
+   */
+  private async townVehicleStep(destination: Location): Promise<'continue' | 'forced' | 'boarded' | 'blocked'> {
+    const { party } = this.univ;
+    const town = this.univ.town!;
+    let forced = false;
+    if (party.inBoat >= 0) {
+      const ter = town.record.terrain[destination.x]![destination.y]!;
+      const terType = this.univ.terrainType(ter);
+      const diagonal = destination.x !== party.townLoc.x && destination.y !== party.townLoc.y;
+      if (
+        !this.townIsBlocked(destination) && this.specialAt(destination) < 0
+        && (!terType.boatOver || diagonal)
+      ) {
+        this.univ.addStringToBuf('You leave the boat.');
+        party.inBoat = -1;
+      } else if (diagonal) {
+        this.univ.addStringToBuf("Move: Boat can't move diagonally.");
+        return 'blocked';
+      } else if (!this.townIsBlocked(destination) && terType.boatOver && terType.special === TerSpec.BRIDGE) {
+        if ((await this.onConfirmBoatBridge?.()) ?? false) {
+          forced = true;
+        } else if (!this.townIsBlocked(destination)) {
+          this.univ.addStringToBuf('You leave the boat.');
+          party.inBoat = -1;
+        }
+      } else if (this.townVehicleAt(party.boats, destination)) {
+        this.univ.addStringToBuf('  Boat there already.');
+        return 'blocked';
+      } else if (terType.boatOver) {
+        forced = true;
+      }
+    }
+
+    party.direction = setDirection(party.townLoc, destination);
+
+    const boardBoat = party.inBoat < 0 && party.inHorse < 0
+      ? this.townVehicleAt(party.boats, destination) : null;
+    if (boardBoat) {
+      if (boardBoat.property) {
+        this.univ.addStringToBuf('  Not your boat.');
+        return 'blocked';
+      }
+      this.univ.addStringToBuf('Move: You board the boat.');
+      party.inBoat = party.boats.indexOf(boardBoat);
+      party.townLoc = destination;
+      this.center = { ...party.townLoc };
+      return 'boarded';
+    }
+    const boardHorse = party.inBoat < 0 && party.inHorse < 0
+      ? this.townVehicleAt(party.horses, destination) : null;
+    if (boardHorse) {
+      if (boardHorse.property) {
+        this.univ.addStringToBuf('  Not your horses.');
+        return 'blocked';
+      }
+      this.univ.addStringToBuf('Move: You mount the horses.');
+      this.sound?.play(84);
+      party.inHorse = party.horses.indexOf(boardHorse);
+      party.townLoc = destination;
+      this.center = { ...party.townLoc };
+      return 'boarded';
+    }
+    return forced ? 'forced' : 'continue';
   }
 
   /**
@@ -1449,6 +1674,13 @@ export class GameSession {
   onConfirmAttackFriendly: (() => Promise<boolean>) | null = null;
 
   /**
+   * Set by the host: `boat-bridge.xml`'s "go under, or land?" prompt when a
+   * boat reaches a bridge. `true` means "go under" (the move is forced
+   * through); `false` (including no handler) means "leave the boat".
+   */
+  onConfirmBoatBridge: (() => Promise<boolean>) | null = null;
+
+  /**
    * force_town_enter — pin where the party lands before start_town_mode runs,
    * which is how a staircase drops you at a specific square.
    */
@@ -1841,8 +2073,57 @@ export class GameSession {
       this.univ.addStringToBuf(`${pc.name} cleans webs.`);
       pc.status[Status.WEBS] = Math.max(0, (pc.status[Status.WEBS] ?? 0) - 2);
     }
-    // TODO(M6): pausing also mounts or dismounts a boat or horse.
+    this.pauseVehicles();
     this.afterPartyTurn();
+  }
+
+  /**
+   * The vehicle half of handle_pause (boe.actions.cpp:630-676): a horse
+   * always dismounts; a boat only dismounts onto passable ground, and
+   * re-boards on a second pause if you're still standing on it (which is how
+   * you get stranded and un-stranded on a single-tile passable patch of
+   * water).
+   */
+  private pauseVehicles(): void {
+    const { party } = this.univ;
+    if (party.inHorse >= 0) {
+      const horse = party.horses[party.inHorse]!;
+      if (this.isOutdoors) {
+        horse.whichTown = TOWN_NUM_OUTDOORS;
+        horse.loc = party.globalToLocal(party.outLoc);
+        horse.sector = { x: party.outdoorCorner.x + party.iwc.x, y: party.outdoorCorner.y + party.iwc.y };
+      } else if (this.inTown) {
+        horse.loc = { ...party.townLoc };
+        horse.whichTown = party.townNum;
+      }
+      party.inHorse = -1;
+    }
+    if (party.inBoat >= 0) {
+      const boat = party.boats[party.inBoat]!;
+      if (this.isOutdoors && !blocksMove(this.univ.terrainType(this.univ.out.at(party.outLoc.x, party.outLoc.y)))) {
+        boat.whichTown = TOWN_NUM_OUTDOORS;
+        boat.loc = party.globalToLocal(party.outLoc);
+        boat.sector = { x: party.outdoorCorner.x + party.iwc.x, y: party.outdoorCorner.y + party.iwc.y };
+        party.inBoat = -1;
+      } else if (
+        this.inTown && this.univ.town
+        && !blocksMove(this.univ.terrainType(this.univ.town.record.terrain[party.townLoc.x]![party.townLoc.y]!))
+      ) {
+        boat.loc = { ...party.townLoc };
+        boat.whichTown = party.townNum;
+        party.inBoat = -1;
+      }
+    } else {
+      // The above could leave you stranded in a single-tile passable area, so
+      // pausing again should re-enter the boat.
+      let boat: Vehicle | null = null;
+      if (this.isOutdoors) boat = this.outVehicleAt(party.boats, party.outLoc);
+      else if (this.inTown) boat = this.townVehicleAt(party.boats, party.townLoc);
+      if (boat) {
+        party.inBoat = party.boats.indexOf(boat);
+        this.univ.addStringToBuf('You board the boat.');
+      }
+    }
   }
 
   /**
@@ -2132,6 +2413,23 @@ export class GameSession {
     this.setUpLights(town);
     this.populateTown(town);
     this.placePresetItems(town);
+
+    // "check horses"/"check boats" (boe.town.cpp:503): a vehicle the party's
+    // own list has lost track of (an older save missing a vehicle the
+    // scenario since gained) is restored from the scenario's template.
+    const { party, scenario } = this.univ;
+    for (let i = 0; i < party.boats.length; i++) {
+      const template = scenario.boats[i];
+      if (template && template.whichTown >= 0 && template.loc.x >= 0 && !party.boats[i]!.exists) {
+        party.boats[i] = { ...template, exists: true };
+      }
+    }
+    for (let i = 0; i < party.horses.length; i++) {
+      const template = scenario.horses[i];
+      if (template && template.whichTown >= 0 && template.loc.x >= 0 && !party.horses[i]!.exists) {
+        party.horses[i] = { ...template, exists: true };
+      }
+    }
 
     // handle_town_specials: the town's entry node fires once we're inside.
     if (record.specOnEntry >= 0)

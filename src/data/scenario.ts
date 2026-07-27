@@ -13,6 +13,7 @@ import { SpecialNode } from './special';
 import { Speech } from './talking';
 import { Terrain } from './terrain';
 import { Timer, Town } from './town';
+import { Vehicle } from './vehicle';
 
 export interface Scenario {
   title: string;
@@ -47,6 +48,9 @@ export interface Scenario {
   initSpec: number;
   specStrs: string[];
   storeItemRects: Map<number, { top: number; left: number; bottom: number; right: number }>;
+  /** The scenario's boat/horse templates, by vehicle number (fileio_scen.cpp). */
+  boats: Vehicle[];
+  horses: Vehicle[];
 }
 
 /**

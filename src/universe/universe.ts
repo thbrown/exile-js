@@ -57,6 +57,10 @@ export class Universe {
     this.party.iwc = { x: 0, y: 0 };
     this.party.locInSec = { ...scenario.sectorStart };
     this.party.outLoc = { ...scenario.sectorStart };
+    // enter_scenario (universe.cpp:1396): the party gets its own copy of
+    // every vehicle the scenario placed.
+    this.party.boats = scenario.boats.filter((v) => v.exists).map((v) => ({ ...v }));
+    this.party.horses = scenario.horses.filter((v) => v.exists).map((v) => ({ ...v }));
     this.out = new CurOut(scenario, this.party);
     this.out.addMaps();
     // The tail of cUniverse::set_scenario (universe.cpp:1438): the party begins

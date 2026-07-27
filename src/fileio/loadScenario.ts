@@ -47,7 +47,10 @@ export async function loadScenario(
       await parseXmlDoc(await src.getText(`${base}.xml`), `${base}.xml`),
       `${base}.xml`,
     );
-    loadTownMapData(loadMap(await src.getText(`${base}.map`), true, `${base}.map`), town, base);
+    loadTownMapData(
+      loadMap(await src.getText(`${base}.map`), true, `${base}.map`),
+      town, t, scen.boats, scen.horses, base,
+    );
     town.specials = parseSpecials(await src.getText(`${base}.spec`), opcodes, `${base}.spec`);
     scen.towns.push(town);
     scen.townTalk.push(
@@ -67,7 +70,10 @@ export async function loadScenario(
         await parseXmlDoc(await src.getText(`${base}.xml`), `${base}.xml`),
         `${base}.xml`,
       );
-      loadOutMapData(loadMap(await src.getText(`${base}.map`), false, `${base}.map`), sector, base);
+      loadOutMapData(
+        loadMap(await src.getText(`${base}.map`), false, `${base}.map`),
+        sector, { x, y }, scen.boats, scen.horses, base,
+      );
       sector.specials = parseSpecials(await src.getText(`${base}.spec`), opcodes, `${base}.spec`);
       scen.outdoors[x]!.push(sector);
     }
