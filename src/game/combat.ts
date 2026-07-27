@@ -186,8 +186,14 @@ export function placeParty(session: GameSession, direction: Direction): void {
     // from being placed inside a wall or on top of a monster. `is_special` is a
     // boolean test in the C++ and `specialAt` returns -1 for none, which is
     // truthy, so it has to be compared rather than negated.
+    // `can_see_light(..., combat_obscurity) < 1` is the test that keeps the
+    // party on *this* side of a wall: the spot has to be in an unobstructed
+    // straight line from where the party stands. Without it the placement
+    // table happily reaches through a wall and drops PCs in the next room.
     const usable = !session.isBlocked(where) && session.specialAt(where) < 0
-      && session.sightObscurity(where.x, where.y) === 0 && !session.locOffActiveArea(where);
+      && session.sightObscurity(where.x, where.y) === 0
+      && session.canSeeLight(univ.party.townLoc, where, session.combatObscurity) < 1
+      && !session.locOffActiveArea(where);
     spotOk[i] = usable;
     if (usable && i > 1) howManyOk++;
     // The party's own square is always allowed, blocked or not.

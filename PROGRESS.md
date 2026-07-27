@@ -1278,6 +1278,67 @@ general dialogxml engine — the same approach the port already takes for the
 talk, shop and map screens. A general engine for the remaining ~210 dialog
 definitions is still the long-term M3 item.
 
+- **Six things from the fifth play-test (2026-07-27)**, all real defects and
+  all now closed:
+  - **PCs placed on the far side of a wall when a fight started.** `place_party`
+    was missing its third test: the C++ requires
+    `can_see_light(town_loc, spot, combat_obscurity) < 1`, i.e. an
+    *unobstructed straight line* from where the party stands. Only `is_blocked`
+    and `sight_obscurity` were ported, and neither stops the placement table
+    reaching around a corner into the next room. Measured over every open
+    square of Fort Talrus: **4341 of 21575 placements crossed an obstruction
+    before the fix, 0 after.**
+    - `combat_obscurity` (boe.locutils.cpp:204) is new here: it is
+      `sight_obscurity` plus "anything that blocks movement is opaque" plus
+      lava. `find_clear_spot` passes it too, and did not before, so summoned
+      creatures could land through walls as well.
+    - `canSeeLight` now takes the obscurity function as an argument, as the C++
+      does, and picks `combat_pt_in_light` in combat rather than `pt_in_light`
+      — the C++ branches on the mode and this port only had the town half.
+  - **No pointing arrows while looking around.** They were drawn (in
+    `scrollableModes`), but Look was a `pending` flag rather than a mode, so
+    LOOK_TOWN/LOOK_COMBAT were never entered and the arrows never showed. `L`
+    now runs `handle_begin_look`: the mode switches, the arrows appear, the
+    border scrolls the view, and looking (or `L`/Escape) runs `end_look`, which
+    puts the camera back on the party.
+    - While fixing it: the click-to-square maths measured from the party's
+      square, but `handle_terrain_screen_actions` (boe.actions.cpp:301)
+      measures from **`center`** in town and combat. They only differ once the
+      view has been scrolled — which, before this, nothing outside targeting
+      could do.
+  - **No random encounters outdoors.** The machinery was all there; the
+    *clock* was wrong. `increase_age` (boe.actions.cpp:3362) advances the
+    outdoor clock by **ten** ticks per step (five mounted), after rounding down
+    to a multiple of that — this port did `age++`. Everything outdoors is
+    gated on `age % 10 == 0`: whether the wandering groups move, and whether
+    the game rolls its 1-in-70 for a new group at all. So encounters were ten
+    times rarer than they should be, and the whole outdoor clock (poison
+    biting, wounds closing, quest deadlines, shop restocking) ran ten times
+    slow. A test now walks the party until a group appears.
+  - **Walking through webs didn't web anyone**, and **crates and barrels
+    didn't move when pushed.** Both live in the middle of
+    `check_special_terrain` (boe.specials.cpp:283-300), between the barrier
+    tests and the terrain switch, and that stretch had never been ported.
+    Now there, along with `push_thing`/`move_thing` (boe.town.cpp:1627, items
+    inside a pushed container travel with it) and the **conveyor** refusal at
+    the top of the same function. `check_fields` (:381) came with them — the
+    walls of fire/force/ice/blades, quickfire, the two clouds and the fire
+    barrier all announce themselves when you walk in, and damage on a combat
+    move.
+    - *Gotcha*: the web's race test reads the **current** PC even when the
+      whole party is caught, so out of combat it is PC 1's race that decides
+      whether anyone gets webbed. Kept.
+    - *Gotcha*: a push against something solid returns the *pusher's* square
+      from `push_loc`, so the crate swaps onto the party's square rather than
+      refusing. Over water or a pit (terrain 90) it is destroyed outright,
+      which `push_loc` signals by returning `x = 0`.
+  - **`OUT_PLACE_ENCOUNTER` and `OUT_MAKE_WANDER` reported themselves instead
+    of doing anything.** Both are one line each now that `wandering.ts` exists:
+    MAKE_WANDER calls `create_wand_monst`, PLACE_ENCOUNTER drops
+    `out->special_enc[ex1a]` on the party's own square with `forced`, so the
+    encounter check meets it on the next turn. `ex1a` outside 0-3 prints the
+    original's error and places nothing.
+
 ## Next steps
 
 M5 is closed and the first slice of **M6** landed 2026-07-27 (quests, job

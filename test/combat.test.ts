@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { Direction, loc } from '../src/core/location';
+import { Direction, loc, locsEqual } from '../src/core/location';
 import { GameRng } from '../src/core/rng';
 import { FieldType } from '../src/data/fields';
 import { ItemAbil, ItemType } from '../src/data/item';
@@ -479,6 +479,35 @@ describe('placement, parry and holding a turn', () => {
       expect(univ.town!.monsterAt(pc.combatPos)).toBeNull();
       expect(session.townIsBlocked(pc.combatPos)).toBe(false);
     }
+  });
+
+  it('never places a PC through a wall', () => {
+    const { univ, session } = newGame();
+    // place_party's spots have to be reachable in a straight, unobstructed
+    // line from the party (can_see_light with combat_obscurity), which is what
+    // keeps the party on one side of a wall when a fight starts in a doorway.
+    placeParty(session, Direction.N);
+    for (const pc of univ.party.pcs) {
+      if (!pc.isAlive) continue;
+      if (locsEqual(pc.combatPos, univ.party.townLoc)) continue; // index 0 is forced
+      expect(session.canSeeLight(
+        univ.party.townLoc, pc.combatPos, session.combatObscurity)).toBe(0);
+    }
+  });
+
+  it('combat_obscurity blocks on anything that blocks movement', () => {
+    const { univ, session } = newGame();
+    const from = univ.party.townLoc;
+    // Find a wall square somewhere in the town and check the two obscurity
+    // functions disagree the way the C++'s do: sight may pass, movement not.
+    const town = univ.town!;
+    let wall: ReturnType<typeof loc> | null = null;
+    for (let x = from.x - 8; x < from.x + 8 && !wall; x++)
+      for (let y = from.y - 8; y < from.y + 8 && !wall; y++)
+        if (town.isOnMap(x, y) && session.townIsBlocked(loc(x, y))
+          && session.sightObscurity(x, y) === 0) wall = loc(x, y);
+    if (!wall) return; // no such square in this town; nothing to assert
+    expect(session.combatObscurity(wall.x, wall.y)).toBe(5);
   });
 
   it('isBlocked counts creatures, the party and barriers, not just terrain', () => {

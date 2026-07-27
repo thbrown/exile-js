@@ -460,6 +460,51 @@ await shot('01d-sign');
 await page.keyboard.press('Enter');
 await page.waitForTimeout(150);
 
+// Look is a *mode* (MODE_LOOK_TOWN), which is what puts the twelve pointing
+// arrows on the terrain view and makes the border scroll it. Press 'l', check
+// the mode and the arrows, scroll one square, look at something, and check the
+// mode and the camera both come back.
+await page.keyboard.press('l');
+await page.waitForTimeout(150);
+const looking = await page.evaluate(async () => {
+  const modes = await import('/src/game/modes.ts');
+  const s = window.__session;
+  return {
+    mode: s.mode,
+    scrollable: modes.isScrollable(s.mode),
+    centre: { ...s.center },
+  };
+});
+await shot('01e-look-mode');
+// A click on the terrain panel's border scrolls the view (the arrows are only
+// a hint about where to click — the whole border is live).
+const borderPt = await page.evaluate(() => {
+  const sc = window.__screen;
+  const c = document.querySelector('canvas');
+  const r = c.getBoundingClientRect();
+  for (let y = 19; y < 317; y++)
+    for (let x = 7; x < 365; x++)
+      if (sc.scrollBorderAt(x, y)?.dx === -1)
+        return {
+          x: r.left + (x + 0.5) * (r.width / c.width),
+          y: r.top + (y + 0.5) * (r.height / c.height),
+        };
+  return null;
+});
+if (borderPt) {
+  await page.mouse.click(borderPt.x, borderPt.y);
+  await page.waitForTimeout(150);
+}
+const lookScrolled = await page.evaluate(() => ({ scrolled: { ...window.__session.center } }));
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+const lookEnded = await page.evaluate(() => ({
+  mode: window.__session.mode,
+  centre: { ...window.__session.center },
+  party: { ...window.__session.univ.party.townLoc },
+}));
+console.log('LOOK MODE:', JSON.stringify({ ...looking, ...lookScrolled, ended: lookEnded }));
+
 /**
  * Walk toward a target, sidestepping when creatures or walls block, until the
  * predicate holds or we run out of steps.
@@ -1409,6 +1454,11 @@ const ok =
   // *sound type* (2) as a file number, which is the cash-register noise.
   (booms.skipped === true || (booms.boomCount > 0 && booms.boom.damage > 0
     && booms.played.includes(70))) &&
+  // Look is a mode: the arrows show, the border scrolls, Escape puts it back.
+  looking.mode === 18 && looking.scrollable === true &&
+  lookScrolled.scrolled.x === looking.centre.x - 1 &&
+  lookEnded.mode === 1 &&
+  lookEnded.centre.x === lookEnded.party.x && lookEnded.centre.y === lookEnded.party.y &&
   reenter?.inTown === true &&
   // run_a_missile: the shot puts exactly one projectile in the air, and the
   // three held-still sprites all draw.

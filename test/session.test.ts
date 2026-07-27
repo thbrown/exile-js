@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Direction } from '../src/core/location';
 import { GameRng } from '../src/core/rng';
+import { FieldType } from '../src/data/fields';
 import { SECTOR_SIZE } from '../src/data/outdoors';
 import { Scenario } from '../src/data/scenario';
 import { TerSpec } from '../src/data/terrain';
@@ -223,7 +224,9 @@ describe('outdoor movement', () => {
       }
     }
     expect(moved).toBe(true);
-    expect(univ.party.age).toBe(before + 1);
+    // increase_age's outdoor clock: rounded down to a multiple of 10, then
+    // +10 on foot. Not +1 — `age % 10 == 0` gates the wandering monsters.
+    expect(univ.party.age).toBe(before - (before % 10) + 10);
     expect(univ.party.outLoc).not.toEqual(from);
     expect(univ.transcript.at(-1)).toMatch(/^Moved: /);
   });
@@ -338,6 +341,73 @@ describe('outdoor terrain specials', () => {
       const before = s.univ.party.pcs[0]!.curHealth;
       await s.moveTo(to);
       expect(s.univ.party.pcs[0]!.curHealth).toBeLessThan(before);
+    } finally {
+      scen.terTypes[idx] = saved;
+    }
+  });
+});
+
+describe('walking into things: webs, crates and conveyors', () => {
+  /** A town session with a clear square next to the party, or null. */
+  function townWithClearNeighbour(): { s: GameSession; to: { x: number; y: number } } | null {
+    const s = newSession();
+    s.startNewGame();
+    const from = s.univ.party.townLoc;
+    const candidates = [
+      { x: from.x + 1, y: from.y }, { x: from.x - 1, y: from.y },
+      { x: from.x, y: from.y + 1 }, { x: from.x, y: from.y - 1 },
+    ];
+    const to = candidates.find((c) =>
+      !s.townIsBlocked(c) && !s.univ.town!.monsterAt(c) && s.specialAt(c) < 0);
+    return to ? { s, to } : null;
+  }
+
+  it('walking into a web catches the whole party and uses the web up', async () => {
+    const found = townWithClearNeighbour();
+    if (!found) return;
+    const { s, to } = found;
+    s.univ.town!.setField(to.x, to.y, FieldType.FIELD_WEB);
+    await s.moveTo(to);
+    expect(s.univ.transcript.some((l) => l.includes('Webs!'))).toBe(true);
+    // Out of combat every PC is webbed, and the web is spent.
+    for (const pc of s.univ.party.pcs)
+      if (pc.isAlive) expect(pc.status[Status.WEBS] ?? 0).toBeGreaterThan(0);
+    expect(s.univ.town!.hasField(to.x, to.y, FieldType.FIELD_WEB)).toBe(false);
+  });
+
+  it('walking into a barrel pushes it one square further along', async () => {
+    const found = townWithClearNeighbour();
+    if (!found) return;
+    const { s, to } = found;
+    const from = { ...s.univ.party.townLoc };
+    const beyond = { x: to.x + (to.x - from.x), y: to.y + (to.y - from.y) };
+    // Only meaningful when the square past it is clear; otherwise push_loc
+    // swaps the barrel onto the pusher's square instead.
+    if (s.townIsBlocked(beyond) || s.sightObscurity(beyond.x, beyond.y) > 0) return;
+    s.univ.town!.setField(to.x, to.y, FieldType.OBJECT_BARREL);
+    await s.moveTo(to);
+    expect(s.univ.transcript.some((l) => l.includes('push the barrel'))).toBe(true);
+    expect(s.univ.town!.hasField(to.x, to.y, FieldType.OBJECT_BARREL)).toBe(false);
+    expect(s.univ.town!.hasField(beyond.x, beyond.y, FieldType.OBJECT_BARREL)).toBe(true);
+  });
+
+  it('a conveyor refuses to be walked against', async () => {
+    const found = townWithClearNeighbour();
+    if (!found) return;
+    const { s, to } = found;
+    const from = { ...s.univ.party.townLoc };
+    // valleydy has no conveyor of its own, so borrow the terrain the party is
+    // about to step onto and make it one.
+    const idx = s.univ.town!.record.terrain[to.x]![to.y]!;
+    const saved = scen.terTypes[idx]!;
+    // Point the belt back the way the party is coming from.
+    const dir = to.y < from.y ? Direction.S : to.y > from.y ? Direction.N
+      : to.x > from.x ? Direction.W : Direction.E;
+    scen.terTypes[idx] = { ...saved, special: TerSpec.CONVEYOR, flag1: dir, blockage: 0 };
+    try {
+      await s.moveTo(to);
+      expect(s.univ.transcript.some((l) => l.includes('moving floor'))).toBe(true);
+      expect(s.univ.party.townLoc).toEqual(from);
     } finally {
       scen.terTypes[idx] = saved;
     }

@@ -7,6 +7,7 @@ import { SpecType } from '../../data/special';
 import { Universe } from '../../universe/universe';
 import { SpecialCtx } from './context';
 import { reportUnsupported } from './general';
+import { createWandMonst, placeOutdWandMonst } from '../wandering';
 import { handleMessage } from './vm';
 
 export async function outdoorSpec(univ: Universe, ctx: SpecialCtx): Promise<void> {
@@ -50,10 +51,29 @@ export async function outdoorSpec(univ: Universe, ctx: SpecialCtx): Promise<void
     }
 
     case SpecType.OUT_MAKE_WANDER:
-    case SpecType.OUT_PLACE_ENCOUNTER:
-      // TODO(M5): wandering monsters and outdoor encounters need combat.
-      reportUnsupported(univ, spec.type);
+      // Roll one of this sector's wandering groups into the world, wherever
+      // its wandering points are — the same call the every-tenth-turn roll
+      // makes, so the group has to walk to the party before anything happens.
+      createWandMonst(ctx.session);
+      ctx.redraw = true;
       break;
+
+    case SpecType.OUT_PLACE_ENCOUNTER: {
+      // ex1a picks one of the sector's four *special* encounters and drops it
+      // on the party's own square, `forced` — which is what makes it start a
+      // fight on the next turn wherever the party is standing.
+      const which = spec.ex1a;
+      if (which < 0 || which > 3) {
+        univ.addStringToBuf('Special outdoor enc. is out of range. Must be 0-3.');
+        break;
+      }
+      const group = univ.out.sectorAt(univ.party.outLoc).specialEnc[which];
+      if (group) {
+        placeOutdWandMonst(ctx.session, univ.party.locInSec, group, 1);
+        checkMess = true;
+      }
+      break;
+    }
 
     default:
       reportUnsupported(univ, spec.type);

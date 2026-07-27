@@ -520,7 +520,9 @@ async function main(): Promise<void> {
       status.textContent = "Click an item name (or type 'a'-'h') to buy; Esc to leave.";
     else if (session.talk) status.textContent = 'Click a highlighted word, or Done to stop talking.';
     else if (pending === 'talk') status.textContent = 'Talk to whom? (pick a direction)';
-    else if (pending === 'look') status.textContent = 'Look where? (pick a direction)';
+    else if (pending === 'look')
+      status.textContent =
+        'Look: click a space (the border arrows scroll the view). L or Esc cancels.';
     else if (pending === 'use') status.textContent = 'Use what? (pick a direction)';
     else if (pending === 'bash') status.textContent = 'Bash which door? (pick a direction)';
     else if (session.missile !== null)
@@ -575,6 +577,43 @@ async function main(): Promise<void> {
     redraw();
   };
 
+  /**
+   * handle_begin_look (boe.actions.cpp:470) — Look is a *mode*, not a one-shot
+   * prompt. That matters for more than bookkeeping: MODE_LOOK_TOWN and
+   * MODE_LOOK_COMBAT are in `scrollableModes`, so while you're looking the
+   * twelve pointing arrows appear and the border scrolls the view — which is
+   * the only way to look at something the 9x9 window doesn't reach. Pressing
+   * the key again cancels, as the original's Escape branch does.
+   */
+  const beginLook = (): void => {
+    if (isLooking()) {
+      univ.addStringToBuf('  Cancelled.');
+      endLook();
+      return;
+    }
+    if (session.mode === GameMode.OUTDOORS) session.mode = GameMode.LOOK_OUTDOORS;
+    else if (session.mode === GameMode.TOWN) session.mode = GameMode.LOOK_TOWN;
+    else if (session.mode === GameMode.COMBAT) session.mode = GameMode.LOOK_COMBAT;
+    else return;
+    pending = 'look';
+    univ.addStringToBuf('Look: Select a space.');
+  };
+
+  const isLooking = (): boolean => session.mode === GameMode.LOOK_TOWN
+    || session.mode === GameMode.LOOK_COMBAT
+    || session.mode === GameMode.LOOK_OUTDOORS;
+
+  /** end_look (boe.actions.cpp:448) — back to the mode we came from, and the
+   * view back onto the party (the scroll arrows may have moved it). */
+  const endLook = (): void => {
+    if (session.mode === GameMode.LOOK_TOWN) session.mode = GameMode.TOWN;
+    else if (session.mode === GameMode.LOOK_COMBAT) session.mode = GameMode.COMBAT;
+    else if (session.mode === GameMode.LOOK_OUTDOORS) session.mode = GameMode.OUTDOORS;
+    else return;
+    pending = null;
+    recentre();
+  };
+
   /** Look at a space: describe it, and read an adjacent sign if there is one. */
   const lookAt = (target: { x: number; y: number }): void => {
     const ter = session.lookAt(target);
@@ -627,6 +666,9 @@ async function main(): Promise<void> {
     }
     if (what === 'look') {
       lookAt(target);
+      // Looking is done unless the modifier keys held it open; this port has
+      // no quick-look modifier, so every look ends the mode.
+      endLook();
       return;
     }
     if (what === 'bash') {
@@ -780,7 +822,7 @@ async function main(): Promise<void> {
         if (btn.btn === ToolbarButton.TALK) {
           pending = 'talk';
         } else if (btn.btn === ToolbarButton.LOOK) {
-          pending = 'look';
+          beginLook();
         } else if (btn.btn === ToolbarButton.CAMP) {
           session.rest();
         } else if (btn.btn === ToolbarButton.USE) {
@@ -831,12 +873,12 @@ async function main(): Promise<void> {
       }
       const cell = screen.terrainCellAt(x, y);
       if (cell) {
-        // Any combat mode aims from the active PC, not just COMBAT itself —
-        // SPELL_TARGET and FIRING are combat modes too, and using the party's
-        // town square there sends the click to the wrong place entirely.
-        const from = isCombat(session.mode) || session.missile !== null
-          ? univ.currentPc.combatPos
-          : session.inTown ? univ.party.townLoc : univ.party.outLoc;
+        // handle_terrain_screen_actions (boe.actions.cpp:301) measures the
+        // click from `center` in town and combat, and from the party's square
+        // outdoors — not from the acting PC. That matters once the view has
+        // been scrolled with the border arrows: the square under the cursor is
+        // relative to what's drawn, which is `center`.
+        const from = session.isOutdoors ? univ.party.outLoc : session.center;
         const clicked = { x: from.x + cell.q - 4, y: from.y + cell.r - 4 };
         // Look, Talk and Use all act on the square you clicked — handle_talk
         // (boe.actions.cpp:818) takes the destination as given and only needs
@@ -935,7 +977,7 @@ async function main(): Promise<void> {
           else univ.addStringToBuf('There is nobody to talk to out here.');
           break;
         case 'l':
-          pending = 'look';
+          beginLook();
           break;
         case 'u': case 'U':
           if (inCombat) univ.addStringToBuf('Use: not in combat.');
@@ -999,6 +1041,13 @@ async function main(): Promise<void> {
       setStatus();
       redraw();
       if (key === 'Escape' && pending) {
+        // Escape out of Look leaves the mode as well as the prompt, which is
+        // what puts the view back on the party.
+        if (isLooking()) {
+          univ.addStringToBuf('  Cancelled.');
+          endLook();
+          redraw();
+        }
         pending = null;
         setStatus();
       }

@@ -37,7 +37,9 @@ export function findClearSpot(
     };
     if (session.locOffActiveArea(loc)) continue;
     if (session.isBlocked(loc)) continue;
-    if (session.canSeeLight(fromWhere, loc) !== 0) continue;
+    // combat_obscurity, as the C++ passes (boe.monster.cpp:745): a creature
+    // is never placed through a wall from the square it's summoned at.
+    if (session.canSeeLight(fromWhere, loc, session.combatObscurity) !== 0) continue;
     if (session.mode === GameMode.COMBAT
       && session.univ.party.pcs.some((pc) => pc.isAlive && locsEqual(pc.combatPos, loc))) continue;
     if (session.inTown

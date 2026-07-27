@@ -23,7 +23,7 @@ import { OutWandering } from '../data/outdoors';
 import { Snd, SoundPlayer } from '../platform/sound';
 import { Creature, CreatureStatus, assignCreature } from '../universe/creature';
 import { DamageType } from '../data/monster';
-import { hitParty } from './damage';
+import { damagePc, hitParty } from './damage';
 import {
   NO_ONE, endTownCombat, pcAttack, pickNextPc, setPcMoves, startTownCombat, takeAp,
 } from './combat';
@@ -46,7 +46,8 @@ import {
   takeItemFrom,
   unequipItem,
 } from '../universe/inventory';
-import { MainStatus, Skill, Status } from '../universe/skills';
+import { MainStatus, Race, Skill, Status } from '../universe/skills';
+import { boomSpace } from './booms';
 import { ShopItemType } from '../data/shop';
 import { ShopState, handleSale } from './shop';
 import { ItemShopMode, ItemShopState, handleItemShopAction } from './itemShop';
@@ -85,6 +86,16 @@ function setDirection(from: Location, to: Location): Direction {
 }
 
 const DIR_NAMES = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest', ''];
+
+/**
+ * The four conveyor-belt refusal sets (boe.specials.cpp:145): a belt running
+ * north can't be walked into from the north, and the two diagonals that
+ * include north count as north too.
+ */
+const NO_MOVE_FROM_NORTH = new Set([Direction.N, Direction.NW, Direction.NE]);
+const NO_MOVE_FROM_WEST = new Set([Direction.W, Direction.NW, Direction.SW]);
+const NO_MOVE_FROM_SOUTH = new Set([Direction.S, Direction.SW, Direction.SE]);
+const NO_MOVE_FROM_EAST = new Set([Direction.E, Direction.NE, Direction.SE]);
 
 /**
  * entry_dir 9 in start_town_mode means "ignore start_locs, use town_force_loc".
@@ -487,7 +498,16 @@ export class GameSession {
     party.outLoc = realDest;
     party.iwc = { x: realDest.x > 47 ? 1 : 0, y: realDest.y > 47 ? 1 : 0 };
     party.locInSec = party.globalToLocal(realDest);
-    party.age++;
+    // increase_age's outdoor clock (boe.actions.cpp:3362): a step outdoors is
+    // *ten* ticks on foot (five on a horse), and the count is first rounded
+    // down to a multiple of that. It is not `age++` — a great deal keys off
+    // `age % 10 == 0`, including whether the wandering groups move and whether
+    // the game rolls for a new encounter at all, so ticking by one made
+    // outdoor encounters ten times rarer than they should be and ran the
+    // whole outdoor clock (poison, healing, quest deadlines) ten times slow.
+    const step = party.inHorse < 0 ? 10 : 5;
+    party.age -= party.age % step;
+    party.age += step;
     this.univ.addStringToBuf(`Moved: ${dirStr}`);
     this.moveSound(this.univ.out.at(realDest.x, realDest.y), this.numOutMoves);
     this.numOutMoves++;
@@ -781,6 +801,7 @@ export class GameSession {
     if (ter === 90 || info.boatOver) return loc(0, target.y);
     if (this.sightObscurity(target.x, target.y) > 0) return { ...from };
     if (info.blockage !== TerObstruct.CLEAR) return { ...from };
+    if (this.locOffActiveArea(target)) return { ...from };
     if (town.monsterAt(target)) return { ...from };
     return target;
   }
@@ -797,7 +818,10 @@ export class GameSession {
   lookAt(where: Location): number {
     const { univ } = this;
     const town = univ.town;
-    const from = this.inTown ? univ.party.townLoc : univ.party.outLoc;
+    // handle_look draws its line from the acting PC in MODE_LOOK_COMBAT and
+    // from the party's own square otherwise (boe.actions.cpp:693).
+    const from = isCombat(this.mode) ? univ.currentPc.combatPos
+      : this.inTown ? univ.party.townLoc : univ.party.outLoc;
     const isLit = !town || this.ptInLight(from, where);
     const onMap = town ? town.isOnMap(where.x, where.y) : univ.out.isOnMap(where.x, where.y);
     if (!onMap) {
@@ -1115,11 +1139,32 @@ export class GameSession {
    * `outd_move_party` (boe.actions.cpp:3950) with `eSpecCtx::OUT_MOVE`, which
    * is what makes a swamp poison you and a lava field burn you on the world
    * map. Only the terrain source and the special's context differ.
-   *
-   * TODO(M5): conveyors, webs and pushable crates/barrels.
    */
   private checkSpecialTerrain(where: Location): boolean {
     const town = this.univ.town;
+    const inCombatMove = isCombat(this.mode);
+    // from_loc: the square being left, which the conveyor and the pushables
+    // both need — a crate is shoved on along the line the pusher was walking.
+    const fromLoc = inCombatMove ? this.univ.currentPc.combatPos : this.univ.party.townLoc;
+
+    const ter = town
+      ? (town.isOnMap(where.x, where.y) ? town.record.terrain[where.x]![where.y]! : 0)
+      : (this.univ.out.isOnMap(where.x, where.y) ? this.univ.out.at(where.x, where.y) : 0);
+    const spec = this.univ.terrainType(ter);
+
+    // A moving floor refuses to be walked against. `flag1` is the direction it
+    // runs; the three headings that include it are the ones it blocks.
+    // (The C++'s own TODO wonders why conveyors don't work outdoors; kept.)
+    if (town && spec.special === TerSpec.CONVEYOR) {
+      const dir = spec.flag1;
+      if ((NO_MOVE_FROM_NORTH.has(dir) && where.y > fromLoc.y)
+        || (NO_MOVE_FROM_EAST.has(dir) && where.x < fromLoc.x)
+        || (NO_MOVE_FROM_SOUTH.has(dir) && where.y < fromLoc.y)
+        || (NO_MOVE_FROM_WEST.has(dir) && where.x > fromLoc.x)) {
+        this.univ.addStringToBuf('The moving floor prevents you.');
+        return false;
+      }
+    }
 
     // Barriers stop the party before terrain is even consulted. They live on
     // the town's field grid, so there are none outdoors.
@@ -1135,10 +1180,13 @@ export class GameSession {
       if (!town.isOnMap(where.x, where.y)) return true;
     } else if (!this.univ.out.isOnMap(where.x, where.y)) return true;
 
-    const ter = town
-      ? town.record.terrain[where.x]![where.y]!
-      : this.univ.out.at(where.x, where.y);
-    const spec = this.univ.terrainType(ter);
+    // Everything between the barrier tests and the terrain switch: the fields
+    // you walk into, the webs that catch you, and the things you shove.
+    if (town) {
+      this.checkFields(where, inCombatMove);
+      this.walkIntoWebs(where, inCombatMove);
+      this.pushThings(fromLoc, where);
+    }
 
     switch (spec.special) {
       case TerSpec.CHANGE_WHEN_STEP_ON: {
@@ -1171,6 +1219,114 @@ export class GameSession {
         return true;
       default:
         return true;
+    }
+  }
+
+  /**
+   * check_fields (boe.specials.cpp:381) — walking *into* a field, as opposed
+   * to standing in one (which is `process_fields`'s job). Out of combat the
+   * walls only announce themselves: the C++ only damages on a COMBAT_MOVE,
+   * because in town the party is about to be hit by `process_fields` anyway.
+   */
+  private checkFields(where: Location, inCombatMove: boolean): void {
+    const town = this.univ.town;
+    if (!town) return;
+    const pc = this.univ.currentPc;
+    const rng = this.univ.rng;
+    const say = (line: string): void => this.univ.addStringToBuf(line);
+    const hit = (dam: number, type: DamageType): void => {
+      if (inCombatMove) damagePc(this.univ, pc, dam, type, Race.UNKNOWN);
+    };
+
+    if (town.hasField(where.x, where.y, FieldType.WALL_FIRE)) {
+      say('  Fire wall!');
+      hit(rng.getRan(1, 1, 6) + 1, DamageType.FIRE);
+    }
+    if (town.hasField(where.x, where.y, FieldType.WALL_FORCE)) {
+      say('  Force wall!');
+      hit(rng.getRan(2, 1, 6), DamageType.MAGIC);
+    }
+    if (town.hasField(where.x, where.y, FieldType.WALL_ICE)) {
+      say('  Ice wall!');
+      const r1 = rng.getRan(2, 1, 6);
+      hit(r1, DamageType.COLD);
+      // The C++ booms on the *party's* square, not the one stepped into, and
+      // only outside combat. Kept.
+      if (!isCombat(this.mode)) boomSpace(this.univ.party.townLoc, 4, r1, 7);
+    }
+    if (town.hasField(where.x, where.y, FieldType.WALL_BLADES)) {
+      say('  Blade wall!');
+      hit(rng.getRan(4, 1, 8), DamageType.WEAPON);
+    }
+    if (town.hasField(where.x, where.y, FieldType.FIELD_QUICKFIRE)) {
+      say('  Quickfire!');
+      hit(rng.getRan(2, 1, 8), DamageType.FIRE);
+    }
+    if (town.hasField(where.x, where.y, FieldType.CLOUD_STINK)) {
+      say('  Stinking cloud!');
+      pc.curse(rng.getRan(1, 2, 3));
+    }
+    if (town.hasField(where.x, where.y, FieldType.CLOUD_SLEEP)) {
+      say('  Sleep cloud!');
+      pc.sleep(Status.ASLEEP, 3, 0, rng);
+    }
+    if (town.hasField(where.x, where.y, FieldType.BARRIER_FIRE)) {
+      say('  Magic barrier!');
+      const r1 = rng.getRan(2, 1, 10);
+      if (inCombatMove) damagePc(this.univ, pc, r1, DamageType.MAGIC, Race.UNKNOWN);
+      else hitParty(this.univ, r1, DamageType.MAGIC);
+    }
+  }
+
+  /**
+   * The webs half of check_special_terrain (boe.specials.cpp:283). Walking
+   * into a web catches you and *uses the web up*. Out of combat it webs the
+   * whole party; in combat only the PC who walked in. Bugs walk through.
+   */
+  private walkIntoWebs(where: Location, inCombatMove: boolean): void {
+    const town = this.univ.town;
+    if (!town || !town.hasField(where.x, where.y, FieldType.FIELD_WEB)) return;
+    // The race test reads the *current* PC even when the whole party is caught,
+    // so out of combat it's PC 1's race that decides for everyone. Kept.
+    if (this.univ.currentPc.race === Race.BUG) return;
+    this.univ.addStringToBuf('  Webs!');
+    if (!inCombatMove) {
+      for (const pc of this.univ.party.pcs) pc.web(this.univ.rng.getRan(1, 2, 3));
+    } else {
+      this.univ.currentPc.web(this.univ.rng.getRan(1, 2, 3));
+    }
+    town.setField(where.x, where.y, FieldType.FIELD_WEB, false);
+  }
+
+  /**
+   * The pushables half of check_special_terrain (boe.specials.cpp:290) plus
+   * `push_thing` / `move_thing` (boe.town.cpp:1627) — walking into a crate,
+   * barrel or stone block shoves it one square further along the same line.
+   */
+  private pushThings(from: Location, where: Location): void {
+    const town = this.univ.town;
+    if (!town) return;
+    const kinds: Array<[FieldType, string]> = [
+      [FieldType.OBJECT_CRATE, '  You push the crate.'],
+      [FieldType.OBJECT_BARREL, '  You push the barrel.'],
+      [FieldType.OBJECT_BLOCK, '  You push the stone block.'],
+    ];
+    for (const [kind, message] of kinds) {
+      if (!town.hasField(where.x, where.y, kind)) continue;
+      this.univ.addStringToBuf(message);
+      this.moveThing(kind, where, this.pushLoc(from, where));
+    }
+  }
+
+  /** move_thing (boe.town.cpp:1630) — and the items inside a pushed container. */
+  private moveThing(kind: FieldType, from: Location, to: Location): void {
+    const town = this.univ.town!;
+    town.setField(from.x, from.y, kind, false);
+    if (to.x > 0) town.setField(to.x, to.y, kind, true);
+    if (kind !== FieldType.OBJECT_CRATE && kind !== FieldType.OBJECT_BARREL) return;
+    for (const item of town.items) {
+      if (item.variety === ItemType.NO_ITEM || !item.contained || !item.held) continue;
+      if (locsEqual(item.itemLoc, from)) item.itemLoc = { ...to };
     }
   }
 
@@ -2066,6 +2222,22 @@ export class GameSession {
   };
 
   /**
+   * combat_obscurity (boe.locutils.cpp:204) — the stricter obscurity the
+   * *placement* code uses: anything that blocks movement, and lava, count as
+   * fully blocking whether or not you can see over them. `place_party` and
+   * `find_clear_spot` draw their lines with this, which is what stops a PC
+   * being dropped on the far side of a wall.
+   */
+  combatObscurity = (x: number, y: number): number => {
+    const ter = this.coordToTer(x, y);
+    if (blocksMove(this.univ.terrainType(ter))) return SIGHT_BLOCKED;
+    // is_lava (boe.locutils.cpp:164) is hardcoded against the picture number
+    // in the C++ too, with its own "TODO: Don't hardcode this!".
+    if (this.univ.terrainType(ter).picture === 964) return SIGHT_BLOCKED;
+    return this.sightObscurity(x, y);
+  };
+
+  /**
    * combat_pt_in_light (boe.locutils.cpp:486) — the combat twin of
    * `pt_in_light`: a square is lit if *any* living PC is within the light
    * radius of it, rather than the party as a whole. An outdoor arena
@@ -2130,10 +2302,21 @@ export class GameSession {
     return false;
   }
 
-  /** can_see_light (boe.locutils.cpp:173). */
-  canSeeLight(from: Location, to: Location): number {
-    if (this.worldIsTown && !this.ptInLight(from, to)) return SIGHT_BLOCKED + 1;
-    return canSee(from, to, this.sightObscurity);
+  /**
+   * can_see_light (boe.locutils.cpp:173). The obscurity function is an
+   * argument in the C++ too: most callers pass `sight_obscurity`, but the
+   * placement code passes the stricter `combat_obscurity`.
+   */
+  canSeeLight(
+    from: Location, to: Location,
+    getObscurity: (x: number, y: number) => number = this.sightObscurity,
+  ): number {
+    // The C++ asks combat_pt_in_light in combat (any PC's own light reaches
+    // the square) and pt_in_light in town (the party's does).
+    if (isCombat(this.mode)) {
+      if (!this.combatPtInLight(to)) return SIGHT_BLOCKED + 1;
+    } else if (this.worldIsTown && !this.ptInLight(from, to)) return SIGHT_BLOCKED + 1;
+    return canSee(from, to, getObscurity);
   }
 
   /** pt_in_light (boe.locutils.cpp:471). */

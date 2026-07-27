@@ -14,6 +14,8 @@ import { loadScenario } from '../src/fileio/loadScenario';
 import { FsSource } from '../src/fileio/source';
 import { buildOpcodeTable } from '../src/fileio/specialParse';
 import { GameMode } from '../src/game/modes';
+import { SpecType, emptySpecialNode } from '../src/data/special';
+import { SpecCtx, SpecCtxType } from '../src/game/specials/context';
 import { ARENA_DIM, createOutCombatTerrain, startOutdoorCombat } from '../src/game/outCombat';
 import { GameSession } from '../src/game/session';
 import {
@@ -48,6 +50,17 @@ async function outdoors(): Promise<GameSession> {
 
 function aGroup(extra: Partial<OutWandering> = {}): OutWandering {
   return { ...emptyOutWandering(), monst: [1, 0, 0, 0, 0, 0, 0], ...extra };
+}
+
+
+/** Take one outdoor step in whatever direction isn't blocked. */
+async function stepAnywhere(s: GameSession): Promise<boolean> {
+  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]];
+  for (const [dx, dy] of dirs) {
+    const from = s.univ.party.outLoc;
+    if (await s.moveTo({ x: from.x + dx!, y: from.y + dy! })) return true;
+  }
+  return false;
 }
 
 describe('outdoor wandering groups', () => {
@@ -210,5 +223,87 @@ describe('bumping into a group', () => {
     slot.mLoc = { x: s.univ.party.outLoc.x + 5, y: s.univ.party.outLoc.y };
     expect(await s.checkOutdoorEncounter()).toBe(false);
     expect(slot.exists).toBe(true);
+  });
+});
+
+describe('the outdoor clock, which is what makes encounters happen', () => {
+  it('a step outdoors is ten ticks, so every turn rolls for a group', async () => {
+    const s = await outdoors();
+    // increase_age (boe.actions.cpp:3362): rounded down to a multiple of 10,
+    // then +10 on foot. `age % 10 == 0` gates do_monsters and the wandering
+    // roll, so a clock that ticked by one starved the game of encounters.
+    for (let i = 0; i < 5; i++) {
+      const before = s.univ.party.age;
+      if (!await stepAnywhere(s)) break;
+      expect(s.univ.party.age).toBe(before + 10);
+      expect(s.univ.party.age % 10).toBe(0);
+    }
+  });
+
+  it('walking outdoors eventually rolls up a wandering group', async () => {
+    const s = await outdoors();
+    // 1 in 70 per turn, so 400 turns is a near-certainty — the point is that
+    // the roll happens at all, which it didn't while the clock ticked by one.
+    for (let i = 0; i < 400 && s.univ.party.outC.every((g) => !g.exists); i++) {
+      if (!await stepAnywhere(s)) break;
+    }
+    expect(s.univ.party.outC.some((g) => g.exists)).toBe(true);
+  });
+});
+
+
+/** The bare minimum SpecialHost these tests need. */
+function attachStubHost(s: GameSession): void {
+  s.attachSpecials({
+    message: async () => {},
+    choice: async () => 0,
+    askText: async () => '',
+    selectPc: async () => 0,
+    startShop: () => false,
+    startTalk: () => {},
+    sound: () => {},
+    rest: () => {},
+    moveParty: () => {},
+    changeLevel: () => {},
+    endScenario: () => {},
+  });
+}
+
+describe('the outdoor encounter specials', () => {
+  it('OUT_PLACE_ENCOUNTER drops one of the sector’s special encounters on the party', async () => {
+    const s = await outdoors();
+    attachStubHost(s);
+    const sector = s.univ.out.sector;
+    // Give the sector a special encounter to place, since not every sector
+    // defines one.
+    sector.specialEnc[1] = aGroup({ cantFlee: true });
+    const node = { ...emptySpecialNode(), type: SpecType.OUT_PLACE_ENCOUNTER, ex1a: 1, jumpto: -1 };
+    s.univ.out.sector.specials = new Map([[0, node]]);
+    await s.runSpecialRaw(SpecCtx.OUT_MOVE, SpecCtxType.OUTDOOR, 0, s.univ.party.locInSec);
+    const slot = s.univ.party.outC.find((g) => g.exists);
+    expect(slot).toBeDefined();
+    // Placed on the party's own square, so the next turn's check meets it.
+    expect(slot!.mLoc).toEqual(s.univ.party.outLoc);
+  });
+
+  it('OUT_PLACE_ENCOUNTER refuses an index outside 0-3', async () => {
+    const s = await outdoors();
+    attachStubHost(s);
+    const node = { ...emptySpecialNode(), type: SpecType.OUT_PLACE_ENCOUNTER, ex1a: 7, jumpto: -1 };
+    s.univ.out.sector.specials = new Map([[0, node]]);
+    await s.runSpecialRaw(SpecCtx.OUT_MOVE, SpecCtxType.OUTDOOR, 0, s.univ.party.locInSec);
+    expect(s.univ.party.outC.some((g) => g.exists)).toBe(false);
+    expect(s.univ.transcript.some((l) => l.includes('out of range'))).toBe(true);
+  });
+
+  it('OUT_MAKE_WANDER rolls a wandering group into the sector', async () => {
+    const s = await outdoors();
+    attachStubHost(s);
+    const node = { ...emptySpecialNode(), type: SpecType.OUT_MAKE_WANDER, jumpto: -1 };
+    s.univ.out.sector.specials = new Map([[0, node]]);
+    // create_wand_monst can roll an empty group, so give it several goes.
+    for (let i = 0; i < 20 && !s.univ.party.outC.some((g) => g.exists); i++)
+      await s.runSpecialRaw(SpecCtx.OUT_MOVE, SpecCtxType.OUTDOOR, 0, s.univ.party.locInSec);
+    expect(s.univ.party.outC.some((g) => g.exists)).toBe(true);
   });
 });

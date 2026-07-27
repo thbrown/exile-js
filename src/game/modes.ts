@@ -77,8 +77,8 @@ export function isCombat(mode: GameMode): boolean {
  * around the terrain grid shifts the centre.
  *
  * Note **TOWN_TARGET is not in the set**: a town spell can't scroll the view.
- * This port's Look is a pending flag rather than a mode, so LOOK_TOWN and
- * LOOK_COMBAT are listed for fidelity but never actually reached yet.
+ * LOOK_TOWN and LOOK_COMBAT are reached by pressing L (main.ts's `beginLook`),
+ * which is what puts the arrows on screen while you look around.
  */
 const SCROLLABLE_MODES = new Set<GameMode>([
   GameMode.SPELL_TARGET,
