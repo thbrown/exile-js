@@ -843,6 +843,43 @@ Smaller things outstanding, all independent of M5:
 - **Quests and job banks** (M6): `UPDATE_QUEST`, `IF_QUEST`, `JOB_BANK`.
 - **Boats and horses** (M6): the two talk nodes and `CHANGE_*_OWNER`.
 
+## Dialog fidelity: the two screens that don't look like the original
+
+Reported from play-testing 2026-07-26. Both are real divergences, and both are
+blocked on the same thing — the dialog toolkit only does picture + text +
+keyed rows + buttons, and these two screens need more than that.
+
+**Spell casting.** The original is **one** dialog (`rsrc/dialogs/cast-spell.xml`,
+238 lines), not the two-step this port uses:
+
+- caster buttons `1`-`6` down the left, beside each PC's name, greyed out
+  where `pc_can_cast_spell(pc, type) != CAST_OK`;
+- **target** buttons `shift+1`-`shift+6` to their right, with a green `->`
+  marking the current pick — this is `store_spell_target`;
+- each PC's HP, SP and their status icons across the row (the same
+  `staticons.png` strip `draw_pc_effects` uses, already ported);
+- the spell grid itself, with the level-1..7 spells laid out in columns, and a
+  Cast / Cancel pair.
+
+Doing this properly also **closes the `store_spell_target` divergence**: the
+town and combat single-target arms (the heals, the protections, Bless, Envenom,
+Augmentation, Nirvana) currently fall back to the caster because there is no
+way to name a target. The target buttons are that way.
+
+Note the caster column is only interactive out of combat: in combat
+`can_choose_caster` is false and the active PC casts (already correct here).
+
+**Picking up items.** The original is `rsrc/dialogs/get-items.xml` (70 lines):
+a framed, scrolling list of what's on the ground — each row an *item graphic*
+plus a name and a detail line — with PC buttons `1`-`6` along the bottom, each
+next to that PC's *portrait*, to say who takes it. Up/down arrows scroll; Done
+closes. The port currently uses a plain keyed-row list with no graphics and no
+scrolling.
+
+What the toolkit needs for both: item and PC pictures inside rows, a scrolling
+row region with up/down buttons, multi-column row layout, and per-row
+sub-labels. That is the "full dialogxml" item M3 has been carrying.
+
 ## Next steps
 
 1. M5b is done bar **monster spellcasting** (`monst_cast_mage` /
