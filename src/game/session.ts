@@ -123,6 +123,14 @@ export class GameSession {
    */
   combatActivePc = NO_ONE;
   /**
+   * `store_spell_target` — the party member the casting dialog aimed the spell
+   * at, for the spells whose `select` says they need one. 6 is "nobody
+   * chosen", which is what the C++ leaves it at and what makes those arms do
+   * nothing at all.
+   */
+  spellTarget = 6;
+
+  /**
    * The spell waiting for a square while the game is in TOWN_TARGET mode
    * (`start_town_targeting`); null the rest of the time.
    */

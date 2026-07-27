@@ -368,11 +368,27 @@ export class Dialog {
 }
 
 /**
+ * Anything the host can put on screen modally. `Dialog` is the generic one;
+ * the screens that have to match a specific dialogxml layout pixel for pixel
+ * (`CastDialog`, `GetItemsDialog`) implement this directly instead of trying
+ * to bend the generic layout into shape.
+ *
+ * `onClick`/`onKey` return the name to close with, or null to stay open — a
+ * screen that only changed its own selection returns null and gets redrawn.
+ */
+export interface ModalScreen {
+  draw(): void;
+  onClick(x: number, y: number): string | null;
+  onKey(key: string): string | null;
+}
+
+/**
  * Owns the modal stack. The game holds one of these; `run()` shows a dialog and
  * resolves once the player picks a button.
  */
 export class DialogHost {
   private current: Dialog | null = null;
+  private screen: ModalScreen | null = null;
   private resolve: ((name: string) => void) | null = null;
 
   constructor(
@@ -382,8 +398,23 @@ export class DialogHost {
     private redraw: () => void,
   ) {}
 
-  get active(): Dialog | null {
-    return this.current;
+  get active(): Dialog | ModalScreen | null {
+    return this.current ?? this.screen;
+  }
+
+  /**
+   * Show a hand-laid-out modal (see `ModalScreen`) and resolve with the name it
+   * closes on.
+   */
+  runScreen(screen: ModalScreen): Promise<string> {
+    if (this.current || this.screen) {
+      return Promise.reject(new Error('a dialog is already open'));
+    }
+    this.screen = screen;
+    this.redraw();
+    return new Promise<string>((resolve) => {
+      this.resolve = resolve;
+    });
   }
 
   /**
@@ -403,7 +434,9 @@ export class DialogHost {
   run(spec: DialogSpec): Promise<string> {
     // One dialog at a time: a second request while one is up is a bug, so fail
     // loudly rather than losing the first one's result.
-    if (this.current) return Promise.reject(new Error('a dialog is already open'));
+    if (this.current || this.screen) {
+      return Promise.reject(new Error('a dialog is already open'));
+    }
     this.current = new Dialog(this.ctx, this.store, spec);
     this.redraw();
     return new Promise<string>((resolve) => {
@@ -414,9 +447,16 @@ export class DialogHost {
   /** Draw the open dialog, if there is one. Call after drawing the screen. */
   draw(): void {
     this.current?.draw();
+    this.screen?.draw();
   }
 
   handleClick(x: number, y: number): boolean {
+    if (this.screen) {
+      const name = this.screen.onClick(x, y);
+      if (name === null) this.redraw();
+      else this.close(name);
+      return true;
+    }
     if (!this.current) return false;
     const btn = this.current.buttonAt(x, y);
     if (btn) this.close(btn.name);
@@ -424,6 +464,12 @@ export class DialogHost {
   }
 
   handleKey(key: string): boolean {
+    if (this.screen) {
+      const name = this.screen.onKey(key);
+      if (name === null) this.redraw();
+      else this.close(name);
+      return true;
+    }
     if (!this.current) return false;
     const btn = this.current.buttonForKey(key);
     if (btn) this.close(btn.name);
@@ -433,6 +479,7 @@ export class DialogHost {
   private close(name: string): void {
     const resolve = this.resolve;
     this.current = null;
+    this.screen = null;
     this.resolve = null;
     this.redraw();
     resolve?.(name);

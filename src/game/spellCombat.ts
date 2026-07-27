@@ -88,8 +88,8 @@ export function combatImmedMageCast(
   let level = freebie ? storeItemSpellLevel : caster.level;
   if (!freebie && (info.level ?? 0) <= getProtLevel(caster, ItemAbil.MAGERY)) level++;
   const spend = (): void => { if (!freebie) caster.curSp -= info.cost ?? 0; };
-  // TODO(M5c): store_spell_target — the target PC from the casting dialog.
-  const target = caster;
+  // `store_spell_target` — the PC the casting dialog aimed at.
+  const target = univ.party.pcs[session.spellTarget] ?? caster;
 
   switch (spellNum) {
     case Spell.SHOCKWAVE:
@@ -207,7 +207,7 @@ export function combatImmedPriestCast(
   let level = freebie ? storeItemSpellLevel : caster.level;
   if (!freebie && caster.traits[Trait.ANAMA]) level++;
   const spend = (): void => { if (!freebie) caster.curSp -= info.cost ?? 0; };
-  const target = caster; // TODO(M5c): store_spell_target, as above.
+  const target = univ.party.pcs[session.spellTarget] ?? caster;
 
   switch (spellNum) {
     case Spell.BLESS_MINOR:

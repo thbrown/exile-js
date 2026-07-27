@@ -843,14 +843,40 @@ Smaller things outstanding, all independent of M5:
 - **Quests and job banks** (M6): `UPDATE_QUEST`, `IF_QUEST`, `JOB_BANK`.
 - **Boats and horses** (M6): the two talk nodes and `CHANGE_*_OWNER`.
 
+- **The real spell-casting dialog (M3/M5c, 2026-07-26)**: `dialogs/castDialog.ts`
+  ports `cast-spell.xml` and the `pick_spell` machinery around it
+  (boe.party.cpp:2133, :1905). It is **one** dialog, as the original is: the six
+  PCs down the left with a caster button, a target button, health, spell points
+  and their status icons, and below them the spell grid — four columns of one
+  level each, flipped between levels 1-4 and 5-7 by "Other Spells".
+  `DialogHost` grew a `ModalScreen` interface for hand-laid-out modals like
+  this one, alongside the generic auto-laid-out `Dialog`.
+  - **This closes the `store_spell_target` divergence.** `GameSession.spellTarget`
+    is the C++ global, set from the dialog's target buttons, and the
+    single-target arms in `spellTown.ts` and `spellCombat.ts` read it instead of
+    falling back to the caster. With nobody chosen it stays 6 and those arms do
+    nothing at all — including not charging — exactly as `if(target < 6)` does.
+  - *Gotcha*: `eLedState` is `{led_green = 0, led_red, led_off}`, and led.hpp:18
+    says what they mean **in this dialog specifically**: red is "castable",
+    green is "the one you picked", off is "can't cast". Not the obvious reading.
+  - *Gotcha*: Simulacrum's cost is -1 because it depends on the captured
+    creature; `put_spell_list` prints `?` rather than the number.
+  - *Divergence, small and deliberate*: the original's dialog window is 612px
+    wide — wider than this port's 605px canvas, because the C++ opens it as its
+    own OS window. The four spell columns and the three buttons are pulled left
+    (146px column pitch instead of ~155) so they fit. Every other coordinate is
+    the original's.
+  - Changing caster re-filters the grid and drops a pick the new caster can't
+    cast, as `pick_spell_caster` does.
+
 ## Dialog fidelity: the two screens that don't look like the original
 
 Reported from play-testing 2026-07-26. Both are real divergences, and both are
 blocked on the same thing — the dialog toolkit only does picture + text +
 keyed rows + buttons, and these two screens need more than that.
 
-**Spell casting.** The original is **one** dialog (`rsrc/dialogs/cast-spell.xml`,
-238 lines), not the two-step this port uses:
+**Spell casting — done 2026-07-26**, see `dialogs/castDialog.ts` above. The
+original is **one** dialog (`rsrc/dialogs/cast-spell.xml`, 238 lines):
 
 - caster buttons `1`-`6` down the left, beside each PC's name, greyed out
   where `pc_can_cast_spell(pc, type) != CAST_OK`;

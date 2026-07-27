@@ -245,11 +245,10 @@ export function doMageSpell(
 
     case Spell.RESIST_MAGIC:
     case Spell.PROTECTION: {
-      // These read the PC picked in the caster dialog. Without that selector
-      // the C++ leaves `store_spell_target` at 6 and the arm does nothing at
-      // all — including not charging. The port takes the caster as the target,
-      // which is what the dialog defaults to.
-      const target = pc;
+      // `store_spell_target` — the PC the casting dialog aimed at. With nobody
+      // chosen (6) the C++ arm does nothing at all, not even charge.
+      const target = univ.party.pcs[session.spellTarget];
+      if (!target) break;
       spendSp(pc, spellNum, freebie);
       if (spellNum === Spell.PROTECTION) {
         target.status[Status.INVULNERABLE] =
@@ -426,9 +425,8 @@ export function doPriestSpell(
     case Spell.CLEANSE:
     case Spell.AWAKEN:
     case Spell.PARALYSIS_CURE: {
-      // As with the mage protections, the target comes from the caster dialog;
-      // the caster is the sensible stand-in until that exists.
-      const target = pc;
+      const target = univ.party.pcs[session.spellTarget];
+      if (!target) break;
       spendSp(pc, spellNum, freebie);
       let line = `  ${target.name}`;
       switch (spellNum) {
@@ -504,10 +502,11 @@ export function doPriestSpell(
     case Spell.SYMBIOSIS:
     case Spell.RAISE_DEAD:
     case Spell.RESURRECT: {
-      const target = pc;
-      if (spellNum === Spell.SYMBIOSIS) {
-        // Symbiosis moves damage from the target to the caster, so it can't be
-        // cast on yourself; with no selector the caster is the only target.
+      const target = univ.party.pcs[session.spellTarget];
+      if (!target) break;
+      if (spellNum === Spell.SYMBIOSIS && session.spellTarget === pcNum) {
+        // Symbiosis moves damage from the target to the caster, so casting it
+        // on yourself would be a no-op.
         univ.addStringToBuf("  Can't cast on self.");
         return;
       }

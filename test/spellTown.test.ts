@@ -52,6 +52,9 @@ function caster(s: GameSession): Player {
   pc.level = 10;
   pc.traits[Trait.PACIFIST] = false;
   pc.traits[Trait.ANAMA] = false;
+  // store_spell_target: the casting dialog's target buttons. Without one, the
+  // single-target arms deliberately do nothing — see the test below.
+  s.spellTarget = 0;
   return pc;
 }
 
@@ -172,6 +175,35 @@ describe('do_mage_spell', () => {
     // Spark is a combat-only spell; do_mage_spell has no arm for it.
     doMageSpell(s, 0, Spell.SPARK);
     expect(s.univ.transcript.at(-1)).toContain('not implemented for town mode');
+  });
+});
+
+describe('store_spell_target', () => {
+  it('a single-target spell with nobody chosen does nothing, and costs nothing', () => {
+    // The C++ leaves store_spell_target at 6 when no target button was
+    // pressed, and every `if(target < 6)` arm then falls straight through.
+    const s = inTown();
+    const pc = caster(s);
+    s.spellTarget = 6;
+    pc.curHealth = 1;
+    const sp = pc.curSp;
+    doPriestSpell(s, 0, Spell.HEAL_MINOR);
+    expect(pc.curHealth).toBe(1);
+    expect(pc.curSp).toBe(sp);
+  });
+
+  it('heals whoever the dialog aimed at, not the caster', () => {
+    const s = inTown();
+    const pc = caster(s);
+    const other = s.univ.party.pcs[2]!;
+    other.maxHealth = 40;
+    other.curHealth = 1;
+    pc.curHealth = 1;
+    s.spellTarget = 2;
+    doPriestSpell(s, 0, Spell.HEAL_MAJOR);
+    expect(other.curHealth).toBeGreaterThan(1);
+    expect(pc.curHealth).toBe(1);
+    expect(s.univ.transcript.at(-1)).toContain(other.name);
   });
 });
 
