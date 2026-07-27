@@ -45,6 +45,10 @@ export interface SpellTarget {
   pattern: SpellPat;
   range: number;
   itemSpellLevel: number;
+  /** Squares collected in FANCY_TARGET mode; empty for a single-target spell. */
+  targets: Location[];
+  /** How many more squares a fancy spell still wants (`num_targets_left`). */
+  targetsLeft: number;
 }
 
 /**
@@ -96,6 +100,8 @@ export function startSpellTargeting(
     pattern: patternFor(spell),
     range: SPELLS[spell]?.range ?? 0,
     itemSpellLevel,
+    targets: [],
+    targetsLeft: 0,
   };
 }
 
@@ -105,14 +111,135 @@ export function cancelSpellTargeting(session: GameSession): void {
   session.spellTargeting = null;
   session.mode = GameMode.COMBAT;
 }
+/**
+ * How many squares each `REFER_FANCY` spell collects
+ * (`start_fancy_spell_targeting`'s own switch). Everything is clamped to 1..8
+ * at the end, so a weak caster still gets one.
+ */
+function fancyTargetCount(spell: Spell, level: number, bonus: number): number {
+  const t = Math.trunc;
+  let n: number;
+  switch (spell) {
+    case Spell.SMITE: n = t(level / 4) + t(bonus / 2); break;
+    case Spell.STICKS_TO_SNAKES: n = t(level / 5) + t(bonus / 2); break;
+    case Spell.SUMMON_HOST: n = 5; break;
+    case Spell.ARROWS_FLAME: n = t(level / 4) + t(bonus / 2); break;
+    case Spell.ARROWS_VENOM: n = t(level / 5) + t(bonus / 2); break;
+    case Spell.ARROWS_DEATH: case Spell.PARALYZE: n = t(level / 8) + t(bonus / 3); break;
+    case Spell.SPRAY_FIELDS: n = t(level / 5) + t(bonus / 2); break;
+    case Spell.SUMMON_WEAK: n = Math.min(7, t(level / 4) + t(bonus / 2)); break;
+    case Spell.SUMMON: n = Math.min(6, t(level / 6) + t(bonus / 2)); break;
+    case Spell.SUMMON_MAJOR: n = Math.min(5, t(level / 8) + t(bonus / 2)); break;
+    default: n = 1; break;
+  }
+  return Math.max(1, Math.min(8, n));
+}
 
 /**
- * `do_combat_cast` — the click landed on `target`; resolve the spell in the
- * air. Returns to COMBAT either way.
+ * `start_fancy_spell_targeting` (boe.combat.cpp:4961) — the multi-target
+ * spells. The player picks up to `targetsLeft` squares; clicking one already
+ * chosen takes it back off the list, and the spell fires by itself once the
+ * last slot is filled (or on space, early).
+ */
+export function startFancySpellTargeting(
+  session: GameSession, spell: Spell, freebie = false, itemSpellLevel = 1,
+): void {
+  const { univ } = session;
+  const caster = univ.currentPc;
+  univ.addStringToBuf('  Target spell.');
+  univ.addStringToBuf(isMage(spell) ? "  (Hit 'm' to cancel.)" : "  (Hit 'p' to cancel.)");
+  univ.addStringToBuf('  (Hit space to cast.)');
+  const bonus = caster.statAdj(Skill.INTELLIGENCE);
+  const level = freebie ? itemSpellLevel : caster.level;
+  session.mode = GameMode.FANCY_TARGET;
+  session.spellTargeting = {
+    spell,
+    freebie,
+    // Fancy targeting can't rotate a wall, so Spray Fields gets a plus and
+    // everything else a single square.
+    pattern: spell === Spell.SPRAY_FIELDS ? SpellPat.PLUS : SpellPat.SINGLE,
+    range: SPELLS[spell]?.range ?? 0,
+    itemSpellLevel,
+    targets: [],
+    targetsLeft: fancyTargetCount(spell, level, bonus),
+  };
+}
+
+/**
+ * `place_target` (:784) — a click while collecting. Clicking a square already
+ * on the list takes it off again; filling the last slot casts at once.
+ */
+export function placeTarget(session: GameSession, target: Location): void {
+  const armed = session.spellTargeting;
+  if (!armed) return;
+  const { univ } = session;
+  const town = univ.town;
+  if (!town) return;
+  const caster = univ.currentPc;
+
+  if (armed.targetsLeft > 0) {
+    const rect = town.record.inTownRect;
+    if (target.x < rect.left || target.x > rect.right
+      || target.y < rect.top || target.y > rect.bottom) {
+      univ.addStringToBuf('  Space not in town.');
+      return;
+    }
+    if (session.canSeeLight(caster.combatPos, target) > 4) {
+      univ.addStringToBuf("  Can't see target.");
+      return;
+    }
+    if (dist(caster.combatPos, target) > armed.range) {
+      univ.addStringToBuf('  Target out of range.');
+      return;
+    }
+    const allowObstructed = armed.spell === Spell.DISPEL_BARRIER;
+    if (!allowObstructed && session.sightObscurity(target.x, target.y) === 5) {
+      univ.addStringToBuf('  Target space obstructed.');
+      return;
+    }
+    if (town.hasField(target.x, target.y, FieldType.FIELD_ANTIMAGIC)) {
+      univ.addStringToBuf('  Target in antimagic field.');
+      return;
+    }
+    const already = armed.targets.findIndex(
+      (t) => t.x === target.x && t.y === target.y);
+    if (already >= 0) {
+      univ.addStringToBuf('  Target removed.');
+      armed.targets.splice(already, 1);
+      armed.targetsLeft++;
+      return;
+    }
+    univ.addStringToBuf('  Target added.');
+    armed.targets.push({ ...target });
+    armed.targetsLeft--;
+  }
+
+  if (armed.targetsLeft === 0) castCollected(session);
+}
+
+/** Space — fire with however many squares have been picked so far. */
+export function castCollected(session: GameSession): void {
+  const armed = session.spellTargeting;
+  if (!armed) return;
+  if (armed.targets.length === 0) {
+    cancelSpellTargeting(session);
+    return;
+  }
+  doCombatCast(session, armed.targets[0]!);
+}
+
+/**
+ * `do_combat_cast` — resolve the spell in the air.
+ *
+ * In `SPELL_TARGET` mode that is the one square clicked; in `FANCY_TARGET` it
+ * is every square collected, and the C++ walks all eight slots. The cost and
+ * the action points are each taken **once**, on the first target that gets as
+ * far as resolving.
  */
 export function doCombatCast(session: GameSession, target: Location): void {
   const armed = session.spellTargeting;
   if (!armed) return;
+  const targets = armed.targets.length > 0 ? [...armed.targets] : [target];
   session.spellTargeting = null;
   session.mode = GameMode.COMBAT;
 
@@ -141,43 +268,84 @@ export function doCombatCast(session: GameSession, target: Location): void {
   // Casting drops Sanctuary, whatever the spell.
   caster.status[Status.INVISIBLE] = 0;
 
-  const spend = (): void => { if (!freebie) caster.curSp -= info.cost ?? 0; };
   const rng = univ.rng;
   const min = Math.min;
-
-  // --- the refusals, in the C++'s order ------------------------------------
-  const adjust = session.canSeeLight(caster.combatPos, target);
-  const allowObstructed = spell === Spell.DISPEL_BARRIER;
-  spend();
-
-  if (adjust > 4) {
-    univ.addStringToBuf("  Can't see target.");
-    return;
-  }
-  const rect = town.record.inTownRect;
-  if (target.x < rect.left || target.x > rect.right
-    || target.y < rect.top || target.y > rect.bottom) {
-    univ.addStringToBuf('  Space not in town.');
-    return;
-  }
-  if (dist(caster.combatPos, target) > armed.range) {
-    univ.addStringToBuf('  Target out of range.');
-    return;
-  }
-  if (session.sightObscurity(target.x, target.y) === 5 && !allowObstructed) {
-    univ.addStringToBuf('  Target space obstructed.');
-    return;
-  }
-  if (town.hasField(target.x, target.y, FieldType.FIELD_ANTIMAGIC)) {
-    univ.addStringToBuf('  Target in antimagic field.');
-    return;
-  }
-
-  // A targeted spell costs 5 AP, not the 6 an untargeted one pays.
-  if (!freebie) takeAp(univ, 5);
-
-  const pat = armed.pattern;
   const who = univ.curPc;
+  let costTaken = false;
+  let apTaken = false;
+  /**
+   * The arms that hold their damage back to the end (`boom_dam` in the C++), so
+   * a volley of arrows lands together rather than one at a time.
+   */
+  const deferred: { at: Location; type: DamageType; dam: number }[] = [];
+
+  for (let i = 0; i < targets.length; i++) {
+    const at = targets[i]!;
+    if (!costTaken && !freebie) {
+      caster.curSp -= info.cost ?? 0;
+      costTaken = true;
+    }
+
+    // --- the refusals, in the C++'s order ----------------------------------
+    const adjust = session.canSeeLight(caster.combatPos, at);
+    const allowObstructed = spell === Spell.DISPEL_BARRIER;
+    if (adjust > 4) {
+      univ.addStringToBuf("  Can't see target.");
+      continue;
+    }
+    const rect = town.record.inTownRect;
+    if (at.x < rect.left || at.x > rect.right || at.y < rect.top || at.y > rect.bottom) {
+      univ.addStringToBuf('  Space not in town.');
+      continue;
+    }
+    if (dist(caster.combatPos, at) > armed.range) {
+      univ.addStringToBuf('  Target out of range.');
+      continue;
+    }
+    if (session.sightObscurity(at.x, at.y) === 5 && !allowObstructed) {
+      univ.addStringToBuf('  Target space obstructed.');
+      continue;
+    }
+    if (town.hasField(at.x, at.y, FieldType.FIELD_ANTIMAGIC)) {
+      univ.addStringToBuf('  Target in antimagic field.');
+      continue;
+    }
+
+    // A targeted spell costs 5 AP, not the 6 an untargeted one pays.
+    if (!apTaken) {
+      if (!freebie) takeAp(univ, 5);
+      apTaken = true;
+    }
+
+    resolveOne(session, spell, at, i, {
+      pattern: armed.pattern, level, bonus, who, rng, min, deferred,
+    });
+  }
+
+  // The held-back damage lands now, all of it at once.
+  for (const d of deferred) {
+    hitSpace(session, d.at, d.dam, d.type, 1, 0, who);
+  }
+}
+
+/** Everything `do_combat_cast` does to one square. */
+function resolveOne(
+  session: GameSession,
+  spell: Spell,
+  target: Location,
+  index: number,
+  ctx: {
+    pattern: SpellPat; level: number; bonus: number; who: number;
+    rng: GameSession['univ']['rng']; min: typeof Math.min;
+    deferred: { at: Location; type: DamageType; dam: number }[];
+  },
+): void {
+  const { univ } = session;
+  const town = univ.town;
+  if (!town) return;
+  const caster = univ.currentPc;
+  const { pattern: pat, level, bonus, who, rng, min, deferred } = ctx;
+
   const field = (which: FieldType): void => {
     placeSpellPattern(session, pat, target, { field: which, whoHit: who });
   };
@@ -250,11 +418,13 @@ export function doCombatCast(session: GameSession, target: Location): void {
         spell === Spell.SPARK ? DamageType.MAGIC : DamageType.COLD, 1, 0, who);
       return;
     }
+    // These three hold their damage back so a whole volley lands together —
+    // `boom_dam` in the C++, applied after the target loop.
     case Spell.ARROWS_FLAME:
-      hitSpace(session, target, rng.getRan(2, 1, 4), DamageType.FIRE, 1, 0, who);
+      deferred.push({ at: target, type: DamageType.FIRE, dam: rng.getRan(2, 1, 4) });
       return;
     case Spell.SMITE:
-      hitSpace(session, target, rng.getRan(2, 1, 5), DamageType.COLD, 1, 0, who);
+      deferred.push({ at: target, type: DamageType.COLD, dam: rng.getRan(2, 1, 5) });
       return;
     case Spell.WOUND:
     case Spell.WRACK: {
@@ -291,8 +461,10 @@ export function doCombatCast(session: GameSession, target: Location): void {
         DamageType.MAGIC, 1, 0, who);
       return;
     case Spell.ARROWS_DEATH:
-      hitSpace(session, target,
-        rng.getRan(3, 0, 10) + caster.level + 3 * bonus, DamageType.MAGIC, 1, 0, who);
+      deferred.push({
+        at: target, type: DamageType.MAGIC,
+        dam: rng.getRan(3, 0, 10) + caster.level + 3 * bonus,
+      });
       return;
 
     // --- summoning ---------------------------------------------------------
@@ -315,7 +487,8 @@ export function doCombatCast(session: GameSession, target: Location): void {
         case Spell.DEMON: which = 85; dice = 5; break;
         case Spell.SUMMON_RAT: which = 80; dice = 3; break;
         case Spell.SUMMON_SPIRIT: which = 125; dice = 2; break;
-        case Spell.SUMMON_HOST: which = 126; dice = 2; break;
+        // Only the first square gets the host itself; the rest are spirits.
+        case Spell.SUMMON_HOST: which = index === 0 ? 126 : 125; dice = 2; break;
         case Spell.SUMMON_GUARDIAN: which = 122; dice = 6; break;
         default: {
           // Sticks to Snakes rolls which of the two snakes it gets.

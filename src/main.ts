@@ -10,7 +10,9 @@ import { SPELLS, Spell, spellName } from './data/spell';
 import { CastStatus, castableSpells, pcCanCastType } from './game/spellCast';
 import { castSpell } from './game/spellTown';
 import { combatCastSpell } from './game/spellCombat';
-import { cancelSpellTargeting, doCombatCast } from './game/spellCombatTarget';
+import {
+  cancelSpellTargeting, castCollected, doCombatCast, placeTarget,
+} from './game/spellCombatTarget';
 import { takeAp } from './game/combat';
 import { castTownSpell, startTownTargeting } from './game/spellTarget';
 import { CastDialog } from './dialogs/castDialog';
@@ -596,9 +598,11 @@ async function main(): Promise<void> {
       })();
       return;
     }
-    // Targeting a combat spell: the click is where it lands.
+    // Targeting a combat spell: the click is where it lands. A multi-target
+    // spell collects squares instead, and fires itself once the last is picked.
     if (session.spellTargeting !== null) {
-      doCombatCast(session, target);
+      if (session.mode === GameMode.FANCY_TARGET) placeTarget(session, target);
+      else doCombatCast(session, target);
       setStatus();
       redraw();
       return;
@@ -877,6 +881,10 @@ async function main(): Promise<void> {
           // 's' arms a missile and 's' again cancels, as in the original.
           if (session.missile !== null) session.cancelMissile();
           else session.startMissile();
+          break;
+        case ' ':
+          // start_fancy_spell_targeting's "(Hit space to cast.)".
+          if (session.mode === GameMode.FANCY_TARGET) castCollected(session);
           break;
         case 'm': case 'M': case 'p': case 'P':
           // While a spell is in the air the same key cancels it, which is what

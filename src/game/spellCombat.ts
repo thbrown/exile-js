@@ -28,7 +28,7 @@ import { takeAp } from './combat';
 import { damageMonst, damagePc } from './damage';
 import { placeSpellPattern } from './spellPatterns';
 import { doMageSpell, doPriestSpell } from './spellTown';
-import { startSpellTargeting } from './spellCombatTarget';
+import { startFancySpellTargeting, startSpellTargeting } from './spellCombatTarget';
 import { SIGHT_BLOCKED } from '../core/sight';
 import type { GameSession } from './session';
 
@@ -324,12 +324,13 @@ export function combatCastSpell(
       startSpellTargeting(session, spellNum, freebie);
       break;
 
+    case SpellRefer.FANCY:
+      startFancySpellTargeting(session, spellNum, freebie);
+      break;
+
     default:
-      // TODO(M5c): start_fancy_spell_targeting (boe.combat.cpp:4961) — the
-      // multi-target spells (Smite, Sticks to Snakes, Summon Host) which
-      // collect up to eight squares before resolving.
       univ.addStringToBuf(
-        `  ${spellName(spellNum)} needs multi-target casting, which is not in yet.`);
+        `  Error: Spell ${spellName(spellNum)} has no way to be cast.`);
       break;
   }
 }

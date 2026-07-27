@@ -14,7 +14,9 @@ import { GameMode } from '../src/game/modes';
 import { GameSession } from '../src/game/session';
 import { castableSpells } from '../src/game/spellCast';
 import { combatCastSpell, combatImmedMageCast, doShockwave } from '../src/game/spellCombat';
-import { cancelSpellTargeting, doCombatCast } from '../src/game/spellCombatTarget';
+import {
+  cancelSpellTargeting, castCollected, doCombatCast, placeTarget,
+} from '../src/game/spellCombatTarget';
 import { FieldType } from '../src/data/fields';
 import { PartyPreset, Player } from '../src/universe/player';
 import { MainStatus, Race, Skill, Status, Trait } from '../src/universe/skills';
@@ -290,5 +292,99 @@ describe('do_combat_cast', () => {
     expect(s.spellTargeting).toBeNull();
     expect(pc.curSp).toBe(500);
     expect(pc.ap).toBe(20);
+  });
+});
+
+describe('fancy (multi-target) casting', () => {
+  /** Clear a run of squares east of the caster so targets are legal. */
+  function clearRun(s: GameSession, pc: Player, n: number) {
+    const out: { x: number; y: number }[] = [];
+    for (let i = 1; i <= n; i++) out.push({ x: pc.combatPos.x + i, y: pc.combatPos.y });
+    for (const m of s.univ.town!.monsters) {
+      if (out.some((o) => o.x === m.curLoc.x && o.y === m.curLoc.y)) {
+        m.curLoc = { x: m.curLoc.x + 20, y: m.curLoc.y + 20 };
+      }
+    }
+    return out;
+  }
+
+  it('a fancy spell collects squares instead of firing at once', () => {
+    const { s, pc } = inCombat();
+    expect(SPELLS[Spell.SMITE]?.refer).toBe(SpellRefer.FANCY);
+    combatCastSpell(s, Spell.SMITE);
+    expect(s.mode).toBe(GameMode.FANCY_TARGET);
+    expect(s.spellTargeting?.targetsLeft).toBeGreaterThan(0);
+    expect(s.univ.transcript.at(-1)).toContain('space to cast');
+  });
+
+  it('clicking a chosen square again takes it back off', () => {
+    const { s, pc } = inCombat();
+    combatCastSpell(s, Spell.SMITE);
+    const left = s.spellTargeting!.targetsLeft;
+    const at = clearRun(s, pc, 1)[0]!;
+    placeTarget(s, at);
+    expect(s.spellTargeting?.targets.length).toBe(1);
+    expect(s.spellTargeting?.targetsLeft).toBe(left - 1);
+    placeTarget(s, at);
+    expect(s.spellTargeting?.targets.length).toBe(0);
+    expect(s.spellTargeting?.targetsLeft).toBe(left);
+    expect(s.univ.transcript.at(-1)).toBe('  Target removed.');
+  });
+
+  it('filling the last slot fires the spell by itself', () => {
+    const { s, pc } = inCombat();
+    combatCastSpell(s, Spell.SMITE);
+    const want = s.spellTargeting!.targetsLeft;
+    const squares = clearRun(s, pc, want);
+    for (const at of squares) placeTarget(s, at);
+    expect(s.mode).toBe(GameMode.COMBAT);
+    expect(s.spellTargeting).toBeNull();
+  });
+
+  it('space fires with however many squares are picked so far', () => {
+    const { s, pc } = inCombat();
+    combatCastSpell(s, Spell.SMITE);
+    expect(s.spellTargeting!.targetsLeft).toBeGreaterThan(1);
+    placeTarget(s, clearRun(s, pc, 1)[0]!);
+    castCollected(s);
+    expect(s.mode).toBe(GameMode.COMBAT);
+    expect(s.spellTargeting).toBeNull();
+  });
+
+  it('space with nothing picked just cancels, spending nothing', () => {
+    const { s, pc } = inCombat();
+    pc.curSp = 500;
+    pc.ap = 20;
+    combatCastSpell(s, Spell.SMITE);
+    castCollected(s);
+    expect(s.mode).toBe(GameMode.COMBAT);
+    expect(pc.curSp).toBe(500);
+    expect(pc.ap).toBe(20);
+  });
+
+  it('the cost and the action points are each taken only once', () => {
+    const { s, pc } = inCombat();
+    pc.curSp = 500;
+    pc.ap = 20;
+    combatCastSpell(s, Spell.SMITE);
+    const squares = clearRun(s, pc, s.spellTargeting!.targetsLeft);
+    for (const at of squares) placeTarget(s, at);
+    expect(pc.curSp).toBe(500 - (SPELLS[Spell.SMITE]?.cost ?? 0));
+    expect(pc.ap).toBe(15);
+  });
+
+  it('a volley hits every square it was aimed at', () => {
+    const { s, pc } = inCombat();
+    combatCastSpell(s, Spell.SMITE);
+    const squares = clearRun(s, pc, s.spellTargeting!.targetsLeft);
+    // Put a fragile monster on each chosen square.
+    const victims = s.univ.town!.monsters.filter((m) => m.isAlive).slice(0, squares.length);
+    victims.forEach((m, i) => {
+      m.curLoc = { ...squares[i]! };
+      m.health = m.maxHealth = 300;
+      m.mon.resist = m.mon.resist.map(() => 100);
+    });
+    for (const at of squares) placeTarget(s, at);
+    expect(victims.every((m) => m.health < 300)).toBe(true);
   });
 });

@@ -912,6 +912,26 @@ Smaller things outstanding, all independent of M5:
     before resolving; `record_monst` for Capture Soul/Simulacrum; and
     `do_mindduel`.
 
+- **Multi-target spells (M5c, 2026-07-27)**: `start_fancy_spell_targeting`
+  (boe.combat.cpp:4961) and `place_target` (:784) join
+  `game/spellCombatTarget.ts`, and `do_combat_cast` now loops over every square
+  collected rather than resolving one. `REFER_FANCY` spells — Smite, Sticks to
+  Snakes, Summon Host, the three enchanted-arrow volleys, Paralyze, Spray
+  Fields and the tiered summons — pick up to eight squares, clicking a chosen
+  one takes it back off, and the spell fires when the last slot fills or on
+  space.
+  - *Gotcha*: the cost and the action points are each taken **once**, on the
+    first square that gets as far as resolving — not per target, and not up
+    front.
+  - *Gotcha*: Arrows of Fire, Smite and Arrows of Death **hold their damage
+    back** to the end of the loop (`boom_dam`), so a volley lands together
+    rather than one arrow at a time. Ported as a deferred list.
+  - *Gotcha*: Summon Host puts the host itself on the **first** square and
+    spirits on the rest — the arm reads `(i == 0) ? 126 : 125`.
+  - *Gotcha*: fancy targeting can't rotate a wall, so Spray Fields uses a plus
+    and everything else a single square, whatever the spell would otherwise get.
+  - This closes the spell system: every `refer` now has a route.
+
 ## Dialog fidelity: the two screens that don't look like the original
 
 Reported from play-testing 2026-07-26. Both are real divergences, and both are
