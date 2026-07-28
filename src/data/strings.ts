@@ -31,6 +31,7 @@ export const STRING_TABLES = [
   'mage-spells',
   'priest-spells',
   'alchemy',
+  'item-abilities',
   'item-types-display',
   'shop-specials',
 ];

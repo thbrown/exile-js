@@ -506,6 +506,52 @@ if (useResult.charges !== 1) throw new Error('using the potion did not spend a c
 if (useResult.hp <= 1) throw new Error('using the potion did not heal');
 await shot('01e2-item-use');
 
+// 2e3. Alchemy (A): give the party a recipe and PC 1 the plant it needs, then
+//      mix it through the two dialogs. Skill 13 against difficulty 1 is nine
+//      clear of the fail table, so the roll can't fail.
+await page.evaluate(() => {
+  const s = window.__session;
+  s.univ.party.alchemy[1] = true; // HEAL_WEAK, one ingredient: comfrey (151)
+  const pc = s.univ.party.pcs[0];
+  pc.skills[12] = 13; // Skill.ALCHEMY
+  pc.items[0] = {
+    ...pc.items[0],
+    variety: 21, itemLevel: 0, charges: 1, maxCharges: 1, ability: 151,
+    abilStrength: 0, graphicNum: 0, name: 'comfrey', fullName: 'comfrey root',
+    ident: true, rechargeable: false, weight: 1, desc: '',
+  };
+  pc.equip[0] = false;
+  window.__screen.itemPage = 0;
+  s.univ.curPc = 0;
+  window.__redraw();
+});
+await press('A');
+await page.waitForTimeout(250);
+const alchWho = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  return d ? { text: d.spec.text, rows: d.spec.rows.length } : null;
+});
+await press('1'); // PC 1 mixes
+await page.waitForTimeout(250);
+const alchList = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  return d ? { rows: d.spec.rows.map((r) => r.label), text: d.spec.text } : null;
+});
+await shot('01e3-alchemy');
+await press('1'); // the only recipe on the list
+await page.waitForTimeout(300);
+const mixed = await page.evaluate(() => {
+  const pc = window.__session.univ.party.pcs[0];
+  const potion = pc.items.find((i) => i.variety === 7);
+  return {
+    potion: potion ? { name: potion.fullName, charges: potion.charges, abil: potion.ability } : null,
+    plantGone: !pc.items.some((i) => i.ability === 151),
+    tail: window.__session.univ.transcript.slice(-1),
+    dialogGone: !window.__dialogs.active,
+  };
+});
+console.log('ALCHEMY:', JSON.stringify({ alchWho, alchList, mixed }));
+
 // 2d. Signs: looking at an adjacent sign opens a dialog with its text.
 const sign = await page.evaluate(async () => {
   const s = window.__session;
@@ -1675,6 +1721,12 @@ const ok =
   // three held-still sprites all draw.
   missileFired.launched.length === 1 &&
   missileFlight.drawn === 3 &&
+  // Alchemy: the two dialogs come up, the recipe shows its difficulty, and
+  // mixing spends the plant and leaves a three-dose potion in the pack.
+  alchWho !== null && alchList !== null && alchList.rows.length === 1 &&
+  alchList.rows[0].includes('(1)') &&
+  mixed.potion !== null && mixed.potion.charges === 3 && mixed.potion.abil === 76 &&
+  mixed.plantGone === true && mixed.dialogGone === true &&
   // The job board offers the quest with its pay, and taking it starts the
   // quest (status 1 = STARTED) and clears the slot, there being no spare.
   board !== null && board.rows.length === 1 && board.rows[0].includes('250 gold') &&

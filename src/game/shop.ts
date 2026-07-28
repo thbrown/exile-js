@@ -10,7 +10,8 @@
  */
 
 import { QuestStatus } from '../data/quest';
-import { Item, ItemType, interestingString } from '../data/item';
+import { Item, ItemAbil, ItemType, interestingString } from '../data/item';
+import { alchemyRecipe } from '../data/alchemy';
 import {
   SKILL_MAX, Shop, ShopItem, ShopItemType, ShopPrompt, ShopType, shopItemCost,
 } from '../data/shop';
@@ -172,9 +173,21 @@ export class ShopState {
     switch (entry.type) {
       case ShopItemType.ITEM:
         return interestingString(entry.item);
-      case ShopItemType.ALCHEMY:
-        // TODO(M6): the recipe's two ingredients need the alchemy table.
-        return 'Alchemical recipe';
+      case ShopItemType.ALCHEMY: {
+        // The recipe's ingredients, named out of the item-abilities table.
+        //
+        // *Gotcha, kept*: the C++ looks them up at `int(ingredient) + 1`
+        // (boe.newgraph.cpp:827) where the table is 1-based and the editor's
+        // own lookup uses no offset — so every ingredient is named one line
+        // late, and a holly recipe advertises comfrey root. The names are a
+        // hint, not a rule; the recipe itself uses the right plant.
+        const info = alchemyRecipe(entry.item.itemLevel);
+        if (!info) return '';
+        let line = getStr('item-abilities', info.ingred1 + 1);
+        if (info.ingred2 !== ItemAbil.NONE)
+          line += ` & ${getStr('item-abilities', info.ingred2 + 1)}`;
+        return line;
+      }
       case ShopItemType.MAGE_SPELL:
       case ShopItemType.PRIEST_SPELL: {
         const table = entry.type === ShopItemType.MAGE_SPELL ? 'mage-spells' : 'priest-spells';

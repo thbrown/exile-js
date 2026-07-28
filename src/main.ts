@@ -18,6 +18,7 @@ import {
 } from './game/spellCombatTarget';
 import { takeAp } from './game/combat';
 import { dispatcherMood, jobBoardOffers, openJobBank, takeJob } from './game/jobBank';
+import { alchemyChoices, makePotion } from './game/alchemy';
 import { castTownSpell, startTownTargeting } from './game/spellTarget';
 import { CastDialog } from './dialogs/castDialog';
 import { GetItemsDialog } from './dialogs/getItemsDialog';
@@ -418,6 +419,56 @@ async function main(): Promise<void> {
       }
       redraw();
     })();
+  };
+
+  /**
+   * Alchemy — `handle_alchemy` (boe.actions.cpp:1224) and the two dialogs
+   * `do_alchemy` (boe.party.cpp:2284) runs: who mixes, then what. Mixing is a
+   * town-only activity, and the mode gates below are the C++'s own wording.
+   *
+   * TODO(M3): pick-potion.xml is a grid of twenty labelled buttons with the
+   * mixer's name and skill along the top. This is the same rules as a list,
+   * pending the dialogxml toolkit.
+   */
+  const doAlchemyFlow = async (): Promise<void> => {
+    if (dialogs.active) return;
+    if (session.mode !== GameMode.TOWN) {
+      if (isCombat(session.mode)) univ.addStringToBuf('Alchemy: Not in combat.');
+      else if (!session.inTown) univ.addStringToBuf('Alchemy: Only in town.');
+      else univ.addStringToBuf("Alchemy: Finish what you're doing first.");
+      redraw();
+      return;
+    }
+    if (!univ.party.alchemy.some((known) => known)) {
+      univ.addStringToBuf('Alchemy: No recipes known.');
+      redraw();
+      return;
+    }
+    const who = await selectPc('living', 'Who will make a potion?', Skill.ALCHEMY);
+    if (who < 0) {
+      redraw();
+      return;
+    }
+    const pc = univ.party.pcs[who]!;
+    const choices = alchemyChoices(univ, who);
+    const picked = await dialogs.run({
+      text: `${pc.name} (skill ${pc.skill(Skill.ALCHEMY)})\nWhich potion?`,
+      rows: choices.map((choice, i) => ({
+        name: String(choice.which),
+        key: i < 9 ? String(i + 1) : undefined,
+        label: `${choice.name} (${choice.difficulty})`,
+        // A recipe above this PC's skill still shows, greyed — the C++ hides
+        // its button and leaves the label for the same reason.
+        disabled: !choice.canMake,
+      })),
+      escapeButton: 'cancel',
+      buttons: [{ name: 'cancel', label: 'Cancel', key: 'c' }],
+    });
+    const which = Number(picked);
+    if (Number.isInteger(which) && choices.some((c) => c.which === which && c.canMake))
+      makePotion(session, who, which, (n) => sound.play(n));
+    setStatus();
+    redraw();
   };
 
   /**
@@ -1195,7 +1246,7 @@ async function main(): Promise<void> {
           univ.addStringToBuf('(Pick Lock has no standalone key yet — walk into a locked door)');
           break;
         case 'A':
-          univ.addStringToBuf('(Alchemy needs M6)');
+          void doAlchemyFlow();
           break;
         default:
           if (key >= '1' && key <= '6') {

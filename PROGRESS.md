@@ -10,9 +10,10 @@
   arrows/keypad move, **f** fight (and end a fight), **e** end combat,
   **w**/Space wait — stand ready in combat, **d** parry, **x** hold the turn on
   one PC, **t** talk, **l** look, **u** use, **b** bash, **g** get, **r** rest,
-  **1-6** whose pack shows, **a** the automap, **s** shoot (in combat: arms the
+  **1-6** whose pack shows, **a** the automap, **A** alchemy (in town),
+  **m**/**p** spells, **s** shoot (in combat: arms the
   missile, then click a square; **s** or Escape cancels). Keys for things not
-  built yet (**m**/**p** spells, **A** alchemy) say which milestone they're
+  built yet say which milestone they're
   waiting on. In conversations: l/n/j/b/s/r/d/g/a. In shops: **a-h** buy, arrows
   scroll, Escape leaves. In prompts: 1-6, Escape, Enter.
 - `npm test` runs everything headless (no browser needed).
@@ -1588,8 +1589,7 @@ playthrough will hit it:
    the party on a specific town square) are still open.
 2. ~~**The job-bank board**~~ — **done** (2026-07-28), see the entry below.
    What's left of the quest UI is the quest pane of the item window.
-3. **Alchemy** (`A`), which needs the recipe table and its two ingredients.
-   (Item Use landed 2026-07-27.)
+3. ~~**Alchemy** (`A`)~~ — **done** (2026-07-28), see the entry below.
 4. **`increase_age`'s remaining upkeep**: hunger and the autosave.
 5. **The dialogxml toolkit**, still M3's long-term item: `give_pc_info`'s
    character sheet, `story_dialog`'s pagination, `display_monst`, and the ~210
@@ -1988,3 +1988,44 @@ playthrough will hit it:
     offer rather than letting the board roll itself, because
     `generate_job_bank` offers each quest on a 50% roll and an unpinned board
     is empty half the time.
+
+- **Alchemy (M6, 2026-07-28)**: `data/alchemy.ts` ports `eAlchemy`, `cAlchemy`
+  and all twenty recipes from alchemy.cpp verbatim, plus `fail_chance`,
+  `charges`, `can_make` and `cItem(eAlchemy)` (item.cpp:364) — the potion a
+  recipe produces. `game/alchemy.ts` ports `do_alchemy` (boe.party.cpp:2284)
+  with `cPlayer::has_abil` and `has_space` under it, and the eligibility half of
+  `alch_choice` (:2345); `main.ts` ports `handle_alchemy`'s mode gates
+  (boe.actions.cpp:1224) and runs the two dialogs. **`A` in town now makes
+  potions**: pick who mixes, pick what, and the plants in their pack turn into
+  a potion the USE button can drink.
+  - An ingredient is just an item whose *ability* is the plant
+    (`ItemAbil.HOLLY` … `MANDRAKE`), so `has_abil` — the unequipped counterpart
+    of `has_abil_equip`, which this port didn't have — is the whole search. It
+    requires a charge left, so a spent rechargeable plant sitting in the pack
+    isn't an ingredient.
+  - *Gotcha*: `fail_chance`'s guard is `skill - difficulty > fail_chances.size()`
+    on a nine-entry table, so a PC exactly nine above the difficulty indexes one
+    past the end — undefined in the C++. Read as 0 here, which is what the next
+    step up gives anyway.
+  - *Gotcha*: `do_alchemy` sets the new potion's `charges` but not
+    `max_charges`, which `cItem(ITEM_POTION)` left at 1 — so a two- or
+    three-dose potion reads as over-full. Kept, and pinned by a test.
+  - *Gotcha*: the two-ingredient path removes the **higher slot first**,
+    because `remove_charge` can take an emptied item out of the pack and
+    everything below it shifts up. The C++ has its own comment saying so.
+  - Ingredients are spent before the roll, so a failed mixing still eats them;
+    the refusals before that point (no space, no ingredients) spend nothing.
+  - The shop's alchemy line now names the ingredients instead of saying
+    "Alchemical recipe" — and *keeps the C++'s off-by-one*: it looks the names
+    up at `int(ingredient) + 1` in a 1-based table (boe.newgraph.cpp:827) where
+    the scenario editor uses no offset, so a holly recipe advertises comfrey
+    root. Cosmetic; the recipe itself uses the right plant. `item-abilities` is
+    now one of the string tables the game loads.
+  - TODO(M3): `pick-potion.xml` is a grid of twenty labelled buttons with the
+    mixer's name and skill along the top, and `display_alchemy` (the paginated
+    help text behind the shop's Info button) is still unported. Both want the
+    dialogxml toolkit.
+  - Tests: `test/alchemy.test.ts` (13) covers the table, the fail/charge curves
+    including the off-the-end read, the choice list's `can_make` marking, and
+    `do_alchemy`'s five outcomes. `verify-screen.mjs` gained a step that mixes a
+    Weak Healing Potion through both dialogs with real keypresses.
