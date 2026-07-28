@@ -261,6 +261,53 @@ function goreField(race: Race, big: boolean): FieldType | null {
 }
 
 /**
+ * petrify_pc (boe.party.cpp:2694) — the gaze that turns a PC to stone. The
+ * saving roll is the PC's level and blessing against the effect's strength,
+ * and an item that protects from petrification simply wins.
+ *
+ * Note stone is *not* death: `kill_pc(STONE)` skips the life-saving item (the
+ * C++ says so in as many words) but the luck save still applies, so a lucky PC
+ * can shrug it off inside `kill_pc`.
+ */
+export function petrifyPc(univ: Universe, pc: Player, strength: number): void {
+  let r1 = univ.rng.getRan(1, 0, 20);
+  r1 += Math.trunc(pc.level / 4);
+  r1 += pc.status[Status.BLESS_CURSE] ?? 0;
+  r1 -= strength;
+  if (hasAbilEquip(pc, ItemAbil.PROTECT_FROM_PETRIFY)) r1 = 20;
+  if (r1 > 14) {
+    univ.addStringToBuf(`  ${pc.name} resists.`);
+    return;
+  }
+  univ.addStringToBuf(`  ${pc.name} is turned to stone.`);
+  killPc(univ, pc, MainStatus.STONE);
+}
+
+/**
+ * petrify_monst (boe.specials.cpp:1583) — the same, aimed the other way.
+ *
+ * *Gotcha*: the resist test is `r1 > 14 || resist[MAGIC] === 0`, and a
+ * resistance of 0 means the monster takes *no* magic damage at all (the
+ * resistances are percentages, 100 being normal). So an ordinary monster is
+ * petrified on a low roll and only a magic-proof one is safe. The C++ has its own TODO
+ * wondering whether it should handle magic resistance the way `charm_monst`
+ * does; kept as written.
+ */
+export function petrifyMonst(univ: Universe, monst: Creature, strength: number, session?: GameSession): void {
+  monst.spellNote(SpellNote.GAZES);
+  let r1 = univ.rng.getRan(1, 0, 20);
+  r1 += Math.trunc(monst.mon.level / 4);
+  r1 += monst.status[Status.BLESS_CURSE] ?? 0;
+  r1 -= strength;
+  if (r1 > 14 || monst.mon.resist[DamageType.MAGIC] === 0) {
+    monst.spellNote(SpellNote.RESISTS);
+    return;
+  }
+  monst.spellNote(SpellNote.STONED);
+  killMonst(univ, monst, 7, MainStatus.STONE, session);
+}
+
+/**
  * kill_pc (boe.party.cpp:2713) — with two ways out of it: luck can save you
  * outright, and a life-saving item is spent instead of your life. Otherwise the
  * PC's gear falls on the floor where they stood.

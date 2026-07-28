@@ -25,6 +25,7 @@ import { getProtLevel } from '../universe/inventory';
 import { livingSound } from '../universe/living';
 import { MainStatus, Skill, Status, Trait } from '../universe/skills';
 import { takeAp } from './combat';
+import { hasTrappedMonst } from './soulCrystal';
 import { damageMonst, damagePc } from './damage';
 import { placeSpellPattern } from './spellPatterns';
 import { doMageSpell, doPriestSpell } from './spellTown';
@@ -300,6 +301,30 @@ export async function combatCastSpell(
   if (caster.traits[Trait.PACIFIST] && !info.peaceful) {
     univ.addStringToBuf("Cast: You're a pacifist!");
     return;
+  }
+
+  // Simulacrum picks its monster *before* anything else happens — before the
+  // "casts" line, and before any AP or spell points are spent. Its cost is the
+  // chosen monster's level (the spell's own cost is -1), which is why it is
+  // also the one spell that can be refused for want of points this late.
+  if (spellNum === Spell.SIMULACRUM) {
+    if (!hasTrappedMonst(univ.party)) {
+      univ.addStringToBuf('Simulacrum: You need to cast Capture');
+      univ.addStringToBuf('  Soul on a creature first.');
+      return;
+    }
+    const which = (await session.onPickTrappedMonst?.()) ?? 0;
+    if (which === 0) return;
+    const mon = which >= 10000
+      ? univ.party.summons[which - 10000]
+      : univ.scenario.scenMonsters[which];
+    if (!mon) return;
+    if (caster.curSp < mon.level) {
+      univ.addStringToBuf('Cast: Not enough spell points.');
+      return;
+    }
+    session.sumMonst = which;
+    session.sumMonstCost = mon.level;
   }
 
   const isPriest = info.type === Skill.PRIEST_SPELLS

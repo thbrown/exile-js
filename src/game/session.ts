@@ -161,6 +161,20 @@ export class GameSession {
   /** The armed missile while the game is in FIRING or THROWING mode. */
   missile: LoadedMissile | null = null;
   /**
+   * `store_sum_monst` / `store_sum_monst_cost` — the soul-crystal slot
+   * Simulacrum is about to summon and what it costs (the monster's own level,
+   * not the spell's, which is -1 in the table). Chosen before targeting starts
+   * and read when the spell resolves, exactly as the C++'s globals are.
+   */
+  sumMonst = 0;
+  sumMonstCost = 0;
+  /**
+   * Set by the host: `soul-crystal.xml`, the picker Simulacrum opens. Returns
+   * the monster number chosen, or 0 for cancel (which is also what no handler
+   * means, so the spell simply doesn't go off).
+   */
+  onPickTrappedMonst: (() => Promise<number>) | null = null;
+  /**
    * The throwaway 48×48 town an outdoor fight happens in (`cCurTown::arena`).
    * The party's `townNum` stays 200 the whole time — it is not *in* a town —
    * but `univ.town` points at this so terrain, sight and blocking all work.
@@ -306,7 +320,7 @@ export class GameSession {
    * The clock is not touched here: this port folds `increase_age`'s tick into
    * the move functions themselves, which already advanced it.
    *
-   * TODO(M6): increase_age's hunger and autosave.
+   * TODO(M7): increase_age's autosave, which eating triggers.
    */
   private async afterPartyTurn(): Promise<void> {
     try {

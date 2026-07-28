@@ -24,7 +24,8 @@ import { Living, SpellNote, livingSound } from '../universe/living';
 import { Player } from '../universe/player';
 import { MainStatus, Status } from '../universe/skills';
 import { animSettle } from './anim';
-import { damageMonst, damagePc, hitChance } from './damage';
+import { damageMonst, damagePc, hitChance, petrifyMonst, petrifyPc } from './damage';
+import { drainPc } from './itemUse';
 import { webSpace } from './fieldEffects';
 import { runAMissile } from './missileAnim';
 import type { GameSession } from './session';
@@ -274,8 +275,6 @@ async function monstFireMissileProper(
  * monst_basic_abil — what a general (non-missile) ability actually does once
  * it has reached its target.
  *
- * TODO(M5b): PETRIFY needs petrify_pc/petrify_monst; FIELD needs
- * `place_spell_pattern`, which is M5c.
  */
 export async function monsterBasicAbil(
   session: GameSession,
@@ -345,14 +344,21 @@ export async function monsterBasicAbil(
       univ.party.gold = Math.max(0, univ.party.gold - rng.getRan(1, 0, strength) - strength);
       break;
 
-    case MonstAbil.PETRIFY:
-      // TODO(M5b): petrify_pc / petrify_monst.
-      univ.addStringToBuf('(Petrification needs M5b)');
+    case MonstAbil.PETRIFY: {
+      // The strength is a *percentage of the monster's own level*, which is
+      // what makes a basilisk's gaze worse than a lesser one's.
+      const power = percentOf(monst.mon.level, strength);
+      if (pcTarget) petrifyPc(univ, pcTarget, power);
+      else if (mTarget) petrifyMonst(univ, mTarget, power, session);
       break;
+    }
 
     case MonstAbil.DRAIN_XP:
-      // TODO(M5b): drain_pc — losing a level, which needs the level-down path.
-      univ.addStringToBuf('(Experience drain needs M5b)');
+      // Only ever aimed at a PC, and a life-saving item stops it outright —
+      // note it isn't *spent*, unlike the way it works against death.
+      if (!pcTarget) break;
+      if (hasAbilEquip(pcTarget, ItemAbil.LIFE_SAVING)) break;
+      drainPc(pcTarget, percentOf(monst.mon.level, strength));
       break;
 
     case MonstAbil.FIELD:

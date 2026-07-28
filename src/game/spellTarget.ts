@@ -27,6 +27,7 @@ import { unlockDoor } from './doors';
 import { breakForceCage } from './fieldEffects';
 import { GameMode } from './modes';
 import { placeSpellPattern } from './spellPatterns';
+import { recordMonst } from './soulCrystal';
 import type { GameSession } from './session';
 
 /**
@@ -161,10 +162,7 @@ export async function castTownSpell(session: GameSession, where: Location): Prom
         // that lasts, so it is what's kept.
         univ.party.mNoted.add(monst.number);
         univ.addStringToBuf(`  ${monst.mon.name} noted.`);
-      } else {
-        // TODO(M6): record_monst — the simulacrum/capture-soul roster.
-        univ.addStringToBuf('  Capture Soul is not in yet.');
-      }
+      } else recordMonst(univ, monst);
       break;
     }
 

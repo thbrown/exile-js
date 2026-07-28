@@ -105,6 +105,12 @@ export class Party {
    * it, which is why `placeMonster` can find nothing there and give up.
    */
   summons: import('../data/monster').Monster[] = [];
+  /**
+   * The soul crystal's four slots (`cParty::imprisoned_monst`): monster
+   * numbers Capture Soul has caught, which Simulacrum then summons. 0 is an
+   * empty slot, so monster 0 can never be stored — the C++ has the same hole.
+   */
+  imprisonedMonst: number[] = [0, 0, 0, 0];
   /** Alchemy recipes the party knows (cParty::alchemy). */
   alchemy: boolean[] = new Array<boolean>(20).fill(false);
   /**

@@ -23,6 +23,7 @@ import { Player } from '../universe/player';
 import { MainStatus, PartyStatus, Race, Status, Trait } from '../universe/skills';
 import { Party } from '../universe/party';
 import { damagePc, hitParty } from './damage';
+import { drainPc } from './itemUse';
 import { GameMode } from './modes';
 import type { GameSession } from './session';
 
@@ -95,8 +96,10 @@ export function handleDisease(session: GameSession): void {
     switch (roll) {
       case 1: case 2: pc.poison(2, univ.rng); break;
       case 3: case 4: pc.slow(2); break;
-      // TODO(M6): drain_pc costs a level, which needs the level-down path.
-      case 5: univ.addStringToBuf(`  ${pc.name} unaffected.`); break;
+      // Roll 5 is `drain_pc(pc, 5)` — five experience, and nothing else; it
+      // takes no level. This arm used to print "unaffected", which is what
+      // rolls 9 and 10 do.
+      case 5: drainPc(pc, 5); break;
       case 6: case 7: pc.curse(3); break;
       case 8: pc.dumbfound(3, univ.rng); break;
       default: univ.addStringToBuf(`  ${pc.name} unaffected.`); break;

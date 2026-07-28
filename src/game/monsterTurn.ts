@@ -17,6 +17,7 @@ import { MonstMelee } from '../data/monster';
 import { Player } from '../universe/player';
 import { MainStatus, Race, Skill, Status, Trait } from '../universe/skills';
 import { Universe } from '../universe/universe';
+import { SpecCtx, SpecCtxType } from './specials/context';
 import {
   MonstAbil, MonstAbilCat, MonstGen, abilityCategory,
 } from '../data/monsterAbility';
@@ -763,7 +764,6 @@ function giveMonstersMoves(session: GameSession): void {
  * table before it considers a swing, which is why an archer shoots rather than
  * closing.
  *
- * TODO(M5b): the SPECIAL ability, which the C++ handles alongside this.
  */
 export async function doMonsterTurn(session: GameSession): Promise<void> {
   const univ = session.univ;
@@ -792,6 +792,9 @@ export async function doMonsterTurn(session: GameSession): Promise<void> {
       // relies on take_m_ap always firing, so the guard is a safety net for the
       // cases this port hasn't filled in yet.
       let guard = 40;
+      // "don't use multiple times per round" — reset per monster, not per
+      // action, so a monster with action points left can't call it twice.
+      let specialCalled = false;
       while (monst.ap > 0 && monst.isAlive && guard-- > 0) {
         // In combat a monster picks a PC; in town the target is the party as a
         // whole, standing on one square, and do_monsters has already chosen it.
@@ -887,6 +890,28 @@ export async function doMonsterTurn(session: GameSession): Promise<void> {
               actedYet = true;
             }
           }
+        }
+
+        // The SPECIAL ability — a scenario node the monster runs itself, once
+        // per round at most (boe.combat.cpp:2393). It sits inside the
+        // "special attacks" block, so a monster that has already shot can
+        // still call it; only the melee below is skipped by `actedYet`.
+        //
+        // The three `special` slots are: extra1 the node, extra2 what it costs
+        // in action points, extra3 the odds in 1000. The node reads its target
+        // through the reserved pointers — 21/22 the square, 20 the target
+        // (a PC is passed as 11 + index, ready for a SELECT_TARGET node).
+        const specAbil = monst.mon.abil[MonstAbil.SPECIAL];
+        if (specAbil?.active && !specialCalled && session.partyCanSeeMonst(monst)
+          && univ.rng.getRan(1, 1, 1000) <= specAbil.special.extra3) {
+          specialCalled = true;
+          univ.party.forcePtr(21, targSpace.x);
+          univ.party.forcePtr(22, targSpace.y);
+          univ.party.forcePtr(20, target < NO_ONE ? 11 + target : target);
+          const r = await session.runSpecialRaw(
+            SpecCtx.MONST_SPEC_ABIL, SpecCtxType.SCEN, specAbil.special.extra1, monst.curLoc);
+          // A node that reports a positive value has taken the time itself.
+          if (r.a <= 0) monst.ap = Math.max(0, monst.ap - specAbil.special.extra2);
         }
 
         // Melee, if it can reach. Attacking a PC still needs `!isFriendly` (a

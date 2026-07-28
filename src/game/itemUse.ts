@@ -41,10 +41,11 @@ import { startFancySpellTargeting, startSpellTargeting } from './spellCombatTarg
 import { doMageSpell, doPriestSpell, increaseLight } from './spellTown';
 
 /**
- * drain_pc (boe.party.cpp:390) — experience lost. The C++'s version also takes
- * a level away, which needs the level-down path.
- *
- * TODO(M6): drain_pc costs a level once the level-down path exists.
+ * drain_pc (boe.party.cpp:390) — experience lost, and nothing else. Worth
+ * saying plainly because the name suggests otherwise and an earlier note here
+ * claimed it took a level too: it doesn't. CBoE's `drain_pc` clamps the
+ * experience at zero and prints the note, so a drained PC keeps every level
+ * they have already been given. There is no level-down path to write.
  */
 export function drainPc(pc: Player, howMuch: number): void {
   if (pc.mainStatus !== MainStatus.ALIVE) return;

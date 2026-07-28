@@ -23,7 +23,7 @@ import { Spell, SPELLS, isMage, isPriestSide, spellName } from '../data/spell';
 import { ItemAbil } from '../data/item';
 import { SIGHT_BLOCKED } from '../core/sight';
 import { Creature } from '../universe/creature';
-import { getProtLevel } from '../universe/inventory';
+import { getProtLevel, removeCharge } from '../universe/inventory';
 import { livingSound } from '../universe/living';
 import { Player } from '../universe/player';
 import { Race, Skill, Status, Trait } from '../universe/skills';
@@ -38,6 +38,9 @@ import { runAMissile } from './missileAnim';
 import { boomSpace, runBoomAnim, startBoomAnim } from './booms';
 import { hitSpace } from './processFields';
 import { placeSpellPattern } from './spellPatterns';
+import { recordMonst } from './soulCrystal';
+import { doMindduel } from './mindduel';
+import { hasAbil } from './alchemy';
 import { makeTownHostile } from './townAttitude';
 import type { GameSession } from './session';
 
@@ -342,8 +345,16 @@ export async function doCombatCast(session: GameSession, target: Location): Prom
   for (let i = 0; i < targets.length; i++) {
     const at = targets[i]!;
     if (!costTaken && !freebie) {
-      caster.curSp -= info.cost ?? 0;
-      costTaken = true;
+      // Two spells don't pay the table's price: Mindduel is free (it charges a
+      // smoky crystal instead) and Simulacrum pays the summoned monster's
+      // level, worked out when the slot was picked.
+      if (spell === Spell.SIMULACRUM) {
+        caster.curSp -= session.sumMonstCost;
+        costTaken = true;
+      } else if (spell !== Spell.MINDDUEL) {
+        caster.curSp -= info.cost ?? 0;
+        costTaken = true;
+      }
     }
 
     // --- the refusals, in the C++'s order ----------------------------------
@@ -609,6 +620,7 @@ async function resolveOne(
       return;
 
     // --- summoning ---------------------------------------------------------
+    case Spell.SIMULACRUM:
     case Spell.SUMMON_BEAST: case Spell.SUMMON_WEAK:
     case Spell.SUMMON: case Spell.SUMMON_AID:
     case Spell.SUMMON_MAJOR: case Spell.SUMMON_AID_MAJOR:
@@ -623,6 +635,9 @@ async function resolveOne(
       let which = 0;
       let dice = 3;
       switch (spell) {
+        // Simulacrum's monster was chosen from the soul crystal before the
+        // spell was even aimed.
+        case Spell.SIMULACRUM: which = session.sumMonst; dice = 3; break;
         case Spell.SUMMON_BEAST: which = getSummonMonster(session, 1); dice = 3; break;
         case Spell.SUMMON_WEAK: which = getSummonMonster(session, 1); dice = 4; break;
         case Spell.SUMMON: case Spell.SUMMON_AID:
@@ -710,14 +725,28 @@ async function resolveOne(
       break;
     case Spell.CAPTURE_SOUL:
       if (!monst) { univ.addStringToBuf('  Nobody there.'); break; }
-      // TODO(M6): record_monst — the roster Simulacrum draws from.
-      univ.addStringToBuf('  Capture Soul is not in yet.');
+      recordMonst(univ, monst);
       break;
-    case Spell.MINDDUEL:
+    case Spell.MINDDUEL: {
+      // No PC-on-PC duels: the C++ bails with its own TODO wondering whether
+      // there would be a point.
+      if (!monst) { univ.addStringToBuf('  Nobody there.'); break; }
       storeMType = -1;
-      // TODO(M6): do_mindduel, which also wants a smoky crystal.
-      univ.addStringToBuf('  Mindduel is not in yet.');
+      if (monst.mon.mu === 0 && monst.mon.cl === 0) {
+        univ.addStringToBuf("  Can't duel: no magic.");
+      } else {
+        // The smoky crystal is the price of admission, and a charge of it is
+        // spent whether the duel goes well or badly.
+        const crystal = hasAbil(caster, ItemAbil.SMOKY_CRYSTAL);
+        if (!crystal) univ.addStringToBuf(`  ${caster.name} needs a smoky crystal.`);
+        else {
+          removeCharge(caster, crystal.slot);
+          doMindduel(session, univ.curPc, monst);
+        }
+      }
+      shared.sound = 24;
       break;
+    }
     case Spell.CHARM_FOE:
       victim.sleep(Status.CHARM, 0, -1 * (bonus + Math.trunc(caster.level / 8)), rng);
       break;

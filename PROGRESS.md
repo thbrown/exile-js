@@ -1595,9 +1595,9 @@ playthrough will hit it:
 5. **The dialogxml toolkit**, still M3's long-term item: `give_pc_info`'s
    character sheet, `story_dialog`'s pagination, `display_monst`, and the ~210
    remaining definitions.
-6. Odds and ends left over from M5: `record_monst` (Capture Soul / Simulacrum),
-   `do_mindduel`, the SPECIAL monster ability, `petrify_pc`/`petrify_monst`,
-   and `drain_pc`'s level-down path.
+6. ~~Odds and ends left over from M5~~ — **done** (2026-07-28), see the entry
+   below. The one thing left in that area is `AFFECT_SOUL_CRYSTAL`, which needs
+   the creature-context plumbing described there.
 7. M2's last leftover is the replay driver.
 8. Part 2 (Exile 3) hasn't started; E3-0 (format groundwork) can proceed in
    parallel at any time.
@@ -2047,3 +2047,67 @@ playthrough will hit it:
   - `try_auto_save("Eat")` is the one thing left in `increase_age` — eating is
     the C++'s autosave point, so it waits for M7's save system. Marked
     TODO(M7) in place.
+
+- **The M5 leftovers: soul crystals, petrification, mindduel (2026-07-28).**
+  The list of odds and ends M5 left behind, cleared in one pass.
+  - **The soul crystal** — `game/soulCrystal.ts` ports `record_monst`
+    (boe.monster.cpp:1084), `has_trapped_monst` and `pick_trapped_monst`
+    (boe.party.cpp:2444/2450); `Party.imprisonedMonst` is the four slots.
+    **Capture Soul now catches things** (in town and in combat) and
+    **Simulacrum summons them**: `combatCastSpell` runs the C++'s preamble —
+    the crystal has to hold something, the host opens the picker, and the spell
+    is refused if the caster can't afford the monster's *level*, which is what
+    it costs (the spell's own cost is -1 in the table). `session.sumMonst` /
+    `sumMonstCost` are `store_sum_monst` / `store_sum_monst_cost`.
+    - *Gotcha*: the catching roll is `get_ran(1,1,100) * 7 / 10` against
+      `charm_odds[level / 2]` — the same table charm and sleep use — so nothing
+      much above level 14 can ever be caught. A monster that splits, or one the
+      scenario marked IMPORTANT, never can.
+    - *Gotcha*: the slot is **rolled, not searched for**. One roll for a slot;
+      if it's occupied, a second roll picks one of the four to overwrite. A full
+      crystal loses a soul at random.
+    - *Gotcha*: Mindduel and Simulacrum are both excluded from
+      `do_combat_cast`'s ordinary "take the cost on the first target" line —
+      Mindduel is free (it spends a smoky crystal instead) and Simulacrum pays
+      its own price.
+  - **Petrification** — `petrifyPc`/`petrifyMonst` (boe.party.cpp:2694,
+    boe.specials.cpp:1583) in `damage.ts`, wired into the PETRIFY monster
+    ability, which reaches it both as a gaze and as a touch. The strength is a
+    *percentage of the monster's own level*.
+    - *Gotcha*: stone is not death — `kill_pc(STONE)` skips the life-saving
+      item (the C++ says so in as many words) but the **luck** save still runs,
+      so a lucky PC can shrug off a gaze inside `kill_pc`.
+    - *Gotcha*: the monster test is `r1 > 14 || resist[MAGIC] === 0`, and a
+      resistance of **0** means it takes no magic damage at all — so only a
+      magic-proof monster is immune, and an ordinary one is stoned on a low
+      roll. The C++ has its own TODO wondering about this; kept.
+  - **Mindduel** — `game/mindduel.ts` ports `do_mindduel` (boe.party.cpp:1497),
+    wired into the combat cast with its smoky crystal. Ten rounds of tug of war
+    over spell points, and the only spell in the game that can kill its own
+    caster: at zero points the loser takes two dumbfounding a round and eight
+    is lethal. Duelling a friendly creature turns the town hostile first.
+    - *Gotcha*: both dumbfounding counters are written **straight into the
+      status**, not through `dumbfound()`, so nothing resists and nothing
+      clamps. The winner's spell points aren't capped at their maximum either;
+      `increase_age` bleeds the excess off afterwards.
+  - **`drain_pc` needed nothing.** The note that said it "also takes a level
+    away, which needs the level-down path" was wrong: CBoE's `drain_pc`
+    (boe.party.cpp:390) clamps experience at zero and prints the note, full
+    stop. There is no level-down path to write, and the TODOs claiming
+    otherwise are gone.
+    - **But a real bug fell out of reading it**: `handle_disease`'s roll of 5 is
+      `drain_pc(pc, 5)`, and this port printed "unaffected" instead — the same
+      line rolls 9 and 10 print. Disease now drains five experience there.
+  - **The SPECIAL monster ability** (boe.combat.cpp:2393) — a scenario node the
+    monster runs itself, at most once a round, with the odds in thousandths.
+    It sits *inside* the special-attacks block, so a monster that has already
+    shot can still call it; the node reads its target through the reserved
+    pointers (21/22 the square, 20 the target, a PC passed as `11 + index`
+    ready for a SELECT_TARGET node), and a node that reports a positive value
+    has taken the action points itself.
+  - **Still open in this area**: `AFFECT_SOUL_CRYSTAL`, the special node that
+    catches or releases a soul. Its C++ arm starts `if(pc_num < 100) break;` —
+    it only works on the *creature* a monster-context special is running
+    against — and `SpecialCtx` has no creature target yet, only `curTarget` for
+    PCs. That plumbing is the job, not the opcode.
+  - Tests: `test/soulCrystal.test.ts` (16) covers all five areas.

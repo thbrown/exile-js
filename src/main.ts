@@ -19,6 +19,7 @@ import {
 import { takeAp } from './game/combat';
 import { dispatcherMood, jobBoardOffers, openJobBank, takeJob } from './game/jobBank';
 import { alchemyChoices, makePotion } from './game/alchemy';
+import { trappedMonsters } from './game/soulCrystal';
 import { castTownSpell, startTownTargeting } from './game/spellTarget';
 import { CastDialog } from './dialogs/castDialog';
 import { GetItemsDialog } from './dialogs/getItemsDialog';
@@ -419,6 +420,29 @@ async function main(): Promise<void> {
       }
       redraw();
     })();
+  };
+
+  /**
+   * `pick_trapped_monst` (boe.party.cpp:2450) — soul-crystal.xml, the four
+   * slots Capture Soul fills and Simulacrum draws on. Cancelling returns 0,
+   * which is what an empty crystal reports too.
+   */
+  session.onPickTrappedMonst = async () => {
+    if (dialogs.active) return 0;
+    const held = trappedMonsters(univ);
+    if (held.length === 0) return 0;
+    const picked = await dialogs.run({
+      text: 'The soul crystal holds:\nWhich will you summon?',
+      rows: held.map((slot, i) => ({
+        name: String(slot.which),
+        key: String(i + 1),
+        label: `${slot.name} (level ${slot.level})`,
+      })),
+      escapeButton: 'cancel',
+      buttons: [{ name: 'cancel', label: 'Cancel', key: 'c' }],
+    });
+    const which = Number(picked);
+    return Number.isInteger(which) && held.some((h) => h.which === which) ? which : 0;
   };
 
   /**
