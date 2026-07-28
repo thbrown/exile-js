@@ -22,6 +22,17 @@ await page.waitForTimeout(600);
 
 const shot = (n) => page.screenshot({ path: `${SHOTS}/${n}.png`, clip: { x: 12, y: 12, width: 1210, height: 860 } });
 
+/**
+ * Wait until the game will accept input again. The monsters' half of a round
+ * is asynchronous now — it waits on the animation timeline where the C++
+ * blocks — and the input layer drops keystrokes while it runs, exactly as the
+ * original does (`flushingInput`). A driver that types straight after an
+ * action would have its key thrown away, so every keypress waits for this
+ * first.
+ */
+const idle = () => page.evaluate(() => window.__session.settled());
+const press = async (key) => { await idle(); await page.keyboard.press(key); };
+
 // 1. Every panel should be painted, not left as bare background.
 const panels = await page.evaluate(async () => {
   const ctx = document.getElementById('canvas').getContext('2d');
@@ -48,7 +59,7 @@ await shot('01-start-town');
 // 1b. The automap: 'a' opens it over the screen, Escape closes it again. The
 // map area (240x240 at 52+47, 62+29) has to hold more than one colour, or the
 // terrain never drew.
-await page.keyboard.press('a');
+await press('a');
 await page.waitForTimeout(150);
 const map = await page.evaluate(() => {
   const ctx = document.getElementById('canvas').getContext('2d');
@@ -58,7 +69,7 @@ const map = await page.evaluate(() => {
   return { visible: window.__screen.mapVisible, colours: seen.size };
 });
 await shot('01a-map-town');
-await page.keyboard.press('Escape');
+await press('Escape');
 await page.waitForTimeout(150);
 const mapClosed = await page.evaluate(() => window.__screen.mapVisible);
 console.log('MAP:', JSON.stringify(map), 'closed:', mapClosed);
@@ -112,7 +123,7 @@ const talk = await page.evaluate(async () => {
 });
 console.log('TALK:', JSON.stringify(talk));
 // Letter shortcuts (talk_chars): 'j' asks about the speaker's job.
-await page.keyboard.press('j');
+await press('j');
 await page.waitForTimeout(150);
 const talkKeys = await page.evaluate(async () => {
   const s = window.__session;
@@ -163,7 +174,7 @@ console.log('SHOP PANEL COLOURS:', shopPainted);
 
 // 'a' buys the first row (shop_chars).
 const goldBefore = await page.evaluate(() => window.__univ.party.gold);
-await page.keyboard.press('a');
+await press('a');
 await page.waitForTimeout(200);
 const bought = await page.evaluate(async () => {
   const s = window.__session;
@@ -175,7 +186,7 @@ const bought = await page.evaluate(async () => {
 });
 console.log('SHOP BUY a:', JSON.stringify({ goldBefore, ...bought }));
 
-await page.keyboard.press('Escape');
+await press('Escape');
 await page.waitForTimeout(200);
 const shopClosed = await page.evaluate(async () => {
   const s = window.__session;
@@ -226,7 +237,7 @@ const trainWho = await page.evaluate(async () => {
   const d = window.__dialogs.active;
   return d ? { text: d.spec.text, rows: d.spec.rows.length } : null;
 });
-await page.keyboard.press('1');
+await press('1');
 await page.waitForTimeout(250);
 const trainList = await page.evaluate(async () => {
   const d = window.__dialogs.active;
@@ -239,9 +250,9 @@ const trainBefore = await page.evaluate(() => ({
   pts: window.__univ.party.pcs[0].skillPts,
   gold: window.__univ.party.gold,
 }));
-await page.keyboard.press('1'); // raise Strength
+await press('1'); // raise Strength
 await page.waitForTimeout(200);
-await page.keyboard.press('k'); // Keep
+await press('k'); // Keep
 await page.waitForTimeout(250);
 const trained = await page.evaluate(() => ({
   str: window.__univ.party.pcs[0].skills[0],
@@ -319,7 +330,7 @@ console.log('DOORS:', JSON.stringify(doors));
 await page.waitForTimeout(200);
 const promptUp = await page.evaluate(() => !!window.__dialogs.active);
 await shot('01c-locked-door');
-await page.keyboard.press('b');
+await press('b');
 await page.waitForTimeout(200);
 const bashed = await page.evaluate(() => ({
   // 'b' picks Bash, which then asks who does it, so a dialog is still up.
@@ -345,7 +356,7 @@ if (bashPrompt) {
     return null;
   });
   // Number keys pick a PC, the way select-pc.xml's def-keys do.
-  await page.keyboard.press('3');
+  await press('3');
   await page.waitForTimeout(200);
 }
 const bashDone = await page.evaluate(() => ({
@@ -447,8 +458,8 @@ const sign = await page.evaluate(async () => {
   return { text: at.text.slice(0, 40), readable: s.signAt(at) !== null };
 });
 if (!sign.skipped) {
-  await page.keyboard.press('l');
-  await page.keyboard.press('ArrowUp');
+  await press('l');
+  await press('ArrowUp');
   await page.waitForTimeout(250);
 }
 const signShown = await page.evaluate(() => ({
@@ -457,14 +468,14 @@ const signShown = await page.evaluate(() => ({
 }));
 console.log('SIGN:', JSON.stringify({ ...sign, ...signShown }));
 await shot('01d-sign');
-await page.keyboard.press('Enter');
+await press('Enter');
 await page.waitForTimeout(150);
 
 // Look is a *mode* (MODE_LOOK_TOWN), which is what puts the twelve pointing
 // arrows on the terrain view and makes the border scroll it. Press 'l', check
 // the mode and the arrows, scroll one square, look at something, and check the
 // mode and the camera both come back.
-await page.keyboard.press('l');
+await press('l');
 await page.waitForTimeout(150);
 const looking = await page.evaluate(async () => {
   const modes = await import('/src/game/modes.ts');
@@ -496,7 +507,7 @@ if (borderPt) {
   await page.waitForTimeout(150);
 }
 const lookScrolled = await page.evaluate(() => ({ scrolled: { ...window.__session.center } }));
-await page.keyboard.press('Escape');
+await press('Escape');
 await page.waitForTimeout(150);
 const lookEnded = await page.evaluate(() => ({
   mode: window.__session.mode,
@@ -574,7 +585,7 @@ const walkUntil = async (goal, limit = 400) => {
     if (done) break;
     if (!chunk.waiting) break;
     // Answer whatever the step raised, then carry on.
-    await page.keyboard.press('Enter');
+    await press('Enter');
     await page.waitForTimeout(120);
     dismissed++;
   }
@@ -630,7 +641,7 @@ console.log('ROAMED:', JSON.stringify(roam));
 
 // 4b. The map again, outdoors — a different branch of draw_map (the sector
 // window, offset by the party's quadrant of the 96x96 outdoor block).
-await page.keyboard.press('a');
+await press('a');
 await page.waitForTimeout(150);
 const mapOut = await page.evaluate(() => {
   const ctx = document.getElementById('canvas').getContext('2d');
@@ -640,7 +651,7 @@ const mapOut = await page.evaluate(() => {
   return { visible: window.__screen.mapVisible, colours: seen.size };
 });
 await shot('02b-map-outdoors');
-await page.keyboard.press('a');
+await press('a');
 await page.waitForTimeout(150);
 const mapOutClosed = await page.evaluate(() => window.__screen.mapVisible);
 console.log('MAP OUTDOORS:', JSON.stringify(mapOut), 'closed:', mapOutClosed);
@@ -696,7 +707,7 @@ const realSpecial = await page.evaluate(async () => {
   return { spot, dialogUp: !!window.__dialogs.active };
 });
 if (!realSpecial.skipped) {
-  await page.keyboard.press('Enter');
+  await press('Enter');
   await page.waitForTimeout(250);
 }
 const realSpecialDone = await page.evaluate(() => ({
@@ -756,7 +767,9 @@ const monstTurn = await page.evaluate(async () => {
     monst.active = 2; // ALERTED
     monst.curLoc = { x: univ.currentPc.combatPos.x + 1, y: univ.currentPc.combatPos.y };
     univ.party.pcs.forEach((pc) => { pc.ap = 0; });
-    s.startCombatRound();
+    // The monsters' round waits on the animation timeline now — it is where
+    // the C++ blocks — so it has to be awaited rather than read straight after.
+    await s.startCombatRound();
     hurt = univ.party.pcs.reduce((n, pc) => n + (200 - pc.curHealth), 0);
   }
   window.__redraw();
@@ -831,6 +844,10 @@ const encounter = await page.evaluate(async () => {
   for (let i = 0; i < 40 && hurt === 0; i++) {
     await s.moveTo({ x: univ.party.townLoc.x, y: univ.party.townLoc.y - 1 });
     await s.moveTo({ x: univ.party.townLoc.x, y: univ.party.townLoc.y + 1 });
+    // The monsters' reply to those steps is queued, not immediate — it waits
+    // on the animation timeline. Let it land before reading the damage, which
+    // is what the input gate makes the player do anyway.
+    await s.settled();
     noticed = noticed || univ.transcript.includes('Monster saw you!');
     hurt = univ.party.pcs.reduce((n, pc) => n + (300 - pc.curHealth), 0);
   }
@@ -965,7 +982,7 @@ const attackFriendly = await page.evaluate(async () => {
   };
 });
 await shot('02f-attack-friendly');
-await page.keyboard.press('a'); // the Attack button's def-key
+await press('a'); // the Attack button's def-key
 await page.waitForTimeout(200);
 const attackFriendlyDone = await page.evaluate(async () => {
   const s = window.__session;
@@ -1036,7 +1053,7 @@ const missile = await page.evaluate(async () => {
   window.__missileMonst = monst;
   return { armedBefore: s.missile !== null };
 });
-await page.keyboard.press('s');
+await press('s');
 await page.waitForTimeout(100);
 const missileAimed = await page.evaluate(() => {
   const s = window.__session;
@@ -1050,6 +1067,14 @@ await shot('02g-aiming');
 const missileFired = await page.evaluate(() => {
   const s = window.__session;
   const monst = window.__missileMonst;
+  // Re-assert the shot's setup. Arming the bow went through a real keypress,
+  // and waiting for the game to accept it let any queued monster round finish
+  // — which hands the turn to whoever is up next and lets the target move. The
+  // archer with the bow is PC 0, so put them back in charge and the target
+  // back in front of them.
+  s.univ.curPc = 0;
+  monst.curLoc = { x: s.univ.party.pcs[0].combatPos.x + 2, y: s.univ.party.pcs[0].combatPos.y };
+  window.__missileTarget = { ...monst.curLoc };
   const before = monst.health;
   const arrows = s.univ.party.pcs[0].items[1].charges;
   // Empty the air first. The step before this one makes the town hostile, and a

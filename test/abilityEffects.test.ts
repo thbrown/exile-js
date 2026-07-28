@@ -197,7 +197,7 @@ describe('ranged monster abilities', () => {
     expect(pickMonsterAbility(s, m, { x: 11, y: 10 }, true)?.key).toBe(MonstAbil.MISSILE);
   });
 
-  it('a fired missile hurts the PC it hits', () => {
+  it('a fired missile hurts the PC it hits', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.MISSILE]!;
@@ -211,7 +211,7 @@ describe('ranged monster abilities', () => {
     pc.curHealth = 400;
     pc.items.fill(defaultItem());
     pc.equip.fill(false);
-    monstFireMissile(s, m, MonstAbil.MISSILE, abil, pc);
+    await monstFireMissile(s, m, MonstAbil.MISSILE, abil, pc);
     expect(pc.curHealth).toBeLessThan(400);
   });
 
@@ -288,12 +288,12 @@ describe('summoning', () => {
     expect(s.univ.scenario.scenMonsters[which]!.summonType).toBe(cls);
   });
 
-  it('a summon expires and the creature disappears', () => {
+  it('a summon expires and the creature disappears', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     expect(summonMonster(s, 3, m.curLoc, 1, Attitude.HOSTILE_A, false, true)).toBe(true);
     const summoned = s.univ.town!.monsters.find((c) => c.summonTime === 1)!;
-    doMonsterTurn(s);
+    await doMonsterTurn(s);
     expect(summoned.isAlive).toBe(false);
   });
 });

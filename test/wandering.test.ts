@@ -208,11 +208,22 @@ describe('the arena', () => {
     let fled = false;
     let failed = false;
     for (let i = 0; i < 100 && !(fled && failed); i++) {
+      // A spent turn queues the monsters' round, which is async now and hands
+      // the turn to whoever is up next when it finishes. Let it finish and put
+      // `pc` back in charge, or the AP this asserts on come off someone else —
+      // the real game blocks input for exactly this window (`session.busy`).
+      await s.settled();
+      s.univ.curPc = s.univ.party.pcs.indexOf(pc);
       pc.mainStatus = MainStatus.ALIVE;
       pc.ap = 4;
       pc.combatPos = { x: 9, y: 20 };
+      // Not `transcript.at(-1)`: handing the turn on prints "Active: <name>
+      // (#n, N ap.)" after the move's own line, which a successful flee always
+      // does — it leaves the PC with no moves.
+      const from = s.univ.transcript.length;
       await s.combatMove(border);
-      const last = s.univ.transcript.at(-1);
+      const said = s.univ.transcript.slice(from);
+      const last = said.find((l) => l.startsWith('Moved:'));
       if (last === 'Moved: Fled.') {
         fled = true;
         expect(pc.mainStatus).toBe(MainStatus.FLED);

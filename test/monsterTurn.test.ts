@@ -71,20 +71,20 @@ function combatWithOne(index = 1): {
 }
 
 describe('a monster taking its turn', () => {
-  it('notices the party, gets action points and closes the distance', () => {
+  it('notices the party, gets action points and closes the distance', async () => {
     const { univ, session, monst } = combatWithOne();
     monst.active = CreatureStatus.IDLE;
     const before = { ...monst.curLoc };
     // Give it enough chances that the notice roll lands.
     for (let i = 0; i < 10 && monst.active === CreatureStatus.IDLE; i++) {
-      doMonsterTurn(session);
+      await doMonsterTurn(session);
     }
     expect(monst.active).toBe(CreatureStatus.ALERTED);
     expect(monst.curLoc).not.toEqual(before);
     expect(univ.party.pcs.some((pc) => pc.isAlive)).toBe(true);
   });
 
-  it('attacks a PC once it is adjacent, and the PC feels it', () => {
+  it('attacks a PC once it is adjacent, and the PC feels it', async () => {
     const { univ, session, monst } = combatWithOne();
     monst.active = CreatureStatus.ALERTED;
     const pc = univ.party.pcs[0]!;
@@ -95,7 +95,7 @@ describe('a monster taking its turn', () => {
     for (let i = 0; i < 15 && !hurt; i++) {
       monst.active = CreatureStatus.ALERTED;
       monst.curLoc = loc(pc.combatPos.x + 1, pc.combatPos.y);
-      doMonsterTurn(session);
+      await doMonsterTurn(session);
       hurt = univ.party.pcs.some((p) => p.curHealth < 200);
     }
     expect(hurt).toBe(true);
@@ -109,13 +109,13 @@ describe('a monster taking its turn', () => {
    * all. This port had nothing booking that beat, which was most of why
    * combat read faster than the original regardless of any speed setting.
    */
-  it('a landed melee swing books the post-action pause on the timeline', () => {
+  it('a landed melee swing books the post-action pause on the timeline', async () => {
     const { univ, session, monst } = combatWithOne();
     animClear();
     const pc = univ.party.pcs[0]!;
     monst.curLoc = loc(pc.combatPos.x + 1, pc.combatPos.y);
     monst.active = CreatureStatus.ALERTED;
-    doMonsterTurn(session);
+    await doMonsterTurn(session);
     // `focusOn` alone (the pre-existing camera dwell, MONSTER_PAUSE_MS=16)
     // would only ever push this a little past zero; asserting a much bigger
     // number is what actually pins ACTION_PAUSE_MS's ~133ms landing too.
@@ -129,7 +129,7 @@ describe('a monster taking its turn', () => {
    * same as the party's own movement — this port had never wired it up, so
    * monsters closing the distance in a fight moved in total silence.
    */
-  it('plays a footstep when a monster moves on screen', () => {
+  it('plays a footstep when a monster moves on screen', async () => {
     const { session, monst } = combatWithOne();
     monst.active = CreatureStatus.ALERTED;
     // Two squares off, in the open, so the only thing that can happen this
@@ -139,7 +139,7 @@ describe('a monster taking its turn', () => {
     const played: number[] = [];
     session.sound = { play: (n: number) => { played.push(n); } } as never;
     const before = { ...monst.curLoc };
-    doMonsterTurn(session);
+    await doMonsterTurn(session);
     expect(monst.curLoc).not.toEqual(before);
     expect(played.length).toBeGreaterThan(0);
   });
@@ -152,7 +152,7 @@ describe('a monster taking its turn', () => {
    * themselves right, but nothing on the monster's-turn side ever checked
    * `parry` at all.
    */
-  it('a PC standing ready swings for free when a monster closes on them', () => {
+  it('a PC standing ready swings for free when a monster closes on them', async () => {
     const { univ, session, monst } = combatWithOne();
     const pc = univ.party.pcs[0]!;
     pc.parry = 100;
@@ -160,14 +160,14 @@ describe('a monster taking its turn', () => {
     // Two squares off — seek_party's first step should land it adjacent.
     monst.curLoc = loc(pc.combatPos.x + 2, pc.combatPos.y);
 
-    doMonsterTurn(session);
+    await doMonsterTurn(session);
 
     expect(monstAdjacent(monst, pc.combatPos)).toBe(true);
     // The stand-ready is spent whether or not the free swing actually landed.
     expect(pc.parry).toBe(0);
   });
 
-  it('does not trigger the opportunity attack for a pacifist', () => {
+  it('does not trigger the opportunity attack for a pacifist', async () => {
     const { univ, session, monst } = combatWithOne();
     const pc = univ.party.pcs[0]!;
     pc.parry = 100;
@@ -175,7 +175,7 @@ describe('a monster taking its turn', () => {
     monst.active = CreatureStatus.ALERTED;
     monst.curLoc = loc(pc.combatPos.x + 2, pc.combatPos.y);
 
-    doMonsterTurn(session);
+    await doMonsterTurn(session);
 
     expect(monstAdjacent(monst, pc.combatPos)).toBe(true);
     expect(pc.parry).toBe(100);
@@ -209,17 +209,17 @@ describe('a monster taking its turn', () => {
     expect(pc.curHealth).toBe(200);
   });
 
-  it('sleep and paralysis cost a monster its whole turn', () => {
+  it('sleep and paralysis cost a monster its whole turn', async () => {
     const { session, monst } = combatWithOne();
     monst.active = CreatureStatus.ALERTED;
     monst.status[Status.ASLEEP] = 5;
     const before = { ...monst.curLoc };
-    doMonsterTurn(session);
+    await doMonsterTurn(session);
     expect(monst.ap).toBe(0);
     expect(monst.curLoc).toEqual(before);
   });
 
-  it('flees once its morale has gone', () => {
+  it('flees once its morale has gone', async () => {
     const { univ, session, monst } = combatWithOne();
     monst.active = CreatureStatus.ALERTED;
     monst.morale = 0;
@@ -227,14 +227,14 @@ describe('a monster taking its turn', () => {
     const pc = univ.party.pcs[0]!;
     monst.curLoc = loc(pc.combatPos.x + 1, pc.combatPos.y);
     const distBefore = Math.abs(monst.curLoc.x - pc.combatPos.x);
-    doMonsterTurn(session);
+    await doMonsterTurn(session);
     // It either backed off or was hemmed in; what it must not do is attack.
     const distAfter = Math.abs(monst.curLoc.x - pc.combatPos.x);
     expect(distAfter).toBeGreaterThanOrEqual(distBefore);
     expect(univ.party.pcs.every((p) => p.curHealth === 200)).toBe(true);
   });
 
-  it('the unliving never flee', () => {
+  it('the unliving never flee', async () => {
     const { session, monst } = combatWithOne();
     monst.active = CreatureStatus.ALERTED;
     monst.morale = -100;
@@ -245,22 +245,22 @@ describe('a monster taking its turn', () => {
     for (let i = 0; i < 15 && !hurt; i++) {
       monst.active = CreatureStatus.ALERTED;
       monst.curLoc = loc(pc.combatPos.x + 1, pc.combatPos.y);
-      doMonsterTurn(session);
+      await doMonsterTurn(session);
       hurt = pc.curHealth < 200;
     }
     expect(hurt).toBe(true);
   });
 
-  it('a summon runs out and vanishes', () => {
+  it('a summon runs out and vanishes', async () => {
     const { univ, session, monst } = combatWithOne();
     monst.active = CreatureStatus.ALERTED;
     monst.summonTime = 1;
-    doMonsterTurn(session);
+    await doMonsterTurn(session);
     expect(monst.active).toBe(CreatureStatus.DEAD);
     expect(univ.transcript.some((l) => l.includes('disappears'))).toBe(true);
   });
 
-  it('two monsters alert each other', () => {
+  it('two monsters alert each other', async () => {
     const { univ, session, monst } = combatWithOne();
     const second = Object.assign(Object.create(Object.getPrototypeOf(monst)) as Creature, monst);
     second.status = [...monst.status];
@@ -268,16 +268,16 @@ describe('a monster taking its turn', () => {
     second.active = CreatureStatus.IDLE;
     univ.town!.monsters.push(second);
     monst.active = CreatureStatus.ALERTED;
-    doMonsterTurn(session);
+    await doMonsterTurn(session);
     expect(second.active).toBe(CreatureStatus.ALERTED);
   });
 
-  it('does nothing once the whole party is down', () => {
+  it('does nothing once the whole party is down', async () => {
     const { univ, session, monst } = combatWithOne();
     monst.active = CreatureStatus.ALERTED;
     univ.party.pcs.forEach((pc) => { pc.mainStatus = MainStatus.DEAD; });
     const before = { ...monst.curLoc };
-    doMonsterTurn(session);
+    await doMonsterTurn(session);
     expect(monst.curLoc).toEqual(before);
   });
 
@@ -353,10 +353,10 @@ describe('a charmed monster fights its former allies', () => {
     expect(backTarget).toBe(100 + session.univ.town!.monsters.indexOf(charmed));
   });
 
-  it('a charmed creature attacks the hostile one next to it', () => {
+  it('a charmed creature attacks the hostile one next to it', async () => {
     const { session, charmed, hostile } = twoMonstersAdjacent();
     const before = hostile.health;
-    doMonsterTurn(session);
+    await doMonsterTurn(session);
     expect(hostile.health).toBeLessThan(before);
     // And the party, which was never in reach, took nothing.
     expect(session.univ.party.pcs.every((pc) => pc.curHealth === pc.maxHealth)).toBe(true);
@@ -408,13 +408,13 @@ describe('encounters in town mode', () => {
     expect(after).toBeLessThan(before);
   });
 
-  it('attacks a PC in town mode, without any combat mode', () => {
+  it('attacks a PC in town mode, without any combat mode', async () => {
     const { univ, session, monst } = townWithOne();
     monst.active = CreatureStatus.ALERTED;
     let hurt = false;
     for (let i = 0; i < 30 && !hurt; i++) {
       doMonsters(session);
-      doMonsterTurn(session);
+      await doMonsterTurn(session);
       hurt = univ.party.pcs.some((pc) => pc.curHealth < 300);
     }
     expect(hurt).toBe(true);
@@ -459,35 +459,108 @@ describe('encounters in town mode', () => {
 });
 
 describe('the round between rounds', () => {
-  it('advances the clock and decays the brief statuses', () => {
+  it('advances the clock and decays the brief statuses', async () => {
     const { univ, session } = combatWithOne();
     const pc = univ.party.pcs[0]!;
     pc.status[Status.INVULNERABLE] = 3;
     pc.status[Status.MARTYRS_SHIELD] = 2;
     const ageBefore = univ.party.age;
-    combatRunMonst(session);
+    await combatRunMonst(session);
     expect(univ.party.age).toBe(ageBefore + 1);
     expect(pc.status[Status.INVULNERABLE]).toBe(2);
     expect(pc.status[Status.MARTYRS_SHIELD]).toBe(1);
   });
 
-  it('blessings tick only every fourth turn', () => {
+  it('blessings tick only every fourth turn', async () => {
     const { univ, session } = combatWithOne();
     const pc = univ.party.pcs[0]!;
     pc.status[Status.BLESS_CURSE] = 8;
     univ.party.age = 0;
-    combatRunMonst(session); // age becomes 1
+    await combatRunMonst(session); // age becomes 1
     expect(pc.status[Status.BLESS_CURSE]).toBe(8);
     univ.party.age = 3;
-    combatRunMonst(session); // age becomes 4
+    await combatRunMonst(session); // age becomes 4
     expect(pc.status[Status.BLESS_CURSE]).toBe(7);
   });
 
-  it('a party that runs out of moves gets a fresh round automatically', () => {
+  it('a party that runs out of moves gets a fresh round automatically', async () => {
     const { univ, session } = combatWithOne();
     univ.party.pcs.forEach((pc) => { pc.ap = 0; });
     univ.curPc = 0;
-    session.startCombatRound();
+    await session.startCombatRound();
     expect(univ.party.pcs.some((pc) => pc.ap > 0)).toBe(true);
+  });
+});
+
+/**
+ * combat_next_step (boe.combat.cpp:1782) is a **loop** — `while(pick_next_pc())
+ * { combat_run_monst(); set_pc_moves(); ... }` — and running it once, as this
+ * port did, deadlocks whenever a round hands out no moves at all.
+ */
+describe('combat_next_step runs the monsters until somebody can act', () => {
+  it('a fully slowed party is not frozen on the round it gets no moves', async () => {
+    const { univ, session } = combatWithOne();
+    // set_pc_moves zeroes a slowed PC's AP on every odd `party.age`. Starting
+    // at 0 means the first round's tick lands on 1 — the round nobody can act
+    // — so the monsters have to go a second time before the party gets a turn.
+    univ.party.age = 0;
+    univ.party.pcs.forEach((pc) => {
+      pc.status[Status.HASTE_SLOW] = -8;
+      pc.ap = 0;
+    });
+    univ.curPc = 0;
+
+    session.afterCombatAction();
+    await session.settled();
+
+    expect(univ.party.pcs.some((pc) => pc.ap > 0)).toBe(true);
+    // Two monster rounds, not one: the round on the odd age plus the one after.
+    expect(univ.party.age).toBe(2);
+  });
+
+  it('releases a pinned PC who cannot act, instead of burning every turn', async () => {
+    const { univ, session } = combatWithOne();
+    const pinned = univ.party.pcs[0]!;
+    // Asleep for long enough to survive the round's own tick toward zero.
+    pinned.status[Status.ASLEEP] = 5;
+    session.combatActivePc = 0;
+    univ.party.pcs.forEach((pc) => { pc.ap = 0; });
+    univ.curPc = 0;
+
+    session.afterCombatAction();
+    await session.settled();
+
+    expect(session.combatActivePc).toBe(NO_ONE);
+    expect(univ.transcript.some((l) => l.includes('unable to act'))).toBe(true);
+    // And the rest of the party has its moves back, rather than having them
+    // burnt by a pin nobody could clear.
+    expect(univ.party.pcs.slice(1).some((pc) => pc.ap > 0)).toBe(true);
+  });
+
+  it('says who is up when the turn changes hands', async () => {
+    const { univ, session } = combatWithOne();
+    univ.party.pcs.forEach((pc) => { pc.ap = 4; });
+    univ.party.pcs[0]!.ap = 0;
+    univ.curPc = 0;
+
+    session.afterCombatAction();
+    await session.settled();
+
+    // No monsters needed to run — someone else still had moves.
+    expect(univ.curPc).toBe(1);
+    const line = univ.transcript.find((l) => l.startsWith('Active:'));
+    expect(line).toBe(`Active: ${univ.party.pcs[1]!.name} (#2, 4 ap.)`);
+  });
+
+  it('stays quiet about the active PC while one is pinned', async () => {
+    const { univ, session } = combatWithOne();
+    univ.party.pcs.forEach((pc) => { pc.ap = 4; });
+    session.combatActivePc = 1;
+    univ.curPc = 1;
+
+    session.afterCombatAction();
+    await session.settled();
+
+    expect(univ.transcript.some((l) => l.startsWith('Active:'))).toBe(false);
   });
 });

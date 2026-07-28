@@ -23,7 +23,7 @@ import { GetItemsDialog } from './dialogs/getItemsDialog';
 import { placeSpellPattern } from './game/spellPatterns';
 import { GameMode, isCombat, isScrollable } from './game/modes';
 import { setBoomSink } from './game/booms';
-import { FocusEvent, animPending, setFocusSink } from './game/anim';
+import { FocusEvent, animPending, setAnimWaiter, setFocusSink } from './game/anim';
 import { MISSILE_MS, setMissileSink } from './game/missileAnim';
 import { pickNextPc } from './game/combat';
 import { GameRng } from './core/rng';
@@ -667,6 +667,18 @@ async function main(): Promise<void> {
   let acting = false;
 
   /**
+   * Whether the game is mid-action and input should be ignored: the party's own
+   * half (`acting`), or the monsters' (`session.busy`, a queued monster round
+   * still playing out on the animation timeline).
+   *
+   * The C++ needs neither flag — `do_monster_turn` blocks, and it goes further
+   * and throws away anything typed while it does (`flushingInput = true`,
+   * boe.combat.cpp:2432). Dropping the input rather than buffering it is the
+   * behaviour being matched here.
+   */
+  const midAction = (): boolean => acting || session.busy;
+
+  /**
    * Whether a click on the terrain is a *shot* rather than a step: a loaded
    * missile or a spell waiting for its square. These are the modes that get
    * the targeting crosshair, and the modes whose clicks must be taken as given
@@ -760,7 +772,7 @@ async function main(): Promise<void> {
         return;
       }
     }
-    if (acting) return;
+    if (midAction()) return;
     acting = true;
     const done = (): void => {
       acting = false;
@@ -784,7 +796,7 @@ async function main(): Promise<void> {
    * a pending async move sets).
    */
   const toggleMap = (): void => {
-    if (!screen.mapVisible && acting) {
+    if (!screen.mapVisible && midAction()) {
       univ.addStringToBuf('Map: Finish what you are doing first.');
       return;
     }
@@ -793,7 +805,7 @@ async function main(): Promise<void> {
 
   const router = new InputRouter(canvas, {
     onMove: (dir) => {
-      if (dialogs.active || session.talk || session.shop || acting) return;
+      if (dialogs.active || session.talk || session.shop || midAction()) return;
       const from = session.mode === GameMode.COMBAT || session.missile !== null
         ? univ.currentPc.combatPos
         : session.inTown ? univ.party.townLoc : univ.party.outLoc;
@@ -993,6 +1005,12 @@ async function main(): Promise<void> {
         if (preset) void activateTalkWord(preset.node);
         return;
       }
+      // Nothing below here may run while the party or the monsters are still
+      // mid-turn — see `midAction`. Dialogs, shops and conversations are
+      // handled above and keep their keys; this only drops the ones that would
+      // start a *new* action. It matters more than it used to: a monster round
+      // now takes real time, where before it was over within the keystroke.
+      if (midAction()) return;
       // handle_keystroke's letters (boe.actions.cpp:2772), which are what a
       // BoE player's fingers already know. Uppercase variants that mean
       // something different in the original (M/P force a recast, L picks a
@@ -1166,6 +1184,21 @@ async function main(): Promise<void> {
   setFocusSink((event) => {
     pendingFocus.push(event);
     startAnimLoop();
+  });
+
+  /**
+   * How the monsters' turn blocks. `animSettle` asks for this whenever the C++
+   * would have called `pause()`, and without a waiter installed — tests,
+   * headless runs — it returns at once instead.
+   *
+   * `startAnimLoop` is kicked here as well as from the sinks: a slot can be
+   * booked (the post-action beat books time without drawing anything new) with
+   * no boom, missile or camera move to start the loop, and nothing would then
+   * repaint while the turn waits on it.
+   */
+  setAnimWaiter((ms) => {
+    startAnimLoop();
+    return new Promise<void>((resolve) => { setTimeout(resolve, ms); });
   });
 
   setStatus();

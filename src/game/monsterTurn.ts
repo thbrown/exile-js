@@ -30,7 +30,7 @@ import { onHitTargetSpecial } from './weaponAbilities';
 import { ItemAbil } from '../data/item';
 import { FieldType } from '../data/fields';
 import { hasAbilEquip } from '../universe/inventory';
-import { bookActionPause, focusOn } from './anim';
+import { animSettle, bookActionPause, focusOn } from './anim';
 import { doPoison, handleAcid, handleDisease } from './increaseAge';
 import { processFields } from './processFields';
 import { specialIncreaseAge } from './specialIncreaseAge';
@@ -765,13 +765,20 @@ function giveMonstersMoves(session: GameSession): void {
  *
  * TODO(M5b): the SPECIAL ability, which the C++ handles alongside this.
  */
-export function doMonsterTurn(session: GameSession): void {
+export async function doMonsterTurn(session: GameSession): Promise<void> {
   const univ = session.univ;
   const town = univ.town;
   if (!town) return;
   giveMonstersMoves(session);
 
-  for (const monst of town.monsters) {
+  // Indexed rather than iterated: a monster's SUMMON appends to this list while
+  // the loop is running, and the C++'s `num_monst` is read *before* the loop —
+  // so a creature summoned this turn doesn't act until the next one. Awaiting
+  // inside the loop makes that ordering observable, where before it wasn't.
+  const numMonst = town.monsters.length;
+
+  for (let i = 0; i < numMonst; i++) {
+    const monst = town.monsters[i]!;
     if (!univ.party.pcs.some((pc) => pc.isAlive)) return;
 
     // A monster that can't reach anything shouldn't spin forever: the C++
@@ -796,6 +803,11 @@ export function doMonsterTurn(session: GameSession): void {
         && (target !== NO_ONE || !monst.isFriendly)
         && session.partyCanSeeMonst(monst)) {
         focusOn(monst.curLoc);
+        // `center = cur_monst->cur_loc; draw_terrain(0); pause(GameSpeed)` — the
+        // view rests on the monster *before* it acts, which is only true if the
+        // turn stops here. This is also what paces plain movement: a monster
+        // walking three squares comes back round this loop three times.
+        await animSettle();
       }
 
       let actedYet = false;
@@ -860,7 +872,7 @@ export function doMonsterTurn(session: GameSession): void {
             univ.addStringToBuf(`${monst.mon.name}:`);
             // Everything picked here goes through monst_fire_missile, which
             // sorts out the four kinds of ranged attack itself.
-            monstFireMissile(session, monst, picked.key, picked.abil, who);
+            await monstFireMissile(session, monst, picked.key, picked.abil, who);
             // A touch costs -1 and never gets here; anything else costs its own
             // price, and 0 would spin the loop, so it still gives up a point.
             const cost = abilityCost(picked);
@@ -893,7 +905,14 @@ export function doMonsterTurn(session: GameSession): void {
       // The post-action beat (boe.combat.cpp:2428) — flee, spec attacks and
       // melee all fall through to here; plain movement doesn't (it has its
       // own footstep sound instead, in combatMoveMonster).
-      if (actedYet && inCombat) bookActionPause();
+      if (actedYet && inCombat) {
+        bookActionPause();
+        // `print_buf(); pause(8);` — the beat that lets one swing's damage
+        // number be read before the next monster starts. Waiting for it is the
+        // point: the C++ blocks here, and it is the only reason a crowded
+        // fight doesn't resolve in a single frame.
+        await animSettle();
+      }
 
       // Otherwise close the distance — but only in combat; town-mode movement
       // is do_monsters' job and has already happened.
@@ -951,9 +970,9 @@ export function doMonsterTurn(session: GameSession): void {
  *
  * TODO(M6): dump_gold and the OCCASIONAL_STATUS item effects.
  */
-export function combatRunMonst(session: GameSession): void {
+export async function combatRunMonst(session: GameSession): Promise<void> {
   const univ = session.univ;
-  doMonsterTurn(session);
+  await doMonsterTurn(session);
 
   // The fields act right after the monsters do, before the clock and the
   // statuses tick — a wall of fire burns you on the same turn it was cast.

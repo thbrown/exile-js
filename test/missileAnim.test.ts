@@ -49,14 +49,21 @@ function aLiveMonster(s: GameSession): Creature {
   return m;
 }
 
-/** Run `fn` with both hooks captured, and hand back what they saw. */
-function capture(fn: () => void): { missiles: Missile[]; sounds: number[] } {
+/**
+ * Run `fn` with both hooks captured, and hand back what they saw. Awaits it:
+ * `monstFireMissile` waits on the animation timeline between the flight and
+ * the damage now, so its effects land a microtask later even though
+ * `animSettle` returns at once with no waiter installed.
+ */
+async function capture(
+  fn: () => void | Promise<void>,
+): Promise<{ missiles: Missile[]; sounds: number[] }> {
   const missiles: Missile[] = [];
   const sounds: number[] = [];
   setMissileSink((m) => missiles.push(m));
   setLivingSound((n) => sounds.push(n));
   try {
-    fn();
+    await fn();
   } finally {
     setMissileSink(null);
     setLivingSound(null);
@@ -65,8 +72,8 @@ function capture(fn: () => void): { missiles: Missile[]; sounds: number[] } {
 }
 
 describe('run_a_missile', () => {
-  it('queues the flight and plays its sound', () => {
-    const { missiles, sounds } = capture(
+  it('queues the flight and plays its sound', async () => {
+    const { missiles, sounds } = await capture(
       () => runAMissile({ x: 3, y: 4 }, { x: 9, y: 4 }, 2, 1, 12, 0, 0, 100));
     expect(sounds).toEqual([12]);
     expect(missiles.length).toBe(1);
@@ -77,16 +84,16 @@ describe('run_a_missile', () => {
     expect(missiles[0]!.len).toBe(100);
   });
 
-  it('drops a missile that travels no distance, as do_missile_anim does', () => {
-    const { missiles, sounds } = capture(
+  it('drops a missile that travels no distance, as do_missile_anim does', async () => {
+    const { missiles, sounds } = await capture(
       () => runAMissile({ x: 5, y: 5 }, { x: 5, y: 5 }, 2, 0, 12));
     expect(missiles).toEqual([]);
     // The sound is play_sound's, before the animation gets a look in.
     expect(sounds).toEqual([12]);
   });
 
-  it('draws nothing for a negative graphic', () => {
-    const { missiles } = capture(
+  it('draws nothing for a negative graphic', async () => {
+    const { missiles } = await capture(
       () => runAMissile({ x: 1, y: 1 }, { x: 4, y: 4 }, -1, 0, 12));
     expect(missiles).toEqual([]);
   });
@@ -125,14 +132,14 @@ describe('get_missile_direction', () => {
 });
 
 describe('monst_fire_missile dispatch', () => {
-  it('throws the web graphic and webs the square it lands on', () => {
+  it('throws the web graphic and webs the square it lands on', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.MISSILE_WEB]!;
     abil.active = true;
     const pc = s.univ.party.pcs[0]!;
     const where = pc.getLoc();
-    const { missiles, sounds } = capture(
+    const { missiles, sounds } = await capture(
       () => monstFireMissile(s, m, MonstAbil.MISSILE_WEB, abil, pc));
     expect(missiles.length).toBe(1);
     expect(missiles[0]!.type).toBe(8); // the animated web sprite
@@ -143,7 +150,7 @@ describe('monst_fire_missile dispatch', () => {
     expect(pc.status[Status.WEBS]).toBeGreaterThan(0);
   });
 
-  it('the heat ray flies and burns for its extra3 strength', () => {
+  it('the heat ray flies and burns for its extra3 strength', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.RAY_HEAT]!;
@@ -152,7 +159,7 @@ describe('monst_fire_missile dispatch', () => {
     const pc = s.univ.party.pcs[0]!;
     pc.maxHealth = 400;
     pc.curHealth = 400;
-    const { missiles, sounds } = capture(
+    const { missiles, sounds } = await capture(
       () => monstFireMissile(s, m, MonstAbil.RAY_HEAT, abil, pc));
     expect(missiles.length).toBe(1);
     expect(missiles[0]!.type).toBe(13);
@@ -162,7 +169,7 @@ describe('monst_fire_missile dispatch', () => {
     expect(s.univ.transcript.some((l) => l.includes('heat ray'))).toBe(true);
   });
 
-  it('a general ability announces how it arrives and lobs a spit', () => {
+  it('a general ability announces how it arrives and lobs a spit', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.DAMAGE]!;
@@ -174,7 +181,7 @@ describe('monst_fire_missile dispatch', () => {
     const pc = s.univ.party.pcs[0]!;
     pc.maxHealth = 400;
     pc.curHealth = 400;
-    const { missiles, sounds } = capture(
+    const { missiles, sounds } = await capture(
       () => monstFireMissile(s, m, MonstAbil.DAMAGE, abil, pc));
     expect(sounds[0]).toBe(64);
     expect(missiles.length).toBe(1);
@@ -184,7 +191,7 @@ describe('monst_fire_missile dispatch', () => {
     expect(s.univ.transcript.some((l) => l.includes('Spits at'))).toBe(true);
   });
 
-  it('an ability with no picture only makes its noise', () => {
+  it('an ability with no picture only makes its noise', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.DAMAGE]!;
@@ -194,13 +201,13 @@ describe('monst_fire_missile dispatch', () => {
     abil.gen.extra = DamageType.FIRE;
     abil.gen.pic = -1;
     const pc = s.univ.party.pcs[0]!;
-    const { missiles, sounds } = capture(
+    const { missiles, sounds } = await capture(
       () => monstFireMissile(s, m, MonstAbil.DAMAGE, abil, pc));
     expect(missiles).toEqual([]);
     expect(sounds[0]).toBe(51);
   });
 
-  it('a fired missile draws its projectile', () => {
+  it('a fired missile draws its projectile', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.MISSILE]!;
@@ -211,7 +218,7 @@ describe('monst_fire_missile dispatch', () => {
     abil.missile.sides = 2;
     abil.missile.skill = 20;
     const pc = s.univ.party.pcs[0]!;
-    const { missiles, sounds } = capture(
+    const { missiles, sounds } = await capture(
       () => monstFireMissile(s, m, MonstAbil.MISSILE, abil, pc));
     expect(missiles.length).toBe(1);
     expect(missiles[0]!.pathType).toBe(1);

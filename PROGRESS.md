@@ -994,6 +994,9 @@ Notes for M2 implementer:
   (`is_combat() && which_combat_type == 0`) — there's no town population there
   to turn, and running `spec_on_hostile` would be worse than useless.
 - (2026-07-25) Movement, `talkTo` and `useSpace` are **async** now, because each can raise a dialog mid-action. `main.ts` keeps an `acting` flag so a held arrow key can't start a second move on top of the first — the C++ gets that for free by blocking.
+- (2026-07-27) The **monsters' turn is async too**, and for the same reason: `do_monster_turn` blocks, so this port `await`s (`animSettle`) wherever the C++ calls `pause()`. Without it the model reached its final values before the first booked frame drew, and the animation constants paced nothing. `afterCombatAction` stays synchronous and *queues* the round (`GameSession.queueTurn`); `session.busy` gates input, `session.settled()` waits. Anything driving the game from a script has to await it — see the `verify-screen.mjs` note in the log entry.
+- (2026-07-27) `combat_next_step` is a **loop** — `while(pick_next_pc()) { combat_run_monst(); set_pc_moves(); ... }`. Running the monsters once is a deadlock waiting to happen: a round can legitimately hand out zero AP to everyone (`set_pc_moves` gives a slowed PC nothing on odd `party.age`), and with no moves there is no input either.
+- (2026-07-27) `do_monster_turn` reads `num_monst` **before** its loop, so a monster summoned during the turn doesn't act until the next one. Iterating the live array instead is a divergence you can't see until the turn is paced.
 
 ## Handoff: what combat still needs (M5b and M5c)
 
@@ -1456,32 +1459,9 @@ definitions is still the long-term M3 item.
       of this pacing is ever observed.** By the time the first booked pause
       or camera move actually plays back, HP bars, monster positions and
       combat outcomes are *already* at their final values — `redraw()` is
-      called once, immediately, right after the whole turn finishes. The
-      600ms window that follows is genuinely a static frame unless a
-      missile is flying or the camera happens to pan (and even then, the
-      numbers don't move — only the camera and the transcript text do).
-      **The real fix is the same shape as `boom_anim_active`'s marked-damage
-      system** (`booms.ts`/`handleMarkedDamage`, the 2026-07-27 entry
-      above, which already solves exactly this problem for spell volleys):
-      state changes from a monster's turn need to be *deferred* onto the
-      timeline and applied at their booked moment, not applied the instant
-      `doMonsterTurn` computes them. Concretely, for whoever picks this up:
-      - `doMonsterTurn`'s per-monster loop would need to open something like
-        `startBoomAnim()`'s volley for the *whole turn* (or per-action), and
-        route `monsterAttack`'s damage through `damagePc`/`damageMonst`'s
-        existing `MARKED` path (already used by spell volleys) instead of
-        applying it inline.
-      - Movement (`combatMoveMonster`) would need its position change (not
-        just its sound) to land at the booked pause's timestamp, likely via
-        `animSchedule` — right now `monst.curLoc` is mutated immediately and
-        only the *sound* is deferred.
-      - `ACTION_PAUSE_MS` is back at the faithful 133ms — worth revisiting
-        once the above lands, since only then will a bigger number actually
-        translate into a visibly slower fight.
-      - This is a genuinely separable piece of work — self-contained to
-        `monsterTurn.ts` (plus reusing the existing `booms.ts` machinery),
-        doesn't touch anything else this document covers, and a fresh
-        session can pick it up from this note alone.
+      called once, immediately, right after the whole turn finishes.
+      **Fixed 2026-07-27 by making the monsters' turn `await` the timeline;
+      see the entry below.**
 
 - **Two more bugs found re-testing the same day's fixes (2026-07-27).**
   - **Fleeing an entire outdoor fight reported a party wipe.** `isAlive()` —
@@ -1511,6 +1491,87 @@ definitions is still the long-term M3 item.
     "Do you drink some?" prompt) directly in a test rather than guessing
     further from the source alone; `test/specials.test.ts` now pins that
     exact node's data so this can't silently flip back.
+
+- **Combat pacing: the monsters' turn now `await`s the timeline
+  (2026-07-27).** This closes the handoff note above — the one that said
+  raising `ACTION_PAUSE_MS` changed nothing because `doMonsterTurn` resolved
+  the whole turn before any pacing was observed.
+  - That note proposed deferring the *state changes* onto the timeline,
+    marked-damage style. **The approach taken instead is the other one: make
+    the turn block.** The C++ doesn't defer anything — `do_monster_turn`
+    sleeps, and display and model advance in lockstep because nothing else
+    can run in between. Deferring would have meant a second source of truth
+    for HP and positions, and state landing *after* the player had control
+    back. Awaiting is the faithful shape and keeps one source of truth.
+  - **`animSettle()`/`setAnimWaiter()` (`anim.ts`)** is the blocking `pause()`:
+    it waits for the booked queue to drain. With no waiter installed it
+    returns at once, so tests, headless runs and `verify-screen` pay nothing
+    — the same default-to-instant trick `Universe.transcriptClock` uses.
+    `animClear()` releases anyone parked in it, or a cleared queue would
+    strand the turn forever.
+  - **Where the awaits go** is decided by where the C++ pauses, not by feel:
+    after `focusOn` (the camera dwell, which is also what paces a monster's
+    *movement* — it comes back round the loop once per square), after
+    `bookActionPause` (`print_buf(); pause(8)`, boe.combat.cpp:2428), and
+    inside `monstFireMissile` between `runAMissile` and the damage, which is
+    `do_missile_anim` blocking. That last one also retires the monster-side
+    boom-volley TODO: with a real wait there is nothing to defer.
+  - **`GameSession.queueTurn`/`busy`/`settled()`** keeps the ripple contained.
+    `afterCombatAction` has ~12 call sites, several of them free functions
+    (`combatCastSpell`, `doCombatCast`) whose own callers would have gone
+    async too. Instead it stays synchronous and *chains* the monster round;
+    `busy` is what the input layer gates on and `settled()` is how a test or
+    a driver waits. Checked that no caller does anything but return or
+    repaint after it.
+  - **Input is gated while the monsters go** (`midAction()` in `main.ts`,
+    now also covering the whole key handler, which had no gate at all). The
+    C++ gets this free by blocking and goes further — `flushingInput = true`
+    *discards* what was typed rather than buffering it, which is what this
+    matches. A round takes real time now, so this stopped being theoretical.
+  - *Measured, not eyeballed*: a four-monster round takes 1264ms at
+    `ACTION_PAUSE_MS = 133` and 2593ms at 400, and the party's HP steps down
+    in four visible stages during it (236ms/436ms/585ms) instead of dropping
+    in one lump. Before this, the constant moved nothing. Left at the
+    faithful 133; it is a working knob again.
+  - *Gotcha for anyone driving the game from a script*: `verify-screen.mjs`
+    needed three fixes that are all the same fix — wait for the game to be
+    idle. Its keypresses go through a `press()` helper that awaits
+    `settled()` first (otherwise the key is dropped, correctly), the town
+    encounter waits for the monsters' reply before reading damage, and the
+    missile test re-pins `curPc` before firing because a round ending hands
+    the turn to whoever is up next.
+
+- **`combat_next_step`'s round loop, found reading it against this port
+  (2026-07-27).** `startCombatRound` ran the monsters **once** where the C++
+  loops (`while(pick_next_pc()) { combat_run_monst(); set_pc_moves(); ... }`,
+  boe.combat.cpp:1789). Three consequences, all now fixed in
+  `afterCombatAction`:
+  - **A freeze, and a reachable one.** If no PC has AP after the monsters
+    go, nothing advances and no input is accepted (`combatMove` bails on
+    `ap <= 0`). `setPcMoves` hands out **zero** AP to a slowed PC on every
+    odd `party.age`, so a fully-slowed party simply stopped on odd rounds;
+    an asleep or paralysed party does the same. The `while` loop is what
+    runs the monsters again until somebody can act, with the C++'s
+    `is_alive` safety valve inside it. `test/monsterTurn.test.ts` pins it —
+    and the test was checked against the old code, where it fails.
+  - **A pinned PC who can't act** (X / `toggleActivePc`) burnt the whole
+    party's moves every round, forever, with no way to notice or undo it.
+    The C++ releases the pin itself and says so; neither half was ported.
+  - **No `Active: <name> (#n, N ap.)` line**, which is the only thing that
+    tells you the turn changed hands and what the new PC can do with it.
+    Printed only when the party isn't pinned and `cur_pc` actually moved.
+    Worth knowing when reading tests: it lands *after* the acting PC's own
+    message, so `transcript.at(-1)` is no longer the move's line.
+  - Also moved `syncForceCages` to the top of `afterCombatAction` — the C++
+    runs it on every step, not only when the round rolls over — and dropped
+    the `ap > 0` early-out, which skipped `pick_next_pc`'s AP-burning.
+
+- **(Found, not fixed) Party statuses never decay in combat.**
+  `combat_run_monst` also does `move_to_zero` on `DETECT_LIFE`, `FIREWALK`,
+  `STEALTH` and `hostiles_present`; this port decays none of them, and
+  `hostilesPresent` isn't ported at all. Deliberately left alone: the gap
+  isn't combat-specific — `increaseAge.ts` misses them too — so fixing only
+  the combat half would be half a fix.
 
 ## Next steps
 

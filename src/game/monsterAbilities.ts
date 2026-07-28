@@ -23,6 +23,7 @@ import { hasAbilEquip } from '../universe/inventory';
 import { Living, SpellNote, livingSound } from '../universe/living';
 import { Player } from '../universe/player';
 import { MainStatus, Status } from '../universe/skills';
+import { animSettle } from './anim';
 import { damageMonst, damagePc, hitChance } from './damage';
 import { webSpace } from './fieldEffects';
 import { runAMissile } from './missileAnim';
@@ -127,25 +128,28 @@ function missileNote(type: MonstMissile): { note: SpellNote; sound: number } {
  * missile, a thrown web, a heat ray, or one of the general abilities arriving
  * as a ray, a gaze, a breath or a spit.
  */
-export function monstFireMissile(
+export async function monstFireMissile(
   session: GameSession,
   monst: Creature,
   key: MonstAbil,
   abil: Ability,
   target: Living,
-): void {
+): Promise<void> {
   if (!target.isAlive) return;
   const targSpace = target.getLoc();
   const source = monst.curLoc;
 
   if (key === MonstAbil.MISSILE) {
-    monstFireMissileProper(session, monst, abil, target);
+    await monstFireMissileProper(session, monst, abil, target);
     return;
   }
 
   if (key === MonstAbil.MISSILE_WEB) {
     target.spellNote(SpellNote.THROWS_WEB);
     runAMissile(source, targSpace, 8, 0, 14, 0, 0, 100);
+    // `do_missile_anim` blocks in the C++, so the web is *on* the square before
+    // anything is stuck to it. See `animSettle`.
+    await animSettle();
     webSpace(session, targSpace);
     return;
   }
@@ -153,6 +157,7 @@ export function monstFireMissile(
   if (key === MonstAbil.RAY_HEAT) {
     target.spellNote(SpellNote.HEAT_RAY);
     runAMissile(source, targSpace, 13, 0, 51, 0, 0, 100);
+    await animSettle();
     // The C++ builds a throwaway DAMAGE ability out of the ray's parameters and
     // runs that, so the heat ray is fire damage of strength extra3.
     const proxy: Ability = {
@@ -197,7 +202,10 @@ export function monstFireMissile(
       break;
   }
   if (abil.gen.pic < 0) livingSound(snd);
-  else runAMissile(source, targSpace, abil.gen.pic, pathType, snd, 0, 0, 100);
+  else {
+    runAMissile(source, targSpace, abil.gen.pic, pathType, snd, 0, 0, 100);
+    await animSettle();
+  }
   monsterBasicAbil(session, monst, key, abil, target);
 }
 
@@ -206,12 +214,12 @@ export function monstFireMissile(
  *
  * TODO(M5b): the target's HIT_CALL_SPECIAL item ability.
  */
-function monstFireMissileProper(
+async function monstFireMissileProper(
   session: GameSession,
   monst: Creature,
   abil: Ability,
   target: Living,
-): void {
+): Promise<void> {
   const univ = session.univ;
   const targSpace = target.getLoc();
   const pcTarget = target instanceof Player ? target : null;
@@ -221,7 +229,12 @@ function monstFireMissileProper(
   target.spellNote(note);
   // A missile with no picture has nothing to draw, so it only makes its noise.
   if (abil.missile.pic < 0) livingSound(sound);
-  else runAMissile(monst.curLoc, targSpace, abil.missile.pic, 1, sound, 0, 0, 100);
+  else {
+    runAMissile(monst.curLoc, targSpace, abil.missile.pic, 1, sound, 0, 0, 100);
+    // The arrow lands before it is known whether it hit — `do_missile_anim`
+    // sleeps through the whole flight in the C++.
+    await animSettle();
+  }
 
   // Sanctuary: an unseen target is hard to hit, and the roll is indexed by the
   // *monster's level* rather than a weapon skill — a debuff, as the C++ notes.

@@ -341,13 +341,20 @@ export class GameSession {
     void this.specials?.drainQueue();
     if (this.mode === GameMode.TOWN) {
       doMonsters(this);
-      doMonsterTurn(this);
-      // A town rolls for a new wandering group every turn, and a hard town
-      // rolls more often — the difficulty is subtracted from the divisor.
-      const difficulty = this.univ.townRecord?.difficulty ?? 0;
-      if (this.univ.rng.getRan(1, 1, Math.max(2, 160 - difficulty)) === 2) {
-        createWandMonst(this);
-      }
+      // The monsters' turn waits on the animation timeline now, so the rest of
+      // the tail has to be queued behind it rather than run underneath it —
+      // the wandering-group roll happens *after* they act, and `get_ran`'s
+      // call order is part of the spec.
+      this.queueTurn(async () => {
+        await doMonsterTurn(this);
+        // A town rolls for a new wandering group every turn, and a hard town
+        // rolls more often — the difficulty is subtracted from the divisor.
+        const difficulty = this.univ.townRecord?.difficulty ?? 0;
+        if (this.univ.rng.getRan(1, 1, Math.max(2, 160 - difficulty)) === 2) {
+          createWandMonst(this);
+        }
+        this.checkPartyDeath();
+      });
       return;
     }
     if (this.mode === GameMode.OUTDOORS) {
@@ -1385,6 +1392,47 @@ export class GameSession {
   onRedraw: (() => void) | null = null;
 
   /**
+   * The monsters' half of a turn is `async` now — it waits on the animation
+   * timeline where the C++ blocks, so the model advances at the same rate the
+   * screen does (see `animSettle`). That would otherwise colour every caller
+   * of `afterCombatAction` async, and several of them are free functions
+   * (`combatCastSpell`, `doCombatCast`) whose own callers would follow.
+   *
+   * So the async part is *queued* rather than awaited: these methods stay
+   * synchronous and chain the monster round here, one at a time and in order.
+   * `busy` is the "the monsters are going" flag the input layer gates on —
+   * the C++ gets that for free by blocking, and even flushes queued keys
+   * (`flushingInput`, boe.combat.cpp:2432). `settled()` is how a test or the
+   * host waits for the fight to catch up.
+   */
+  private turnChain: Promise<void> = Promise.resolve();
+  private turnsQueued = 0;
+
+  /** True while a monster round is still playing out. `prime_time` is not. */
+  get busy(): boolean {
+    return this.turnsQueued > 0;
+  }
+
+  /** Resolves once every queued monster round has finished. */
+  settled(): Promise<void> {
+    return this.turnChain;
+  }
+
+  private queueTurn(work: () => Promise<void>): void {
+    this.turnsQueued++;
+    this.turnChain = this.turnChain
+      .then(work)
+      // A throw must not poison the chain — every later turn would be skipped
+      // silently and the fight would simply stop. Reported instead, which also
+      // fails `verify-screen`'s console-error gate rather than hiding.
+      .catch((err: unknown) => { console.error('monster turn failed', err); })
+      .then(() => {
+        this.turnsQueued--;
+        if (this.turnsQueued === 0) this.onRedraw?.();
+      });
+  }
+
+  /**
    * The special node attached to a town square, if any (cTown::special_locs).
    */
   specialAt(where: Location): number {
@@ -2117,16 +2165,23 @@ export class GameSession {
   /**
    * The turn between rounds: the monsters act, the clock ticks and statuses
    * decay, then the party gets a fresh set of moves.
+   *
+   * One round only — `afterCombatAction` owns the loop that decides whether
+   * another is needed.
    */
-  startCombatRound(): void {
-    // combat_next_step (boe.combat.cpp:1786) opens by reconciling the cage
-    // barriers with the FORCECAGE statuses, so anyone who walked into one is
-    // caught before they get their moves.
-    syncForceCages(this);
-    combatRunMonst(this);
+  async startCombatRound(): Promise<void> {
+    await combatRunMonst(this);
     setPcMoves(this.univ);
-    pickNextPc(this.univ, this.combatActivePc);
-    if (this.univ.currentPc.ap <= 0) pickNextPc(this.univ, this.combatActivePc);
+    // "The active character is unable to act!" — a PC pinned with X who is
+    // asleep, paralysed or slowed to a standstill would otherwise burn the
+    // whole party's moves every round, forever, with no way to notice or
+    // undo it. The C++ releases the pin itself (boe.combat.cpp:1791).
+    if (this.combatActivePc < NO_ONE
+      && (this.univ.party.pcs[this.combatActivePc]?.ap ?? 0) === 0) {
+      this.combatActivePc = NO_ONE;
+      this.univ.addStringToBuf(
+        'The active character is unable to act! The whole party is now active.');
+    }
   }
 
   /**
@@ -2396,12 +2451,51 @@ export class GameSession {
    * trigger the same turn advance, or the caster never runs out of AP.
    */
   afterCombatAction(): void {
-    if (this.univ.currentPc.ap > 0) {
-      this.checkPartyDeath();
+    // combat_next_step opens by reconciling the cage barriers with the
+    // FORCECAGE statuses — on *every* step, not only when the round rolls
+    // over, so someone who just walked into one is caught straight away.
+    syncForceCages(this);
+
+    const storePc = this.univ.curPc;
+    // `pick_next_pc` is always called at least once, even when the current PC
+    // still has moves: it is also what burns everyone else's AP while one PC
+    // is pinned active, which the old `ap > 0` early-out skipped.
+    if (!pickNextPc(this.univ, this.combatActivePc)) {
+      this.finishCombatStep(storePc);
       return;
     }
-    if (pickNextPc(this.univ, this.combatActivePc)) this.startCombatRound();
+
+    this.queueTurn(async () => {
+      // `while(pick_next_pc()) { combat_run_monst(); set_pc_moves(); ... }`
+      // (boe.combat.cpp:1789). The **loop** matters: if nobody can act after
+      // the monsters have gone, the monsters go again. Running it once — as
+      // this port did — deadlocks a party that has no moves to come back to,
+      // and `setPcMoves` hands out zero AP to a slowed PC on every odd
+      // `party.age`, so a fully-slowed party simply froze on odd rounds.
+      do {
+        await this.startCombatRound();
+        // The C++'s own safety valve, and with a real loop it is load-bearing:
+        // a dead party never regains AP, so this is what ends the round.
+        if (!this.univ.party.isAlive()) break;
+      } while (pickNextPc(this.univ, this.combatActivePc));
+      pickNextPc(this.univ, this.combatActivePc);
+      this.finishCombatStep(storePc);
+    });
+  }
+
+  /**
+   * combat_next_step's tail: recentre on whoever is up, and say so. The
+   * `Active:` line is the only thing that tells the player the turn moved on
+   * and how much the new PC can do with it — printed only when the party is
+   * *not* pinned to one PC, and only when the turn actually changed hands.
+   */
+  private finishCombatStep(storePc: number): void {
     this.center = { ...this.univ.currentPc.combatPos };
+    if (this.combatActivePc === NO_ONE && this.univ.curPc !== storePc) {
+      const pc = this.univ.currentPc;
+      this.univ.addStringToBuf(
+        `Active: ${pc.name} (#${this.univ.curPc + 1}, ${pc.ap} ap.)`);
+    }
     this.onRedraw?.();
     this.checkPartyDeath();
   }
