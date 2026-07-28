@@ -95,3 +95,54 @@ describe('canDrawTerrainSpot (town, out of combat)', () => {
     expect(canDrawTerrainSpot(s, far.x, far.y, dim, dim)).toBe(false);
   });
 });
+
+/**
+ * The `monsters_going` term of the combat gate (boe.graphics.cpp:940), which
+ * this port was missing: while the monsters go the camera follows each one,
+ * often onto ground the party has never explored, and the monster was then
+ * drawn moving over pure black because `party_can_see_monst` doesn't consult
+ * the explored map at all.
+ */
+describe('canDrawTerrainSpot (town combat, monsters going)', () => {
+  function combatSession(): GameSession {
+    const s = newSession();
+    s.startCombat(s.univ.party.direction);
+    // Town combat — `which_combat_type == 1` is what makes the explored map
+    // count in the first place.
+    expect(s.mode).toBe(GameMode.COMBAT);
+    expect(s.whichCombatType).not.toBe(0);
+    return s;
+  }
+
+  /** An unexplored square that a PC has line of sight to, or null. */
+  function unexploredButVisible(s: GameSession): { x: number; y: number } | null {
+    const dim = s.univ.town!.record.maxDim;
+    for (let x = 0; x < dim; x++)
+      for (let y = 0; y < dim; y++) {
+        if (s.univ.town!.isExplored(x, y)) continue;
+        if (s.partyCanSee({ x, y }) < 6) return { x, y };
+      }
+    return null;
+  }
+
+  it('draws unexplored ground the party can see while the monsters go', () => {
+    const s = combatSession();
+    const dim = s.univ.town!.record.maxDim;
+    const spot = unexploredButVisible(s);
+    expect(spot).not.toBeNull();
+    const { x, y } = spot!;
+
+    expect(canDrawTerrainSpot(s, x, y, dim, dim)).toBe(false);
+    s.monstersGoing = true;
+    expect(canDrawTerrainSpot(s, x, y, dim, dim)).toBe(true);
+  });
+
+  it('does not draw what no PC can see, monsters going or not', () => {
+    const s = combatSession();
+    const dim = s.univ.town!.record.maxDim;
+    const far = { x: dim - 1, y: dim - 1 };
+    expect(s.partyCanSee(far)).toBe(6);
+    s.monstersGoing = true;
+    expect(canDrawTerrainSpot(s, far.x, far.y, dim, dim)).toBe(false);
+  });
+});

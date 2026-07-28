@@ -198,9 +198,35 @@ describe('the animation timeline', () => {
       focusOn({ x: 9, y: 9 });
       runAMissile({ x: 9, y: 9 }, { x: 5, y: 5 }, 3, 0, 14);
     });
-    expect(focus.length).toBe(1);
+    // The dwell on the monster, then the missile's own two: the frame it
+    // launches in and the swing onto the target half way over.
+    expect(focus.length).toBe(3);
     expect(focus[0]!.center).toEqual({ x: 9, y: 9 });
     expect(missiles[0]!.started).toBeGreaterThanOrEqual(focus[0]!.at);
+  });
+
+  /**
+   * `do_missile_anim`'s `camera_dest`/`recentered` pair: the view frames the
+   * shooter and the target together, then swings onto the target's own frame
+   * at `t == num_steps / 2`. Neither move books any time — the flight is
+   * already paying for it.
+   */
+  it('the camera follows a projectile without lengthening its flight', () => {
+    const from = { x: 4, y: 4 };
+    const dest = { x: 16, y: 4 };
+    const { focus, missiles } = capture(() => {
+      runAMissile(from, dest, 3, 0, 14);
+    });
+    const m = missiles[0]!;
+    expect(focus.length).toBe(2);
+    // Opening frame: between the two, and near enough the shooter to show it.
+    expect(focus[0]!.at).toBe(m.started);
+    expect(Math.abs(focus[0]!.center.x - from.x)).toBeLessThanOrEqual(4);
+    // Halfway: the target's frame, and the target is in it.
+    expect(focus[1]!.at).toBeCloseTo(m.started + m.dur / 2);
+    expect(Math.abs(focus[1]!.center.x - dest.x)).toBeLessThanOrEqual(4);
+    // Both moves land inside the flight; nothing was booked for them.
+    expect(focus[1]!.at).toBeLessThan(m.started + m.dur);
   });
 
   it('stops queueing once the backlog is long, so a mob does not stall', () => {

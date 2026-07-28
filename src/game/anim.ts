@@ -29,6 +29,42 @@ import { Location } from '../core/location';
 
 let cursor = 0;
 
+/**
+ * One tick of the original's clock — `time_in_ticks` (mathutil.cpp:67) counts
+ * in sixtieths of a second, which is what every `pause(n)` below is expressed
+ * in.
+ */
+export const TICK_MS = 1000 / 60;
+
+/**
+ * **A play-testing knob that is not in the original.** Every animation length
+ * below is multiplied by this, so `1` is the faithful speed and larger numbers
+ * are slow motion. The original's own answer to "combat is too fast" is the
+ * GameSpeed preference, which only stretches one of the pauses (see
+ * `MONSTER_DWELL_TICKS`); this stretches all of them together, which is what
+ * you want while checking that a monster's turn does what it should.
+ *
+ * Left at 3 while combat is being play-tested. Set it back to 1 — or press
+ * `-`/`=` in the running game, which is `setCombatPace` — once a fight reads
+ * correctly at speed.
+ */
+const DEFAULT_COMBAT_PACE = 3;
+
+let pace = DEFAULT_COMBAT_PACE;
+
+export function combatPace(): number {
+  return pace;
+}
+
+export function setCombatPace(value: number): void {
+  pace = Math.max(0.25, Math.min(10, value));
+}
+
+/** A faithful duration in ms, stretched by the current play-testing pace. */
+export function paced(ms: number): number {
+  return ms * pace;
+}
+
 /** When the next animation should start. Never earlier than now. */
 export function animAt(): number {
   const now = performance.now();
@@ -41,13 +77,17 @@ export function animAt(): number {
  * fight can queue a *lot* of them, though, and a player watching damage
  * numbers arrive ten seconds after the turn resolved is worse than a player
  * watching two spears overlap, so past this depth new animations start at once.
+ *
+ * Scaled by the pace with everything else: at three times the length, three
+ * animations deep is the same *number* of animations, and a cap that didn't
+ * scale would silently undo the slowdown exactly when the screen is busiest.
  */
 const MAX_QUEUE_MS = 1500;
 
 /** Book `ms` on the timeline, and hand back when that slot starts. */
 export function animBook(ms: number): number {
   const now = performance.now();
-  if (cursor - now > MAX_QUEUE_MS) return now;
+  if (cursor - now > paced(MAX_QUEUE_MS)) return now;
   const at = animAt();
   cursor = at + ms;
   return at;
@@ -136,28 +176,35 @@ export function animSchedule(fn: () => void, at: number): void {
 }
 
 /**
- * How long the view rests on a monster before it acts.
+ * How long the view rests on a monster before it acts, in the original's ticks
+ * — `draw_terrain(0); pause(speed == 3 ? 9 : speed)` (boe.combat.cpp:2213),
+ * where `speed` is the GameSpeed preference. The four settings the original's
+ * Preferences dialog offers are 0, 1, 2 and 9 ticks, and it ships on **0**: the
+ * default dwell is just the redraw, one frame.
  *
- * The C++ does `draw_terrain(0); pause(get_int_pref("GameSpeed"))`, and
- * GameSpeed defaults to **0** — so the original's default dwell is just the
- * redraw itself, one frame. That is what this is: a frame, not an invented
- * pause. The original's Preferences dialog raises it to 1, 2 or 9 *ticks*
- * (~17/33/150ms), which is the knob to turn if the monsters' turn reads too
- * fast.
+ * This is the original's own knob for "the monsters' turn reads too fast", so
+ * it is set to the slowest of the four rather than the shipped default. The
+ * dwell is the only thing that says *which* monster is acting before its spear
+ * is in the air, and at 0 there is nothing to see.
  */
-export const MONSTER_PAUSE_MS = 16;
+export const MONSTER_DWELL_TICKS = 9;
+
+/** The GameSpeed dwell in ms, at the current pace. */
+export function monsterPauseMs(): number {
+  return paced(MONSTER_DWELL_TICKS * TICK_MS);
+}
 
 /**
  * The beat after a monster's action lands — `do_monster_turn`'s own
  * `print_buf(); pause(8);` (boe.combat.cpp:2428), right after a flee, a
  * spell, a ranged shot or a melee swing resolves and before the loop moves
- * on. Unlike `MONSTER_PAUSE_MS` this one is **not** gated by GameSpeed at
+ * on. Unlike the GameSpeed dwell this one is **not** gated by that pref at
  * all — it always runs, which is what gives every monster's turn a
  * perceptible beat regardless of the speed setting. 8 ticks at ~16.67ms
  * each (`time_in_ticks`, mathutil.cpp:67) is ~133ms.
  *
- * This was missing outright rather than approximated, unlike
- * `MONSTER_PAUSE_MS` — there was no placeholder for it at all, which is most
+ * This was missing outright rather than approximated, unlike the GameSpeed
+ * dwell — there was no placeholder for it at all, which is most
  * of why combat read as faster than the original: nothing paced the moment
  * *between* one monster's swing and the next monster's turn starting.
  *
@@ -165,14 +212,19 @@ export const MONSTER_PAUSE_MS = 16;
  * every monster's move and damage roll before any of the pacing was observed,
  * so the booked time only ever guarded a static frame. Now that the turn
  * `animSettle`s on it, the number is real: a four-monster round measured
- * 1264ms at 133 and 2593ms at 400. Left at the faithful 133 — that is the
- * C++'s 8 ticks — but it is a working knob again if a fight reads too fast.
+ * 1264ms at 133 and 2593ms at 400. Kept at the faithful 8 ticks; the
+ * play-testing slowdown is `paced()`, applied here with everything else.
  */
-export const ACTION_PAUSE_MS = 133;
+export const ACTION_PAUSE_MS = 8 * TICK_MS;
+
+/** The post-action beat in ms, at the current pace. */
+export function actionPauseMs(): number {
+  return paced(ACTION_PAUSE_MS);
+}
 
 /** Book the post-action beat on the shared timeline; see `ACTION_PAUSE_MS`. */
 export function bookActionPause(): void {
-  animBook(ACTION_PAUSE_MS);
+  animBook(actionPauseMs());
 }
 
 /** A scheduled camera move — `center = cur_monst->cur_loc; draw_terrain(0);` */
@@ -193,6 +245,16 @@ export function setFocusSink(fn: ((event: FocusEvent) => void) | null): void {
  * its spear is in the air.
  */
 export function focusOn(where: Location): void {
-  const at = animBook(MONSTER_PAUSE_MS);
+  const at = animBook(monsterPauseMs());
+  focusSink?.({ center: { ...where }, at });
+}
+
+/**
+ * Move the camera at an already-booked moment, without booking any time of its
+ * own. `do_missile_anim` does exactly this: it re-centres *inside* the flight
+ * loop, on the frame where the shot passes the halfway mark, and the flight is
+ * no longer for it.
+ */
+export function focusAt(where: Location, at: number): void {
   focusSink?.({ center: { ...where }, at });
 }

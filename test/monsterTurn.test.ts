@@ -12,6 +12,7 @@ import {
   monstPickTarget,
 } from '../src/game/monsterTurn';
 import { FORCED_ENTRY, GameSession } from '../src/game/session';
+import { statusBarText } from '../src/render/screen';
 import { loadScenario } from '../src/fileio/loadScenario';
 import { FsSource } from '../src/fileio/source';
 import { buildOpcodeTable } from '../src/fileio/specialParse';
@@ -562,5 +563,49 @@ describe('combat_next_step runs the monsters until somebody can act', () => {
     await session.settled();
 
     expect(univ.transcript.some((l) => l.startsWith('Active:'))).toBe(false);
+  });
+});
+
+/**
+ * `monsters_going` (boe.combat.cpp:2065) exists for the *drawing* code, so what
+ * matters is that it is true for exactly the span of the turn — the window in
+ * which the camera is off following monsters — and false either side of it.
+ */
+describe('monsters_going', () => {
+  it('is set for the length of the turn and cleared after it', async () => {
+    const { session, monst } = combatWithOne();
+    monst.active = CreatureStatus.ALERTED;
+    expect(session.monstersGoing).toBe(false);
+    const turn = doMonsterTurn(session);
+    expect(session.monstersGoing).toBe(true);
+    await turn;
+    expect(session.monstersGoing).toBe(false);
+  });
+
+  it('is cleared even when the turn bails out early', async () => {
+    const { univ, session } = combatWithOne();
+    // A dead party is `do_monster_turn`'s early return. A flag left set here
+    // would keep the explored map bypassed for the rest of the game.
+    univ.party.pcs.forEach((pc) => { pc.mainStatus = MainStatus.DEAD; });
+    await doMonsterTurn(session);
+    expect(session.monstersGoing).toBe(false);
+  });
+});
+
+describe('the status bar text', () => {
+  it('names the monster that is going, and the PC otherwise', () => {
+    const { univ, session, monst } = combatWithOne();
+    univ.curPc = 0;
+    univ.party.pcs[0]!.ap = 4;
+    expect(statusBarText(session)).toBe(`${univ.party.pcs[0]!.name} (ap: 4)`);
+
+    session.monstersGoing = true;
+    monst.ap = 3;
+    expect(statusBarText(session)).toBe(`${monst.getName()} (ap: 3)`);
+
+    // "the 1st monster with >0 ap - that is monster that is going": one that
+    // has spent everything is no longer the one acting.
+    monst.ap = 0;
+    expect(statusBarText(session)).toBe(session.locationName());
   });
 });

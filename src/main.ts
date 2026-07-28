@@ -3,7 +3,7 @@
  * the classic 605x430 screen.
  */
 
-import { animAt, animSchedule } from './game/anim';
+import { animAt, animSchedule, combatPace, setCombatPace } from './game/anim';
 import { useItem } from './game/itemUse';
 import type { SpecialHost } from './game/specials/context';
 import { Location, locsEqual, shiftLoc } from './core/location';
@@ -24,7 +24,7 @@ import { placeSpellPattern } from './game/spellPatterns';
 import { GameMode, isCombat, isScrollable } from './game/modes';
 import { setBoomSink } from './game/booms';
 import { FocusEvent, animPending, setAnimWaiter, setFocusSink } from './game/anim';
-import { MISSILE_MS, setMissileSink } from './game/missileAnim';
+import { setMissileSink } from './game/missileAnim';
 import { pickNextPc } from './game/combat';
 import { GameRng } from './core/rng';
 import { DialogHost } from './dialogs/dialog';
@@ -59,6 +59,17 @@ function scenarioFromQuery(): string {
   return q && /^[a-z0-9_-]+$/i.test(q) ? q : DEFAULT_SCENARIO;
 }
 
+/**
+ * `?pace=1` runs combat at the original's own speed; larger numbers are slow
+ * motion. See `combatPace` — the default is set there, and `-`/`=` change it
+ * while the game is running.
+ */
+function applyPaceFromQuery(): void {
+  const q = new URLSearchParams(window.location.search).get('pace');
+  const n = q === null ? NaN : Number(q);
+  if (Number.isFinite(n) && n > 0) setCombatPace(n);
+}
+
 async function main(): Promise<void> {
   const canvas = document.getElementById('canvas') as HTMLCanvasElement;
   const status = document.getElementById('status')!;
@@ -66,6 +77,7 @@ async function main(): Promise<void> {
   canvas.height = BOE_HEIGHT;
   const ctx = canvas.getContext('2d')!;
 
+  applyPaceFromQuery();
   const name = scenarioFromQuery();
   status.textContent = `Loading ${name}…`;
   const fetchText = async (url: string): Promise<string> => (await fetch(url)).text();
@@ -1005,6 +1017,18 @@ async function main(): Promise<void> {
         if (preset) void activateTalkWord(preset.node);
         return;
       }
+      // The play-testing speed knob, and deliberately *above* the mid-action
+      // gate: a fight that turns out to be too slow should be speedable
+      // without waiting for the round to end. Not a key the original has —
+      // its equivalent is the GameSpeed preference — so it is kept to two
+      // keys the original leaves unused.
+      if (key === '-' || key === '_' || key === '=' || key === '+') {
+        const slower = key === '-' || key === '_';
+        setCombatPace(combatPace() * (slower ? 1.5 : 1 / 1.5));
+        univ.addStringToBuf(`(Combat pace: ${combatPace().toFixed(2)}x, 1 = original)`);
+        redraw();
+        return;
+      }
       // Nothing below here may run while the party or the monsters are still
       // mid-turn — see `midAction`. Dialogs, shops and conversations are
       // handled above and keep their keys; this only drops the ones that would
@@ -1150,7 +1174,7 @@ async function main(): Promise<void> {
         session.center = { ...pendingFocus.shift()!.center };
       }
       screen.booms = screen.booms.filter((b) => b.expires > now);
-      screen.missiles = screen.missiles.filter((m) => m.started + MISSILE_MS > now);
+      screen.missiles = screen.missiles.filter((m) => m.started + m.dur > now);
       redraw();
       if (pendingFocus.length > 0 || screen.booms.length > 0
         || screen.missiles.length > 0 || animPending() > 0) {
@@ -1166,6 +1190,16 @@ async function main(): Promise<void> {
 
   /** Put the camera back where the game logic wants it after an animation. */
   const recentreOnParty = (): void => {
+    // Not while the monsters are going: the queue drains between one monster's
+    // action and the next, and snapping to the party in that gap would flick
+    // the view back and forth all round. The C++ holds the camera on the
+    // monsters for the whole turn and restores it afterwards, which here is
+    // `finishCombatStep` (combat) or nothing at all (town, where it never
+    // moved). Visible only once the turn is paced slowly enough to see.
+    if (session.monstersGoing) {
+      redraw();
+      return;
+    }
     const univ2 = session.univ;
     session.center = isCombat(session.mode)
       ? { ...univ2.currentPc.combatPos }

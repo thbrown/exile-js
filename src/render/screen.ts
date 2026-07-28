@@ -15,7 +15,7 @@ import { Lighting } from '../data/town';
 import { GameSession } from '../game/session';
 import { GameMode, isCombat, isScrollable } from '../game/modes';
 import { Boom } from '../game/booms';
-import { MISSILE_MS, Missile, getMissileDirection } from '../game/missileAnim';
+import { Missile, getMissileDirection } from '../game/missileAnim';
 import { MAIN_STATUS_LABEL, MainStatus, Status } from '../universe/skills';
 import { statIconRect, statusIconFor } from '../data/statusIcons';
 import { Player } from '../universe/player';
@@ -104,7 +104,9 @@ export const CHROME_SHEETS = [
  * - In combat the explored map is bypassed the moment the mode is anything
  *   other than plain `MODE_COMBAT` — i.e. while you are aiming — so
  *   scrolling with the pointing arrows during targeting shows whatever the
- *   party can actually see, not a wall of black.
+ *   party can actually see, not a wall of black. It is bypassed for the same
+ *   reason while the monsters are going, when the camera is likewise off
+ *   somewhere the party may never have been.
  * - In plain town mode, the same fallback exists but is gated on
  *   `MODE_LOOK_TOWN` specifically (boe.graphics.cpp:945): scrolling the view
  *   with **L** falls back to `party_can_see` once explored+lit fails.
@@ -122,7 +124,13 @@ export function canDrawTerrainSpot(
   const town = univ.town;
   if (x < 0 || y < 0 || x >= maxDim || y >= maxDimY) return false;
   if (town && isCombat(session.mode)) {
-    const ignoreExplored = session.whichCombatType === 0 || session.mode !== GameMode.COMBAT;
+    // `monsters_going` is the third of these, and the one that was missing:
+    // while the monsters go, the camera is centred on whichever monster is
+    // acting, and the ground around it is very often ground the party has
+    // never walked on. Without it that monster is drawn — `party_can_see_monst`
+    // never consulted the explored map — as a sprite moving over pure black.
+    const ignoreExplored = session.whichCombatType === 0 || session.monstersGoing
+      || session.mode !== GameMode.COMBAT;
     return (town.isExplored(x, y) || ignoreExplored) && session.partyCanSee({ x, y }) < 6;
   }
   if (town) {
@@ -131,6 +139,36 @@ export function canDrawTerrainSpot(
     return false;
   }
   return univ.out.explored[x]?.[y] !== 0;
+}
+
+/**
+ * text_bar_text (boe.graphics.cpp:685) — what the bar above the terrain view
+ * says. Outside combat it is where you are; inside it, it is whose turn it is
+ * and what they have left to spend with.
+ *
+ * The monster half is the one that matters while the monsters go: paired with
+ * the camera following each one, it is what names the thing that is about to
+ * swing at you. It picks the **first living monster with any AP left**, which
+ * is the one currently spending them — the C++'s own comment says so, and its
+ * `i = 400` is just a `break`.
+ *
+ * Exported so the wording is testable without a canvas.
+ *
+ * TODO(M6): the right-hand half — the "hit m to recast <spell>" hint, and the
+ * party status icons it replaces.
+ */
+export function statusBarText(session: GameSession): string {
+  const { univ } = session;
+  if (!isCombat(session.mode)) return session.locationName();
+  if (session.monstersGoing) {
+    for (const monst of univ.town?.monsters ?? []) {
+      if (monst.isAlive && monst.ap > 0) return `${monst.getName()} (ap: ${monst.ap})`;
+    }
+    return session.locationName();
+  }
+  const pc = univ.party.pcs[univ.curPc];
+  if (!pc) return session.locationName();
+  return `${pc.name} (ap: ${pc.ap})`;
 }
 
 export class Screen {
@@ -279,7 +317,10 @@ export class Screen {
    * `scrollableModes`, and never while the monsters are moving.
    */
   private drawPointingArrows(session: GameSession): void {
-    if (!isScrollable(session.mode)) return;
+    // `if(monsters_going || !scrollableModes.count(overall_mode)) return;`
+    // (boe.graphics.cpp:1635) — the view isn't the player's to scroll while
+    // it is following the monsters around.
+    if (session.monstersGoing || !isScrollable(session.mode)) return;
     const sheet = this.store.get('invenbtns');
     if (!sheet) return;
     for (const [dir, pos] of POINTING_ARROWS) {
@@ -840,7 +881,9 @@ export class Screen {
           pos.x, pos.y, TILE_W, TILE_H,
         );
       }
-      if (i === univ.curPc) {
+      // `frame_active_pc` bails while the monsters go (boe.graphutil.cpp:264):
+      // the ring means "this one is up", and during their turn nobody is.
+      if (i === univ.curPc && !session.monstersGoing) {
         this.ctx.save();
         this.ctx.strokeStyle = Colours.WHITE;
         this.ctx.lineWidth = 1;
@@ -929,7 +972,7 @@ export class Screen {
       const x1 = finishPt.x - startPt.x;
       const y1 = finishPt.y - startPt.y;
 
-      const t = Math.min(m.len, Math.trunc(((now - m.started) / MISSILE_MS) * m.len));
+      const t = Math.min(m.len, Math.trunc(((now - m.started) / m.dur) * m.len));
       const px = startPt.x + Math.trunc((x1 * t) / m.len);
       let py = startPt.y + Math.trunc((y1 * t) / m.len);
       // A lobbed missile rises and falls over its flight.
@@ -993,7 +1036,7 @@ export class Screen {
   private drawStatusBar(session: GameSession): void {
     const rect = WIN_RECTS.status;
     const inner: UiRect = { top: rect.top + 4, left: rect.left + 5, bottom: rect.bottom, right: rect.right - 5 };
-    drawString(this.ctx, inner, session.locationName(), {
+    drawString(this.ctx, inner, statusBarText(session), {
       font: 'bold',
       size: 12,
       colour: Colours.WHITE,

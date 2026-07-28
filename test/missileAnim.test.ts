@@ -14,8 +14,13 @@ import { loadScenario } from '../src/fileio/loadScenario';
 import { FsSource } from '../src/fileio/source';
 import { buildOpcodeTable } from '../src/fileio/specialParse';
 import {
-  Missile, getMissileDirection, runAMissile, setMissileSink,
+  MISSILE_MS, Missile, getMissileDirection, missileMs, runAMissile, setMissileSink,
 } from '../src/game/missileAnim';
+import {
+  ACTION_PAUSE_MS, actionPauseMs, animClear, animPending, combatPace, monsterPauseMs,
+  setCombatPace,
+} from '../src/game/anim';
+import { BOOM_MS, boomMs } from '../src/game/booms';
 import { monstFireMissile } from '../src/game/monsterAbilities';
 import { GameSession } from '../src/game/session';
 import { Creature } from '../src/universe/creature';
@@ -223,5 +228,54 @@ describe('monst_fire_missile dispatch', () => {
     expect(missiles.length).toBe(1);
     expect(missiles[0]!.pathType).toBe(1);
     expect(sounds[0]).toBe(12); // an arrow's twang, not a thrown thing's
+  });
+});
+
+/**
+ * The play-testing pace knob. Not part of the original — the point of it is
+ * that every animation length moves together, so a slow fight stays in the
+ * same *order* as a fast one, and that `1` is still the faithful timing.
+ */
+describe('the combat pace knob', () => {
+  it('scales every animation length together, and 1 is the original', () => {
+    const original = combatPace();
+    try {
+      setCombatPace(1);
+      expect(actionPauseMs()).toBeCloseTo(ACTION_PAUSE_MS);
+      expect(boomMs()).toBe(BOOM_MS);
+      const dwell = monsterPauseMs();
+      // A missile carries its own extra slowdown on top of the shared pace —
+      // it crosses the whole view in one hop — so it is pinned by its ratio
+      // rather than by the faithful constant.
+      const flight = missileMs();
+      expect(flight).toBeGreaterThanOrEqual(MISSILE_MS);
+
+      setCombatPace(4);
+      expect(actionPauseMs()).toBeCloseTo(ACTION_PAUSE_MS * 4);
+      expect(missileMs()).toBeCloseTo(flight * 4);
+      expect(boomMs()).toBe(BOOM_MS * 4);
+      expect(monsterPauseMs()).toBeCloseTo(dwell * 4);
+    } finally {
+      setCombatPace(original);
+    }
+  });
+
+  it('books a missile for the paced flight time and remembers it', () => {
+    const original = combatPace();
+    try {
+      animClear();
+      setCombatPace(2);
+      const seen: Missile[] = [];
+      setMissileSink((m) => { seen.push(m); });
+      runAMissile({ x: 9, y: 9 }, { x: 5, y: 5 }, 3, 0, 0);
+      setMissileSink(null);
+      expect(seen[0]!.dur).toBe(missileMs());
+      // The turn waits on the queue, so the booking has to be the paced
+      // length too — otherwise the slowdown would be drawing only.
+      expect(animPending()).toBeGreaterThan(MISSILE_MS);
+    } finally {
+      setCombatPace(original);
+      animClear();
+    }
   });
 });

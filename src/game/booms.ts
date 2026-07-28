@@ -16,7 +16,7 @@
 
 import { Location } from '../core/location';
 import { livingSound } from '../universe/living';
-import { animAt } from './anim';
+import { animAt, paced } from './anim';
 
 /**
  * sound_lookup (boom_space) — sound type to sound file. A *negative* sound
@@ -30,8 +30,17 @@ const SOUND_LOOKUP = [
   0, 0, 0, 0, 0,
 ];
 
-/** How long a boom stays on screen. The C++ sleeps 300ms in the WASM build. */
+/**
+ * How long a boom stays on screen. The C++ sleeps 300ms in the WASM build.
+ * `boomMs()` is that stretched by the play-testing pace: a damage number that
+ * vanishes before the pause after it is over is one you can't read, so this
+ * has to slow down with the rest of the turn.
+ */
 export const BOOM_MS = 300;
+
+export function boomMs(): number {
+  return paced(BOOM_MS);
+}
 
 export interface Boom {
   where: Location;
@@ -93,7 +102,7 @@ export function runBoomAnim(): void {
   for (const boom of toPlay) {
     if (boom.sound > 0) livingSound(boom.sound);
     if (boom.type < 0 || boom.type > 6) continue;
-    sink?.({ ...boom, starts, expires: starts + BOOM_MS });
+    sink?.({ ...boom, starts, expires: starts + boomMs() });
   }
 }
 
@@ -130,5 +139,5 @@ export function boomSpace(
   // several blows in one turn land together, but a hit that follows a missile
   // still waits for the missile to arrive.
   const starts = animAt();
-  sink?.({ where: { ...where }, type, damage, sound: file, starts, expires: starts + BOOM_MS });
+  sink?.({ where: { ...where }, type, damage, sound: file, starts, expires: starts + boomMs() });
 }

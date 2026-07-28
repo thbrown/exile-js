@@ -1413,6 +1413,25 @@ export class GameSession {
     return this.turnsQueued > 0;
   }
 
+  /**
+   * `monsters_going` (boe.main.cpp:190) — set for exactly the span of
+   * `do_monster_turn` and read by the *drawing* code, which is why it is here
+   * rather than local to that function. It is not the same thing as `busy`:
+   * `busy` covers the whole queued round, including the bookkeeping either
+   * side, whereas this is only the part where the view is following monsters
+   * around instead of sitting on the party.
+   *
+   * Three things depend on it (boe.graphics.cpp:940, :692/:732, :1635, and
+   * boe.graphutil.cpp:264):
+   * - Terrain drawn while the camera is off on a monster **ignores the
+   *   explored map**, so the monster isn't a sprite floating in blackness.
+   * - The status bar names the monster that is going, rather than the PC whose
+   *   turn it isn't.
+   * - The active-PC ring and the pointing arrows are suppressed; both point at
+   *   a PC who cannot act right now.
+   */
+  monstersGoing = false;
+
   /** Resolves once every queued monster round has finished. */
   settled(): Promise<void> {
     return this.turnChain;

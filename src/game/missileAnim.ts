@@ -12,22 +12,38 @@
  * difference is that the hit's explosion pops while the arrow is still in the
  * air.
  *
- * Not ported with it: the mid-flight camera move (`camera_dest`, the
- * `recentered` branch), which follows a missile that leaves the view. Our
- * terrain view doesn't scroll during an animation, so a missile that flies off
- * the edge is simply clipped there.
+ * The camera **does** follow the shot (`camera_dest` and the `recentered`
+ * branch of the flight loop): the view opens framing the shooter and the
+ * target together, and swings onto the target half way through the flight.
+ * See `runAMissile` for what's faithful about that and what isn't.
  */
 
-import { Location } from '../core/location';
+import { Location, betweenAnchorPoints } from '../core/location';
 import { livingSound } from '../universe/living';
-import { animBook } from './anim';
+import { animBook, focusAt, paced } from './anim';
 
 /**
  * How long a missile takes to cross, in ms. The C++ sleeps
  * `2 + 5 * GameSpeed` per step over `num_steps` steps, so at the default speed
  * a 100-step shot is about 200ms.
+ *
+ * `missileMs()` is this stretched by the play-testing pace — use it anywhere
+ * the *current* flight time is wanted; the bare constant is the faithful one.
  */
 export const MISSILE_MS = 200;
+
+/**
+ * **Play-testing, not the original.** A projectile crosses the whole view in
+ * one hop, so at the same multiplier as everything else it still reads as a
+ * flicker next to a paced turn — and a shot you can't follow is the thing
+ * most worth watching in a fight. Folded in on top of the shared pace so the
+ * two knobs stay separate: set this to 1 to go back to the C++'s proportions.
+ */
+const MISSILE_EXTRA = 2.5;
+
+export function missileMs(): number {
+  return paced(MISSILE_MS * MISSILE_EXTRA);
+}
 
 /** One missile in flight. `store_missiles[i]` in the C++. */
 export interface Missile {
@@ -46,6 +62,12 @@ export interface Missile {
   len: number;
   /** When this missile launches, on the shared animation timeline. */
   started: number;
+  /**
+   * How long this one's flight lasts. Carried on the missile rather than read
+   * from `missileMs()` at draw time so that changing the pace mid-fight can't
+   * make something already in the air jump or stall.
+   */
+  dur: number;
 }
 
 let sink: ((missile: Missile) => void) | null = null;
@@ -81,9 +103,24 @@ export function runAMissile(
   // The C++ blocks here for the whole flight, so whatever comes next — the hit,
   // the next monster's shot — happens after the missile lands. Booking the
   // slot on the shared timeline is how that ordering survives without blocking.
-  const started = animBook(MISSILE_MS);
+  const dur = missileMs();
+  const started = animBook(dur);
+  // The camera work, `do_missile_anim`'s `camera_dest`/`recentered` pair: the
+  // view opens on a centre that frames the shooter and the target together,
+  // and swings onto the target's own frame half way through the flight
+  // (`t == num_steps / 2`). Two divergences, both in this port's favour:
+  // - The C++'s other trigger — "the tracked missile has left the terrain
+  //   rect" — isn't ported. Here a shot always crosses in the same time, so
+  //   halfway is where it would fire in every case that matters.
+  // - The C++ has to offset the sprite's path by the camera delta by hand.
+  //   Ours is drawn from world coordinates against the *current* centre, so
+  //   the missile simply keeps flying its line while the ground slides under
+  //   it, which is what the offset is emulating.
+  const cameraDest = betweenAnchorPoints(dest, from);
+  focusAt(betweenAnchorPoints(from, cameraDest), started);
+  focusAt(cameraDest, started + dur / 2);
   sink?.({
-    from: { ...from }, dest: { ...dest }, type, pathType, xAdj, yAdj, len, started,
+    from: { ...from }, dest: { ...dest }, type, pathType, xAdj, yAdj, len, started, dur,
   });
 }
 

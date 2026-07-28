@@ -762,6 +762,35 @@ const monstTurn = await page.evaluate(async () => {
   monst.mon.attacks = [{ dice: 4, sides: 6, type: 0 }];
   monst.mon.skill = 20;
   monst.mon.speed = 12;
+
+  // What the screen looks like *while* the monsters go, sampled from inside
+  // the draw path rather than by polling — an extra `await` around the turn
+  // changes how it interleaves with the game's own promise chain, and this
+  // script is sensitive to that (it diverges on one microtask).
+  const scr = await import('/src/render/screen.ts');
+  const dim = univ.town.record.maxDim;
+  const screen = window.__screen;
+  const origDraw = screen.draw.bind(screen);
+  const frames = [];
+  screen.draw = (sess) => {
+    if (sess.monstersGoing) {
+      // `monsters_going` bypasses the explored map, so ground the party has
+      // never walked but a PC can see draws instead of going black under the
+      // monster standing on it.
+      let unexploredDrawn = 0;
+      for (let q = 0; q < 9; q++)
+        for (let r = 0; r < 9; r++) {
+          const x = sess.center.x + q - 4;
+          const y = sess.center.y + r - 4;
+          if (x < 0 || y < 0 || x >= dim || y >= dim) continue;
+          if (univ.town.isExplored(x, y)) continue;
+          if (scr.canDrawTerrainSpot(sess, x, y, dim, dim)) unexploredDrawn++;
+        }
+      frames.push({ bar: scr.statusBarText(sess), unexploredDrawn });
+    }
+    origDraw(sess);
+  };
+
   let hurt = 0;
   for (let round = 0; round < 12 && hurt === 0; round++) {
     monst.active = 2; // ALERTED
@@ -772,8 +801,20 @@ const monstTurn = await page.evaluate(async () => {
     await s.startCombatRound();
     hurt = univ.party.pcs.reduce((n, pc) => n + (200 - pc.curHealth), 0);
   }
+  screen.draw = origDraw;
   window.__redraw();
-  return { hurt, taken: univ.party.totalDamTaken, tail: univ.transcript.slice(-4) };
+  return {
+    hurt,
+    taken: univ.party.totalDamTaken,
+    tail: univ.transcript.slice(-4),
+    // Frames drawn mid-turn, what the bar said on them, and the most
+    // unexplored-but-visible squares any one of them drew.
+    frames: frames.length,
+    monstBar: frames.map((f) => f.bar).find((b) => / \(ap: \d+\)$/.test(b)) ?? null,
+    unexploredDrawn: frames.reduce((n, f) => Math.max(n, f.unexploredDrawn), 0),
+    // The bar outside the turn is the acting PC, not the location.
+    pcBar: scr.statusBarText(s),
+  };
 });
 console.log('MONSTER TURN:', JSON.stringify(monstTurn));
 await shot('02c2-monster-turn');
@@ -1467,7 +1508,11 @@ const ok =
   (combat.skipped === true || (combat.mode === 9 && combat.placed > 1
     && combat.hurt > 0 && combatEnd.ended === true && combatEnd.mode === 1
     && combatEnd.placed === 0)) &&
-  (monstTurn.skipped === true || monstTurn.hurt > 0) &&
+  (monstTurn.skipped === true || (monstTurn.hurt > 0
+    // The monsters' turn is paced, so it must actually draw frames while it
+    // runs, and those frames must name the monster that is going.
+    && monstTurn.frames > 0 && monstTurn.monstBar !== null
+    && / \(ap: \d+\)$/.test(monstTurn.pcBar))) &&
   fightButton.found === true &&
   fightButton.inFight === 9 &&
   fightButton.swordStillThere === false &&

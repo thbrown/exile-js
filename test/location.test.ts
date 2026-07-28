@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { Direction, Rect, dist, loc, shiftLoc, vdist } from '../src/core/location';
+import {
+  Direction, Rect, SCREEN_RADIUS, betweenAnchorPoints, dist, isOnScreen, loc, shiftLoc, vdist,
+} from '../src/core/location';
 
 describe('distances', () => {
   it('dist truncates like C++ short assignment from hypot', () => {
@@ -30,5 +32,22 @@ describe('Rect', () => {
     expect(r.contains(loc(21, 5))).toBe(false);
     expect(r.width).toBe(18);
     expect(r.height).toBe(9);
+  });
+});
+
+describe('between_anchor_points', () => {
+  it('takes the midpoint, rounded toward the first anchor', () => {
+    // 4..11 → 7.5, rounded down because anchor1 is the smaller.
+    expect(betweenAnchorPoints(loc(4, 4), loc(11, 4))).toEqual(loc(7, 4));
+    // Same pair the other way round rounds up, toward anchor1 again.
+    expect(betweenAnchorPoints(loc(11, 4), loc(4, 4))).toEqual(loc(8, 4));
+  });
+
+  it('walks back toward the first anchor until it is on screen', () => {
+    // 30 squares apart: the midpoint frames neither, so the result sits
+    // exactly four squares — the view's radius — from anchor1.
+    const c = betweenAnchorPoints(loc(0, 0), loc(30, 0));
+    expect(c).toEqual(loc(4, 0));
+    expect(isOnScreen(loc(0, 0), c, SCREEN_RADIUS)).toBe(true);
   });
 });

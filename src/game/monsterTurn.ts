@@ -769,197 +769,215 @@ export async function doMonsterTurn(session: GameSession): Promise<void> {
   const univ = session.univ;
   const town = univ.town;
   if (!town) return;
-  giveMonstersMoves(session);
+  // `monsters_going = true; // This affects how graphics are drawn.`
+  // (boe.combat.cpp:2065). The try/finally is inline rather than wrapped round
+  // a helper on purpose: an extra `await` layer here is an extra microtask per
+  // turn, and that is enough to change how the turn interleaves with whatever
+  // is driving the game — `verify-screen` diverges on it.
+  session.monstersGoing = true;
+  try {
+    giveMonstersMoves(session);
 
-  // Indexed rather than iterated: a monster's SUMMON appends to this list while
-  // the loop is running, and the C++'s `num_monst` is read *before* the loop —
-  // so a creature summoned this turn doesn't act until the next one. Awaiting
-  // inside the loop makes that ordering observable, where before it wasn't.
-  const numMonst = town.monsters.length;
+    // Indexed rather than iterated: a monster's SUMMON appends to this list while
+    // the loop is running, and the C++'s `num_monst` is read *before* the loop —
+    // so a creature summoned this turn doesn't act until the next one. Awaiting
+    // inside the loop makes that ordering observable, where before it wasn't.
+    const numMonst = town.monsters.length;
 
-  for (let i = 0; i < numMonst; i++) {
-    const monst = town.monsters[i]!;
-    if (!univ.party.pcs.some((pc) => pc.isAlive)) return;
+    for (let i = 0; i < numMonst; i++) {
+      const monst = town.monsters[i]!;
+      if (!univ.party.pcs.some((pc) => pc.isAlive)) return;
 
-    // A monster that can't reach anything shouldn't spin forever: the C++
-    // relies on take_m_ap always firing, so the guard is a safety net for the
-    // cases this port hasn't filled in yet.
-    let guard = 40;
-    while (monst.ap > 0 && monst.isAlive && guard-- > 0) {
-      // In combat a monster picks a PC; in town the target is the party as a
-      // whole, standing on one square, and do_monsters has already chosen it.
-      const inCombat = session.mode === GameMode.COMBAT;
-      const target = inCombat ? monstPickTarget(session, monst) : monst.target;
-      monst.target = target;
-      const targSpace = !inCombat
-        ? univ.party.townLoc
-        : targetLoc(session, monst, target);
+      // A monster that can't reach anything shouldn't spin forever: the C++
+      // relies on take_m_ap always firing, so the guard is a safety net for the
+      // cases this port hasn't filled in yet.
+      let guard = 40;
+      while (monst.ap > 0 && monst.isAlive && guard-- > 0) {
+        // In combat a monster picks a PC; in town the target is the party as a
+        // whole, standing on one square, and do_monsters has already chosen it.
+        const inCombat = session.mode === GameMode.COMBAT;
+        const target = inCombat ? monstPickTarget(session, monst) : monst.target;
+        monst.target = target;
+        const targSpace = !inCombat
+          ? univ.party.townLoc
+          : targetLoc(session, monst, target);
 
-      // "Draw w. monster in center, if can see" — the view follows whichever
-      // monster is about to act, so you see where the spear comes from rather
-      // than only the damage number it leaves behind. Combat only: in town the
-      // camera stays on the party, which is where the action is anyway.
-      if (inCombat && monst.ap > 0 && monst.attitude !== Attitude.DOCILE
-        && (target !== NO_ONE || !monst.isFriendly)
-        && session.partyCanSeeMonst(monst)) {
-        focusOn(monst.curLoc);
-        // `center = cur_monst->cur_loc; draw_terrain(0); pause(GameSpeed)` — the
-        // view rests on the monster *before* it acts, which is only true if the
-        // turn stops here. This is also what paces plain movement: a monster
-        // walking three squares comes back round this loop three times.
-        await animSettle();
-      }
-
-      let actedYet = false;
-
-      // Flee when its nerve is gone — but the unliving and the mindless never do.
-      const canFlee = !monst.mon.mindless && monst.mon.race !== Race.UNDEAD
-        && monst.mon.race !== Race.SKELETAL;
-      if (target !== NO_ONE && monst.morale <= 0 && canFlee) {
-        if (monst.morale < 0) monst.morale++;
-        if (monst.health > 50) monst.morale++;
-        if (univ.rng.getRan(1, 1, 6) === 3) monst.morale++;
-        if (monst.mobile) {
-          actedYet = fleeParty(session, monst, targSpace);
-          if (actedYet) monst.ap = Math.max(0, monst.ap - 1);
+        // "Draw w. monster in center, if can see" — the view follows whichever
+        // monster is about to act, so you see where the spear comes from rather
+        // than only the damage number it leaves behind. Combat only: in town the
+        // camera stays on the party, which is where the action is anyway.
+        if (inCombat && monst.ap > 0 && monst.attitude !== Attitude.DOCILE
+          && (target !== NO_ONE || !monst.isFriendly)
+          && session.partyCanSeeMonst(monst)) {
+          focusOn(monst.curLoc);
+          // `center = cur_monst->cur_loc; draw_terrain(0); pause(GameSpeed)` — the
+          // view rests on the monster *before* it acts, which is only true if the
+          // turn stops here. This is also what paces plain movement: a monster
+          // walking three squares comes back round this loop three times.
+          await animSettle();
         }
-      }
 
-      // Spells come before the missile abilities, as they do in the C++
-      // (boe.combat.cpp:2272). A caster mostly won't bother when the party is
-      // already on top of it — unless it is a high-level one, or a scenario
-      // monster (number >= 160), or the coin says otherwise.
-      //
-      // Divergence worth knowing: the C++ tries *breath* before spells, but
-      // this port folds breath into `pickMonsterAbility` below, so a monster
-      // that both breathes and casts will reach for a spell first.
-      if (!actedYet && target !== NO_ONE && monst.attitude !== Attitude.DOCILE
-        && !monst.isFriendly && dist(monst.curLoc, targSpace) <= 10) {
-        const adjacent = monstAdjacent(monst, targSpace);
-        const mu = monst.mon.mu;
-        const cl = monst.mon.cl;
-        if (mu > 0 && univ.rng.getRan(1, 1, 10) < (cl > 0 ? 6 : 9)) {
-          if (!adjacent || univ.rng.getRan(1, 0, 2) < 2
-            || monst.number >= 160 || monst.getLevel() > 9) {
-            monstCastMage(session, monst, target);
-            // The C++ discards the return and counts the turn as spent either
-            // way, so a monster that couldn't afford the spell still loses its
-            // action points. Its own TODO asks whether that is right.
-            monst.ap = Math.max(0, monst.ap - 5);
-            actedYet = true;
+        let actedYet = false;
+
+        // Flee when its nerve is gone — but the unliving and the mindless never do.
+        const canFlee = !monst.mon.mindless && monst.mon.race !== Race.UNDEAD
+          && monst.mon.race !== Race.SKELETAL;
+        if (target !== NO_ONE && monst.morale <= 0 && canFlee) {
+          if (monst.morale < 0) monst.morale++;
+          if (monst.health > 50) monst.morale++;
+          if (univ.rng.getRan(1, 1, 6) === 3) monst.morale++;
+          if (monst.mobile) {
+            actedYet = fleeParty(session, monst, targSpace);
+            if (actedYet) monst.ap = Math.max(0, monst.ap - 1);
           }
         }
-        if (!actedYet && cl > 0 && univ.rng.getRan(1, 1, 8) < 7) {
-          if (!adjacent || univ.rng.getRan(1, 0, 2) < 2 || monst.getLevel() > 9) {
-            monstCastPriest(session, monst, target);
+
+        // Spells come before the missile abilities, as they do in the C++
+        // (boe.combat.cpp:2272). A caster mostly won't bother when the party is
+        // already on top of it — unless it is a high-level one, or a scenario
+        // monster (number >= 160), or the coin says otherwise.
+        //
+        // Divergence worth knowing: the C++ tries *breath* before spells, but
+        // this port folds breath into `pickMonsterAbility` below, so a monster
+        // that both breathes and casts will reach for a spell first.
+        if (!actedYet && target !== NO_ONE && monst.attitude !== Attitude.DOCILE
+          && !monst.isFriendly && dist(monst.curLoc, targSpace) <= 10) {
+          const adjacent = monstAdjacent(monst, targSpace);
+          const mu = monst.mon.mu;
+          const cl = monst.mon.cl;
+          if (mu > 0 && univ.rng.getRan(1, 1, 10) < (cl > 0 ? 6 : 9)) {
+            if (!adjacent || univ.rng.getRan(1, 0, 2) < 2
+              || monst.number >= 160 || monst.getLevel() > 9) {
+              monstCastMage(session, monst, target);
+              // The C++ discards the return and counts the turn as spent either
+              // way, so a monster that couldn't afford the spell still loses its
+              // action points. Its own TODO asks whether that is right.
+              monst.ap = Math.max(0, monst.ap - 5);
+              actedYet = true;
+            }
+          }
+          if (!actedYet && cl > 0 && univ.rng.getRan(1, 1, 8) < 7) {
+            if (!adjacent || univ.rng.getRan(1, 0, 2) < 2 || monst.getLevel() > 9) {
+              monstCastPriest(session, monst, target);
+              monst.ap = Math.max(0, monst.ap - 4);
+              actedYet = true;
+            }
+          }
+        }
+
+        // Ranged abilities come before melee — the missile or breath is what an
+        // archer or a drake reaches for when the party isn't yet on top of it.
+        if (!actedYet && target !== NO_ONE && monst.attitude !== Attitude.DOCILE
+          && !monst.isFriendly) {
+          const who: Living | null = target < NO_ONE
+            ? univ.party.pcs[inCombat ? target : selectActivePc(univ)]!
+            : null;
+          if (who && who.isAlive) {
+            const picked = pickMonsterAbility(
+              session, monst, targSpace, monstAdjacent(monst, targSpace));
+            if (picked) {
+              univ.addStringToBuf(`${monst.mon.name}:`);
+              // Everything picked here goes through monst_fire_missile, which
+              // sorts out the four kinds of ranged attack itself.
+              await monstFireMissile(session, monst, picked.key, picked.abil, who);
+              // A touch costs -1 and never gets here; anything else costs its own
+              // price, and 0 would spin the loop, so it still gives up a point.
+              const cost = abilityCost(picked);
+              monst.ap = Math.max(0, monst.ap - Math.max(1, cost));
+              actedYet = true;
+            }
+          }
+        }
+
+        // Melee, if it can reach. Attacking a PC still needs `!isFriendly` (a
+        // charmed creature never swings at the party); attacking another
+        // creature only needs `attitude !== DOCILE`, already true here — this
+        // is what lets a charmed monster actually fight its former allies.
+        if (!actedYet && target !== NO_ONE && monst.attitude !== Attitude.DOCILE) {
+          let who: Living | null;
+          if (target >= 100) {
+            who = univ.town?.monsters[target - 100] ?? null;
+          } else {
+            // In town, whoever the blow lands on is picked at random.
+            const victim = inCombat ? target : selectActivePc(univ);
+            who = monst.isFriendly ? null : univ.party.pcs[victim]!;
+          }
+          if (who && who.isAlive && monstAdjacent(monst, targSpace)) {
+            monsterAttack(session, monst, who);
             monst.ap = Math.max(0, monst.ap - 4);
             actedYet = true;
           }
         }
-      }
 
-      // Ranged abilities come before melee — the missile or breath is what an
-      // archer or a drake reaches for when the party isn't yet on top of it.
-      if (!actedYet && target !== NO_ONE && monst.attitude !== Attitude.DOCILE
-        && !monst.isFriendly) {
-        const who: Living | null = target < NO_ONE
-          ? univ.party.pcs[inCombat ? target : selectActivePc(univ)]!
-          : null;
-        if (who && who.isAlive) {
-          const picked = pickMonsterAbility(
-            session, monst, targSpace, monstAdjacent(monst, targSpace));
-          if (picked) {
-            univ.addStringToBuf(`${monst.mon.name}:`);
-            // Everything picked here goes through monst_fire_missile, which
-            // sorts out the four kinds of ranged attack itself.
-            await monstFireMissile(session, monst, picked.key, picked.abil, who);
-            // A touch costs -1 and never gets here; anything else costs its own
-            // price, and 0 would spin the loop, so it still gives up a point.
-            const cost = abilityCost(picked);
-            monst.ap = Math.max(0, monst.ap - Math.max(1, cost));
-            actedYet = true;
-          }
+        // The post-action beat (boe.combat.cpp:2428) — flee, spec attacks and
+        // melee all fall through to here; plain movement doesn't (it has its
+        // own footstep sound instead, in combatMoveMonster).
+        if (actedYet && inCombat) {
+          bookActionPause();
+          // `print_buf(); pause(8);` — the beat that lets one swing's damage
+          // number be read before the next monster starts. Waiting for it is the
+          // point: the C++ blocks here, and it is the only reason a crowded
+          // fight doesn't resolve in a single frame.
+          await animSettle();
         }
-      }
 
-      // Melee, if it can reach. Attacking a PC still needs `!isFriendly` (a
-      // charmed creature never swings at the party); attacking another
-      // creature only needs `attitude !== DOCILE`, already true here — this
-      // is what lets a charmed monster actually fight its former allies.
-      if (!actedYet && target !== NO_ONE && monst.attitude !== Attitude.DOCILE) {
-        let who: Living | null;
-        if (target >= 100) {
-          who = univ.town?.monsters[target - 100] ?? null;
-        } else {
-          // In town, whoever the blow lands on is picked at random.
-          const victim = inCombat ? target : selectActivePc(univ);
-          who = monst.isFriendly ? null : univ.party.pcs[victim]!;
-        }
-        if (who && who.isAlive && monstAdjacent(monst, targSpace)) {
-          monsterAttack(session, monst, who);
-          monst.ap = Math.max(0, monst.ap - 4);
-          actedYet = true;
-        }
-      }
-
-      // The post-action beat (boe.combat.cpp:2428) — flee, spec attacks and
-      // melee all fall through to here; plain movement doesn't (it has its
-      // own footstep sound instead, in combatMoveMonster).
-      if (actedYet && inCombat) {
-        bookActionPause();
-        // `print_buf(); pause(8);` — the beat that lets one swing's damage
-        // number be read before the next monster starts. Waiting for it is the
-        // point: the C++ blocks here, and it is the only reason a crowded
-        // fight doesn't resolve in a single frame.
-        await animSettle();
-      }
-
-      // Otherwise close the distance — but only in combat; town-mode movement
-      // is do_monsters' job and has already happened.
-      if (!actedYet && monst.mobile && inCombat) {
-        if (target >= 100) {
-          // A creature target: `seek_party` runs unconditionally in the C++
-          // (there's no is_friendly gate on this branch), whichever side
-          // `monst` is fighting for. The opportunity-attack check right after
-          // it does still require `monst` to be hostile, since a charmed
-          // creature wandering next to a parrying PC shouldn't provoke one.
-          seekParty(session, monst, targSpace);
-          if (!monst.isFriendly) checkParryOpportunity(session, monst);
-        } else {
-          const moveTarget = target !== NO_ONE ? target : closestPc(univ, monst.curLoc);
-          if (!monst.isFriendly && moveTarget < NO_ONE) {
-            const pc = univ.party.pcs[moveTarget]!;
-            if (pc.isAlive) {
-              seekParty(session, monst, pc.combatPos);
-              checkParryOpportunity(session, monst);
+        // Otherwise close the distance — but only in combat; town-mode movement
+        // is do_monsters' job and has already happened.
+        if (!actedYet && monst.mobile && inCombat) {
+          if (target >= 100) {
+            // A creature target: `seek_party` runs unconditionally in the C++
+            // (there's no is_friendly gate on this branch), whichever side
+            // `monst` is fighting for. The opportunity-attack check right after
+            // it does still require `monst` to be hostile, since a charmed
+            // creature wandering next to a parrying PC shouldn't provoke one.
+            seekParty(session, monst, targSpace);
+            if (!monst.isFriendly) checkParryOpportunity(session, monst);
+          } else {
+            const moveTarget = target !== NO_ONE ? target : closestPc(univ, monst.curLoc);
+            if (!monst.isFriendly && moveTarget < NO_ONE) {
+              const pc = univ.party.pcs[moveTarget]!;
+              if (pc.isAlive) {
+                seekParty(session, monst, pc.combatPos);
+                checkParryOpportunity(session, monst);
+              }
             }
           }
+          monst.ap = Math.max(0, monst.ap - 1);
+          actedYet = true;
         }
-        monst.ap = Math.max(0, monst.ap - 1);
-        actedYet = true;
-      }
 
-      // Summoning rides along with the action rather than costing one, and it
-      // happens once per action the monster takes — the C++ puts it at the
-      // bottom of the same loop, gated on the monster actually seeing its foe.
-      if (target !== NO_ONE && session.canSeeLight(monst.curLoc, targSpace) < 5) {
-        // RADIATE rolls before SUMMON does, and both use the same stream —
-        // don't reorder them.
-        const radiate = monst.mon.abil[MonstAbil.RADIATE];
-        if (radiate?.active && univ.rng.getRan(1, 1, 100) < radiate.radiate.chance) {
-          placeSpellPattern(session, radiate.radiate.pat, monst.curLoc, {
-            field: radiate.radiate.type as FieldType,
-            rot: monst.direction + 6,
-            // 7 is out of the 0-5 PC range, so nobody is credited with a kill.
-            whoHit: 7,
-          });
+        // Summoning rides along with the action rather than costing one, and it
+        // happens once per action the monster takes — the C++ puts it at the
+        // bottom of the same loop, gated on the monster actually seeing its foe.
+        if (target !== NO_ONE && session.canSeeLight(monst.curLoc, targSpace) < 5) {
+          // RADIATE rolls before SUMMON does, and both use the same stream —
+          // don't reorder them.
+          const radiate = monst.mon.abil[MonstAbil.RADIATE];
+          if (radiate?.active && univ.rng.getRan(1, 1, 100) < radiate.radiate.chance) {
+            placeSpellPattern(session, radiate.radiate.pat, monst.curLoc, {
+              field: radiate.radiate.type as FieldType,
+              rot: monst.direction + 6,
+              // 7 is out of the 0-5 PC range, so nobody is credited with a kill.
+              whoHit: 7,
+            });
+          }
+          monsterSummon(session, monst);
         }
-        monsterSummon(session, monst);
-      }
 
-      if (!actedYet) monst.ap = 0;
+        if (!actedYet) monst.ap = 0;
+      }
+      monst.ap = 0;
     }
-    monst.ap = 0;
+    // "If in town, need to restore center" (boe.combat.cpp:2620). The camera
+    // never followed a monster here — that is combat-only — but a missile it
+    // throws now moves the view, so the town half of the turn has somewhere to
+    // put it back from too. On the main exit only, as in the C++: a wiped
+    // party returns above this.
+    if (session.mode !== GameMode.COMBAT) {
+      session.center = { ...univ.party.townLoc };
+    }
+  } finally {
+    session.monstersGoing = false;
   }
 }
 

@@ -997,6 +997,8 @@ Notes for M2 implementer:
 - (2026-07-27) The **monsters' turn is async too**, and for the same reason: `do_monster_turn` blocks, so this port `await`s (`animSettle`) wherever the C++ calls `pause()`. Without it the model reached its final values before the first booked frame drew, and the animation constants paced nothing. `afterCombatAction` stays synchronous and *queues* the round (`GameSession.queueTurn`); `session.busy` gates input, `session.settled()` waits. Anything driving the game from a script has to await it — see the `verify-screen.mjs` note in the log entry.
 - (2026-07-27) `combat_next_step` is a **loop** — `while(pick_next_pc()) { combat_run_monst(); set_pc_moves(); ... }`. Running the monsters once is a deadlock waiting to happen: a round can legitimately hand out zero AP to everyone (`set_pc_moves` gives a slowed PC nothing on odd `party.age`), and with no moves there is no input either.
 - (2026-07-27) `do_monster_turn` reads `num_monst` **before** its loop, so a monster summoned during the turn doesn't act until the next one. Iterating the live array instead is a divergence you can't see until the turn is paced.
+- (2026-07-27) `monsters_going` is a **drawing** flag (`GameSession.monstersGoing`), not the same thing as `busy`: it is true for exactly the span of `do_monster_turn`. Four bits of drawing read it, the load-bearing one being `can_draw`'s explored-map bypass — without it a monster acting on unexplored ground is a sprite moving over pure black.
+- (2026-07-27) **Adding an `await` on the monster-turn path changes the RNG stream.** One extra microtask per turn was enough to make `verify-screen` diverge from the first swing on. Its logged outputs are a fingerprint of the whole run: if they move, something in the ordering moved.
 
 ## Handoff: what combat still needs (M5b and M5c)
 
@@ -1644,3 +1646,77 @@ playthrough will hit it:
     town19/town20 place 5 horses and 9 boats total), the per-party copy,
     boarding/dismounting a horse, the ownership refusal, and
     `CHANGE_HORSE_OWNER`.
+
+- **Combat you can watch: the pace knob, `monsters_going`, and the camera
+  following a shot (2026-07-27, from the tenth play-test round).** The report
+  was two things — combat runs too fast to see what the enemy is doing, and in
+  a town fight NPCs move around over black, unrendered ground.
+  - **The pace knob (`combatPace`, `anim.ts`).** Not in the original: every
+    animation length is multiplied by it, so `1` is the faithful timing and
+    the default of **3** is slow motion for play-testing. `paced()` is applied
+    to the monster dwell, the post-action beat, a missile's flight, a boom's
+    time on screen *and* `MAX_QUEUE_MS` — a cap that didn't scale would
+    silently undo the slowdown exactly when the screen is busiest. Changed at
+    runtime with `-` / `=` (above the mid-action gate, so a fight can be sped
+    up while it runs) or `?pace=1` in the URL.
+  - **The GameSpeed dwell was the wrong end of its own range.** The camera's
+    rest on the acting monster is `pause(speed == 3 ? 9 : speed)`
+    (boe.combat.cpp:2213) — the *preference*, 0/1/2/9 ticks, shipped at 0.
+    This port had hard-coded the shipped 0 (one frame, ~16ms), which is the
+    original's own answer to "combat is too fast" left turned all the way
+    down. Now `MONSTER_DWELL_TICKS = 9`, the slowest of the four.
+  - **A missile carries an extra slowdown of its own** (`MISSILE_EXTRA`,
+    2.5x): a projectile crosses the whole view in one hop, so at the shared
+    multiplier it still read as a flicker next to a paced turn.
+  - **`monsters_going` was missing entirely, and that is the black-ground
+    bug.** The C++ sets it for exactly the span of `do_monster_turn`
+    (boe.combat.cpp:2065) and four bits of drawing read it. The one that
+    matters: `can_draw` in a town fight is
+    `(is_explored || which_combat_type == 0 || monsters_going || mode !=
+    MODE_COMBAT) && party_can_see < 6` (boe.graphics.cpp:940). While the
+    monsters go the camera is centred on whichever monster is acting — very
+    often on ground the party has never walked — and `party_can_see_monst`
+    never consulted the explored map, so the monster was drawn moving over
+    pure black. With the flag, the ground under it draws. Also ported with it:
+    the status bar naming the monster that is going (`text_bar_text`, and with
+    it the PC's `name (ap: n)` line, which was missing too), the active-PC
+    ring bailing out (`frame_active_pc`, boe.graphutil.cpp:264) and the
+    pointing arrows (boe.graphics.cpp:1635).
+  - **The camera holds still for the whole turn.** `recentreOnParty` in
+    `main.ts` used to fire whenever the animation queue drained, which is
+    *between* two monsters' actions — so the view flicked back to the party
+    and away again all round. Only visible once the turn is slow enough to
+    watch. It now defers to `monstersGoing`, and the C++'s "if in town, need
+    to restore center" (boe.combat.cpp:2620) is ported at the end of
+    `doMonsterTurn` so the town half has somewhere to put it back from.
+  - **The missile camera is ported now** — `do_missile_anim`'s `camera_dest`
+    and `recentered` branch, which the header of `missileAnim.ts` used to say
+    was left out. The view opens on `between_anchor_points(origin, dest)`
+    (a new faithful port in `core/location.ts`) and swings onto the target's
+    frame at the flight's halfway mark; `focusAt` books *no* time for either,
+    since the flight is already paying for them. Two knowing divergences: the
+    C++'s second trigger ("the tracked missile left the terrain rect") isn't
+    ported, because here every shot crosses in the same time and halfway is
+    where it would fire anyway; and the C++ has to offset the sprite's path by
+    the camera delta by hand, where ours is drawn from world coordinates
+    against the current centre and simply keeps flying while the ground slides
+    under it.
+  - *Gotcha, and an expensive one*: **an extra `await` layer inside
+    `doMonsterTurn` changes the RNG stream.** The first draft set the flag in
+    a wrapper that awaited a `monsterTurnBody` helper; `verify-screen` then
+    diverged from the first swing onward (a different damage roll, a different
+    party position ten steps later) and failed. One extra microtask per turn
+    is enough to change how the turn interleaves with whatever is driving the
+    game. The flag is set with an **inline** `try`/`finally` for that reason —
+    worth knowing before refactoring anything on this path, and worth
+    remembering that `verify-screen`'s outputs are a reproducible fingerprint
+    of the whole run, not just a pass/fail.
+  - `verify-screen` now samples from *inside* the draw path while the monsters
+    go (wrapping `Screen.draw`, since polling from the driver would add the
+    very awaits described above): it checks that the turn draws frames at all,
+    that the bar names the monster on them, and counts the unexplored squares
+    the `monsters_going` gate lets through. Unit cover: `test/screen.test.ts`
+    (the gate), `test/monsterTurn.test.ts` (the flag's lifetime, including the
+    early return, and the bar's wording), `test/missileAnim.test.ts` (the pace
+    scaling), `test/increaseAge.test.ts` (the camera following a shot without
+    lengthening it) and `test/location.test.ts` (`between_anchor_points`).
