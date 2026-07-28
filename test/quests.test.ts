@@ -10,6 +10,8 @@ import {
   Quest, QuestStatus, makeJob, makeQuest, specItemStartWith, specItemUseable,
 } from '../src/data/quest';
 import { SpecType, emptySpecialNode } from '../src/data/special';
+import { TalkNode, TalkNodeType, emptyTalkNode } from '../src/data/talking';
+import { dispatcherMood, jobBoardOffers, openJobBank, takeJob } from '../src/game/jobBank';
 import { Scenario } from '../src/data/scenario';
 import { loadScenario } from '../src/fileio/loadScenario';
 import { readQuestFromXml, readSpecItemFromXml, readTimerFromXml } from '../src/fileio/scenarioXml';
@@ -323,5 +325,225 @@ describe('generate_job_bank', () => {
     s.univ.party.jobBank(3);
     expect(s.univ.party.jobBanks.length).toBe(4);
     expect(s.univ.party.jobBanks[3]!.anger).toBe(0);
+  });
+});
+
+describe('the job board', () => {
+  /** A quest with a description, a deadline and a fee, as a board shows it. */
+  function paidQuest(gold: number, deadline: number, relative: boolean): Quest {
+    const q = makeQuest();
+    q.name = 'Find the cow';
+    q.descr = 'It wandered off.';
+    q.gold = gold;
+    q.deadline = deadline;
+    q.deadlineIsRelative = relative;
+    q.bank1 = 0;
+    return q;
+  }
+
+  it("writes a relative deadline as days and an absolute one as a day number", () => {
+    const s = inTown();
+    scen.quests.push(paidQuest(250, 30, true), paidQuest(80, 12, false), paidQuest(5, 0, false));
+    const bank = s.univ.party.jobBank(0);
+    bank.jobs = [0, 1, 2, -1, -1, -1];
+    const offers = jobBoardOffers(s.univ, bank);
+    expect(offers.map((o) => o.text)).toEqual([
+      'It wandered off. Must be completed in 30 days. Pay is 250 gold.',
+      'It wandered off. Must be completed by day 12. Pay is 80 gold.',
+      // A deadline of 0 is "none", so no deadline line at all.
+      'It wandered off. Pay is 5 gold.',
+    ]);
+  });
+
+  it('shows only the first four slots, and skips empty ones', () => {
+    const s = inTown();
+    for (let i = 0; i < 6; i++) scen.quests.push(paidQuest(10, 0, false));
+    const bank = s.univ.party.jobBank(0);
+    // Slots 4 and 5 are the spares; the board never displays them.
+    bank.jobs = [0, -1, 2, 3, 4, 5];
+    const offers = jobBoardOffers(s.univ, bank);
+    expect(offers.map((o) => o.slot)).toEqual([0, 2, 3]);
+  });
+
+  it('reads the dispatcher\'s temper in four bands', () => {
+    expect(dispatcherMood(0)).toContain('neutral');
+    expect(dispatcherMood(9)).toContain('neutral');
+    expect(dispatcherMood(10)).toContain('a little annoyed');
+    expect(dispatcherMood(19)).toContain('a little annoyed');
+    expect(dispatcherMood(20)).toContain('annoyed');
+    expect(dispatcherMood(34)).toContain('annoyed');
+    expect(dispatcherMood(35)).toContain('rather angry');
+  });
+
+  it('rolls a board the first time it is opened, and not again after', () => {
+    const s = inTown();
+    for (let i = 0; i < 4; i++) scen.quests.push(paidQuest(10, 0, false));
+    const bank = openJobBank(s.univ, 1);
+    expect(bank.inited).toBe(true);
+    const rolled = bank.jobs.slice();
+    // A second visit shows the same offers — generate_job_bank is lazy and
+    // runs once, which is why anger only bites on a board's next refresh.
+    expect(openJobBank(s.univ, 1).jobs).toEqual(rolled);
+  });
+
+  it('starts the quest it hands over, and records where it came from', () => {
+    const s = inTown();
+    scen.quests.push(paidQuest(250, 30, true));
+    const which = scen.quests.length - 1;
+    s.univ.party.age = 3700 * 4; // day 5
+    const bank = s.univ.party.jobBank(0);
+    bank.jobs = [which, -1, -1, -1, -1, -1];
+    takeJob(s.univ, bank, 0, 27);
+    const job = s.univ.party.activeQuests.get(which)!;
+    expect(job.status).toBe(QuestStatus.STARTED);
+    expect(job.start).toBe(5);
+    // The source is the *personality*, not the board number — the C++'s own
+    // shape, even though special_increase_age then indexes job_banks with it.
+    expect(job.source).toBe(27);
+  });
+
+  it('refills the emptied slot from a spare, and only from one', () => {
+    const s = inTown();
+    for (let i = 0; i < 6; i++) scen.quests.push(paidQuest(10, 0, false));
+    const bank = s.univ.party.jobBank(0);
+    bank.jobs = [0, 1, 2, 3, 4, 5];
+    takeJob(s.univ, bank, 1, 0);
+    // Slot 4's job moves up; the taken one goes where it came from.
+    expect(bank.jobs).toEqual([0, 4, 2, 3, 1, 5]);
+    // With slot 4 now holding a taken job it is still >= 0, so it is used
+    // again — the C++ never clears it either.
+    takeJob(s.univ, bank, 0, 0);
+    expect(bank.jobs).toEqual([1, 4, 2, 3, 0, 5]);
+  });
+
+  it('leaves the slot alone when both spares are empty', () => {
+    const s = inTown();
+    for (let i = 0; i < 4; i++) scen.quests.push(paidQuest(10, 0, false));
+    const bank = s.univ.party.jobBank(0);
+    bank.jobs = [0, 1, 2, 3, -1, -1];
+    takeJob(s.univ, bank, 2, 0);
+    expect(bank.jobs).toEqual([0, 1, 2, 3, -1, -1]);
+  });
+});
+
+describe('the JOB_BANK and RECEIVE_QUEST talk nodes', () => {
+  /**
+   * Valleydy has neither node type, so the tests write their own into the
+   * start town's speech and take it out again afterwards. The personality
+   * decides which town's speech record answers (`cur_talk`), so it has to
+   * belong to the town the party is standing in.
+   */
+  function withNode(node: Partial<TalkNode>): { session: GameSession; index: number } {
+    const session = inTown();
+    const town = session.univ.party.townNum;
+    const speech = session.univ.scenario.townTalk[town]!;
+    const index = speech.talkNodes.length;
+    speech.talkNodes.push({ ...emptyTalkNode(), personality: town * 10, ...node });
+    added.push(speech);
+    session.startTalkMode(-1, town * 10, 0, -1);
+    return { session, index };
+  }
+
+  const added: { talkNodes: TalkNode[] }[] = [];
+  afterEach(() => {
+    for (const speech of added) speech.talkNodes.pop();
+    added.length = 0;
+  });
+
+  it('opens the board, passing the node\'s own text as the title', () => {
+    const { session, index } = withNode({
+      type: TalkNodeType.JOB_BANK,
+      extras: [2, -1, -1, -1],
+      str1: 'THE MERCENARY GUILD:',
+      str2: 'Get lost.',
+    });
+    const opened: { which: number; title: string; personality: number }[] = [];
+    session.onJobBank = (which, title, personality) =>
+      opened.push({ which, title, personality });
+    session.chooseTalkNode(index);
+    expect(opened).toEqual([
+      { which: 2, title: 'THE MERCENARY GUILD:', personality: session.univ.party.townNum * 10 },
+    ]);
+    // The node's text stays on screen behind the board.
+    expect(session.talk!.str1).toBe('THE MERCENARY GUILD:');
+  });
+
+  it('turns the party away when the board is angry enough', () => {
+    const { session, index } = withNode({
+      type: TalkNodeType.JOB_BANK,
+      extras: [2, -1, -1, -1],
+      str1: 'THE MERCENARY GUILD:',
+      str2: 'Get lost.',
+    });
+    session.univ.party.jobBank(2).anger = 50;
+    let opened = 0;
+    session.onJobBank = () => { opened++; };
+    session.chooseTalkNode(index);
+    expect(opened).toBe(0);
+    expect(session.talk!.str1).toBe('Get lost.');
+    expect(session.talk!.str2).toBe('');
+  });
+
+  it('never counts a board it has never seen as angry', () => {
+    const { session, index } = withNode({
+      type: TalkNodeType.JOB_BANK, extras: [5, -1, -1, -1], str1: 'Jobs.', str2: 'Get lost.',
+    });
+    // The anger test reads the list without growing it, so board 5 not
+    // existing is not an error and not a refusal.
+    expect(session.univ.party.jobBanks.length).toBe(0);
+    let opened = 0;
+    session.onJobBank = () => { opened++; };
+    session.chooseTalkNode(index);
+    expect(opened).toBe(1);
+  });
+
+  it('RECEIVE_QUEST starts an available quest, with no board behind it', () => {
+    scen.quests.push(aQuest(30));
+    const which = scen.quests.length - 1;
+    const { session, index } = withNode({
+      type: TalkNodeType.RECEIVE_QUEST,
+      extras: [which, -1, -1, -1],
+      str1: 'Please find my cow.',
+      str2: 'You found her already.',
+    });
+    session.univ.party.age = 3700 * 2; // day 3
+    session.chooseTalkNode(index);
+    const job = session.univ.party.activeQuests.get(which)!;
+    expect(job.status).toBe(QuestStatus.STARTED);
+    expect(job.start).toBe(3);
+    expect(job.source).toBe(-1);
+    expect(session.talk!.str1).toBe('Please find my cow.');
+    expect(session.talk!.str2).toBe('');
+  });
+
+  it('says nothing new about a quest already under way, and swaps to str2 once it is done', () => {
+    scen.quests.push(aQuest(30));
+    const which = scen.quests.length - 1;
+    const { session, index } = withNode({
+      type: TalkNodeType.RECEIVE_QUEST,
+      extras: [which, -1, -1, -1],
+      str1: 'Please find my cow.',
+      str2: 'You found her already.',
+    });
+    session.univ.party.activeQuests.set(which, makeJob(1));
+    session.chooseTalkNode(index);
+    expect(session.talk!.str1).toBe('Please find my cow.');
+    expect(session.univ.party.activeQuests.get(which)!.start).toBe(1);
+
+    session.univ.party.activeQuests.get(which)!.status = QuestStatus.COMPLETED;
+    session.chooseTalkNode(index);
+    expect(session.talk!.str1).toBe('You found her already.');
+  });
+
+  it('leaves the reply untouched when the quest number is out of range', () => {
+    const { session, index } = withNode({
+      type: TalkNodeType.RECEIVE_QUEST,
+      extras: [scen.quests.length + 10, -1, -1, -1],
+      str1: 'Please find my cow.',
+    });
+    const before = session.talk!.str1;
+    session.chooseTalkNode(index);
+    expect(session.talk!.str1).toBe(before);
+    expect(session.univ.transcript.at(-1)).toContain('nonexistent quest');
   });
 });

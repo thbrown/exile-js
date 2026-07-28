@@ -17,6 +17,7 @@ import {
   cancelSpellTargeting, castCollected, doCombatCast, placeTarget,
 } from './game/spellCombatTarget';
 import { takeAp } from './game/combat';
+import { dispatcherMood, jobBoardOffers, openJobBank, takeJob } from './game/jobBank';
 import { castTownSpell, startTownTargeting } from './game/spellTarget';
 import { CastDialog } from './dialogs/castDialog';
 import { GetItemsDialog } from './dialogs/getItemsDialog';
@@ -373,6 +374,47 @@ async function main(): Promise<void> {
         const which = choices[Number(picked)];
         if (which === undefined) break;
         if (!state.change(which, true)) sound.play(Snd.BUTTON);
+      }
+      redraw();
+    })();
+  };
+
+  /**
+   * The job board (`show_job_bank`, boe.dlgutil.cpp:794). Four offers, a Take
+   * beside each, and the dispatcher's mood along the bottom; taking one starts
+   * the quest and refills the slot from the board's spares.
+   *
+   * TODO(M3): job-board.xml is a picture, a title and four framed blocks with
+   * their own buttons. This is the same rules as a list, pending the dialogxml
+   * toolkit.
+   */
+  session.onJobBank = (which, title, personality) => {
+    if (dialogs.active) return;
+    void (async () => {
+      const bank = openJobBank(univ, which);
+      let prompt = dispatcherMood(bank.anger);
+      for (;;) {
+        const offers = jobBoardOffers(univ, bank);
+        const picked = await dialogs.run({
+          text: `${title || 'THE JOB BOARD:'}\n`
+            + `Current day: ${univ.party.calcDay()}\n`
+            + (offers.length > 0 ? 'Pick a job to take it.' : 'Nothing is on offer.')
+            + `\n${prompt}`,
+          rows: offers.map((offer, i) => ({
+            name: String(offer.slot),
+            key: String(i + 1),
+            label: offer.text,
+          })),
+          escapeButton: 'done',
+          buttons: [{ name: 'done', label: 'Done', key: 'd' }],
+        });
+        if (picked === 'done') break;
+        const slot = Number(picked);
+        if (!Number.isInteger(slot)) break;
+        const quest = univ.scenario.quests[bank.jobs[slot]!];
+        takeJob(univ, bank, slot, personality);
+        prompt = 'Job accepted.';
+        if (quest) univ.addStringToBuf(`  You take the job: ${quest.name}`);
       }
       redraw();
     })();

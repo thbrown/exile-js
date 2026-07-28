@@ -271,6 +271,56 @@ const trained = await page.evaluate(() => ({
 }));
 console.log('TRAINED:', JSON.stringify({ trainBefore, trained }));
 
+// 2b-4a. The job board. Valleydy has no JOB_BANK node, so the step supplies a
+//        quest for board 0 and opens it the way the node would.
+await page.evaluate(async () => {
+  const s = window.__session;
+  const q = {
+    deadlineIsRelative: true, autoStart: false, deadline: 30, event: -1,
+    xp: 100, gold: 250, bank1: 0, bank2: -1,
+    name: 'Find the cow', descr: 'It wandered off.',
+  };
+  window.__jobQuest = s.univ.scenario.quests.length;
+  s.univ.scenario.quests.push(q);
+  // generate_job_bank offers each eligible quest on a 50% roll, so a board
+  // left to roll itself is empty half the time. The rolling is unit-tested;
+  // this step pins the offer so it can check the board and taking a job.
+  const bank = s.univ.party.jobBank(0);
+  bank.jobs = [window.__jobQuest, -1, -1, -1, -1, -1];
+  bank.inited = true;
+  s.onJobBank(0, 'THE JOB BOARD:', s.talk ? s.talk.personality : 0);
+});
+await page.waitForTimeout(250);
+const board = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  return d ? { text: d.spec.text, rows: d.spec.rows.map((r) => r.label) } : null;
+});
+await shot('01b4a-job-board');
+await press('1'); // Take the job
+await page.waitForTimeout(250);
+const tookJob = await page.evaluate(() => {
+  const s = window.__session;
+  const job = s.univ.party.activeQuests.get(window.__jobQuest);
+  const d = window.__dialogs.active;
+  return {
+    status: job ? job.status : null,
+    start: job ? job.start : null,
+    // The board's own feedback line changes to "Job accepted.". The offer
+    // itself stays: with no spare to swap in, the C++ leaves the slot alone
+    // despite its own "otherwise, clear space" comment.
+    prompt: d ? d.spec.text.split('\n').at(-1) : null,
+    rows: d ? d.spec.rows.length : null,
+  };
+});
+console.log('JOB BOARD:', JSON.stringify({ board, tookJob }));
+await press('d'); // Done
+await page.waitForTimeout(250);
+await page.evaluate(() => {
+  window.__session.univ.scenario.quests.length = window.__jobQuest;
+  window.__session.univ.party.activeQuests.delete(window.__jobQuest);
+  window.__session.univ.party.jobBanks.length = 0;
+});
+
 await page.evaluate(async () => {
   window.__session.chooseTalkNode(-14);
   window.__redraw();
@@ -1625,6 +1675,10 @@ const ok =
   // three held-still sprites all draw.
   missileFired.launched.length === 1 &&
   missileFlight.drawn === 3 &&
+  // The job board offers the quest with its pay, and taking it starts the
+  // quest (status 1 = STARTED) and clears the slot, there being no spare.
+  board !== null && board.rows.length === 1 && board.rows[0].includes('250 gold') &&
+  tookJob.status === 1 && tookJob.rows === 1 && tookJob.prompt === 'Job accepted.' &&
   // place_spell_pattern: the protective circle raises all four of its rings.
   (pattern.skipped !== undefined || (pattern.counts.forceWall > 0
     && pattern.counts.ice > 0 && pattern.counts.blades > 0

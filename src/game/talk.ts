@@ -14,6 +14,7 @@ import { Attitude } from '../data/monster';
 import { Universe } from '../universe/universe';
 import { Creature, CreatureStatus } from '../universe/creature';
 import { ItemShopMode } from './itemShop';
+import { receiveQuest } from './jobBank';
 
 /** Pseudo-node ids for the fixed buttons (boe.newgraph.hpp:31). */
 export enum TalkAction {
@@ -99,6 +100,11 @@ export class TalkState {
   onMakeTownHostile: (() => void) | null = null;
   /** How a TRAINING node opens the spend-skill-points dialog. */
   onTrain: (() => void) | null = null;
+  /**
+   * How a JOB_BANK node opens the job board. Same shape as onTrain: the host
+   * owns the dialog, and the node's own text is the board's title.
+   */
+  onJobBank: ((which: number, title: string) => void) | null = null;
   /** How an INN node rests the party and moves it to the bed it paid for. */
   onRest:
     | ((length: number, hp: number, sp: number, wakeAt: { x: number; y: number }) => void)
@@ -396,6 +402,38 @@ export class TalkState {
         str2 = '';
         this.onTrain?.();
         break;
+      case TalkNodeType.JOB_BANK: {
+        // A board too angry to deal with the party doesn't open at all — it
+        // just gives the brush-off in str2 (boe.dlgutil.cpp:1016). Note the
+        // test reads the list without growing it, so a board that has never
+        // been opened is never angry.
+        const bank = party.jobBanks[a];
+        if (bank !== undefined && bank.anger >= 50) {
+          useSecond();
+          break;
+        }
+        // Otherwise the node's own text is the board's title and stays on
+        // screen behind it (the RECORD_WHICH_NODE path, which leaves both
+        // strings alone).
+        this.canRecord = false;
+        this.onJobBank?.(a, str1);
+        break;
+      }
+      case TalkNodeType.RECEIVE_QUEST: {
+        if (a < 0 || a >= this.univ.scenario.quests.length) {
+          // showError("Tried to give a nonexistent quest!") — the C++ returns
+          // without touching the reply, so the previous one stays up.
+          this.univ.addStringToBuf('Tried to give a nonexistent quest!');
+          return 'ok';
+        }
+        const result = receiveQuest(this.univ, a);
+        // FAILED bails out entirely; the C++ has a TODO asking what it should
+        // do instead.
+        if (result === 'failed') return 'ok';
+        if (result === 'done') str1 = str2;
+        str2 = '';
+        break;
+      }
       case TalkNodeType.INN:
         // a is the price, b scales the rest, and (c,d) is the bed you wake in.
         if (party.gold < a) useSecond();
@@ -465,8 +503,8 @@ export class TalkState {
         break;
       }
       default:
-        // Shops, inns, training, job banks, quests, vehicles and the two
-        // call-special nodes all need systems that arrive in later milestones.
+        // What's left: BUY_SHIP and BUY_HORSE, which need a vehicle to hand
+        // over at a price. TODO(M6).
         this.lastUnsupported = node.type;
         break;
     }

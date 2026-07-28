@@ -1787,6 +1787,13 @@ export class GameSession {
   onTrain: (() => void) | null = null;
 
   /**
+   * Set by the host: called when a JOB_BANK node needs the job board
+   * (`job-board.xml`). The personality is passed because a job taken from the
+   * board records it as the job's source — see `takeJob`.
+   */
+  onJobBank: ((which: number, title: string, personality: number) => void) | null = null;
+
+  /**
    * Set by the host: the "This creature isn't hostile. Attack anyway?" prompt
    * (`attack-friendly.xml`). Without a handler the swing is simply refused,
    * which is what Cancel does.
@@ -1975,6 +1982,7 @@ export class GameSession {
       this.startShopMode(shopNum, costAdj, name) || this.startShopModeAnyPc(shopNum, costAdj, name);
     this.talk.onItemShop = (mode, a, b, c) => this.startItemShop(mode, a, b, c);
     this.talk.onTrain = () => this.onTrain?.();
+    this.talk.onJobBank = (which, title) => this.onJobBank?.(which, title, personality);
     this.talk.onMakeTownHostile = () => makeTownHostile(this);
     this.talk.onCallSpecial = (node, scenario) => {
       const type = scenario ? SpecCtxType.SCEN : SpecCtxType.TOWN;

@@ -31,7 +31,7 @@
 
 ## Current state
 
-**M2 done bar the replay driver, M3 nearly done, M4 and M5 complete, M6 begun (2026-07-27): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: enchanting (needs M5's enchantment table), job banks (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; projectiles fly across the screen; and `place_spell_pattern` works, so exploding weapons blast, monsters lay fields and a protective circle raises four rings of wall. **M5 is closed**: monster spellcasting, the 147-spell list, `process_fields` and the real casting dialog all landed 2026-07-26. **M6 has started**: quests, job banks, special items and the town/scenario/party timers work as of 2026-07-27, so a scripted deadline can expire and a timed node can fire — **items can be Used**: the USE button on an inventory row drinks the potion, fires the wand and reads the book — and **boats and horses work**: walk onto one to board it, dry land to leave it, Space to dismount or re-board, and `CHANGE_HORSE_OWNER`/`CHANGE_BOAT_OWNER` hand one to the party.
+**M2 done bar the replay driver, M3 nearly done, M4 and M5 complete, M6 begun (2026-07-27): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: enchanting (needs M5's enchantment table), job banks (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; projectiles fly across the screen; and `place_spell_pattern` works, so exploding weapons blast, monsters lay fields and a protective circle raises four rings of wall. **M5 is closed**: monster spellcasting, the 147-spell list, `process_fields` and the real casting dialog all landed 2026-07-26. **M6 has started**: quests, job banks, special items and the town/scenario/party timers work as of 2026-07-27, so a scripted deadline can expire and a timed node can fire — **items can be Used**: the USE button on an inventory row drinks the potion, fires the wand and reads the book — and **boats and horses work**: walk onto one to board it, dry land to leave it, Space to dismount or re-board, and `CHANGE_HORSE_OWNER`/`CHANGE_BOAT_OWNER` hand one to the party — and **the job board works**: a JOB_BANK conversation node opens it, and a quest taken there (or handed over by a RECEIVE_QUEST node) runs on the timers that were already ported.
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -59,7 +59,7 @@ M2 landed so far:
 - **Shops (M3e)**: `data/shop.ts` (cShop/cShopItem verbatim, `cost_mult` prices, the two preset shops), `data/treasure.ts` (return_treasure / pull_item_of_type, RNG call order preserved), `data/strings.ts` (get_str against `data/strings/*.txt`, loaded before the scenario because shop stock names itself synchronously), `fileio/scenarioXml.ts` (`readShopFromXml` + the store-items rects), `game/shop.ts` (`ShopState` = set_up_shop_array + handle_sale), `render/shopScreen.ts` (draw_shop_graphics with init_shopping_rects geometry). A SHOP talk node opens it; keys **a**-**h** buy, arrows scroll, Escape leaves. `Universe.refreshStoreItems` rolls random-shop stock; `party.storeLimitedStock` remembers what's been bought out.
 - **Shop services on your own goods (M3f)**: `game/itemShop.ts` ports place_item_button's eligibility/price rules and handle_item_shop_action — selling (half value), identifying, recharging (a free recharge can melt the item), enchanting (stubbed on M5's table). A SELL/IDENTIFY/RECHARGE talk node switches the inventory panel into a prompt where each eligible item grows a priced button. Note `inventory.ts`'s `takeItem` now compacts the pack the way `cPlayer::take_item` does.
 - **Training and inns (M3g)**: `game/training.ts` holds spend_xp's mode-1 rules (skill-point *and* gold costs, caps, no refunding a level the PC walked in with, the Anama curse); `game/rest.ts` ports do_rest for the INN node. The training dialog is a two-column list rather than the original's stepper grid — marked `TODO(M3)` pending stepper widgets.
-- **Talking (M3a)**: `game/talk.ts` (`TalkState`) ports start_talk_mode/handle_talk_node/reset_talk_words/scan_for_response; `render/talkScreen.ts` ports place_talk_str/place_talk_face. Press T (or the TALK toolbar button) then a direction. Keyword matching is first-4-chars case-insensitive, and nodes are filtered to the personality (or -2 = anyone in town). Node types implemented: REGULAR, DEP_ON_SDF, SET_SDF, DEP_ON_TIME(_AND_EVENT), DEP_ON_TOWN, BUY_INFO, BUY_SDF, BUY_SPEC_ITEM, BUY_TOWN_LOC, END_FORCE/FIGHT/ALARM/DIE, SHOP, INN, TRAINING, SELL_WEAPONS/ARMOR/ITEMS, IDENTIFY, ENCHANT, RECHARGE. Still unimplemented (and saying so in the transcript rather than failing silently): JOB_BANK, BUY_SHIP, BUY_HORSE, RECEIVE_QUEST, CALL_TOWN_SPEC, CALL_SCEN_SPEC.
+- **Talking (M3a)**: `game/talk.ts` (`TalkState`) ports start_talk_mode/handle_talk_node/reset_talk_words/scan_for_response; `render/talkScreen.ts` ports place_talk_str/place_talk_face. Press T (or the TALK toolbar button) then a direction. Keyword matching is first-4-chars case-insensitive, and nodes are filtered to the personality (or -2 = anyone in town). Node types implemented: REGULAR, DEP_ON_SDF, SET_SDF, DEP_ON_TIME(_AND_EVENT), DEP_ON_TOWN, BUY_INFO, BUY_SDF, BUY_SPEC_ITEM, BUY_TOWN_LOC, END_FORCE/FIGHT/ALARM/DIE, SHOP, INN, TRAINING, SELL_WEAPONS/ARMOR/ITEMS, IDENTIFY, ENCHANT, RECHARGE, JOB_BANK, RECEIVE_QUEST, CALL_TOWN_SPEC, CALL_SCEN_SPEC. Still unimplemented (and saying so in the transcript rather than failing silently): BUY_SHIP, BUY_HORSE.
 
 Notes for M2 implementer:
 - The window is **605×430** (`global.hpp:30`), not 800×600 — the earlier plan text was wrong. index.html scales the canvas ×2 in CSS.
@@ -534,9 +534,9 @@ Notes for M2 implementer:
     list can never be offered while earlier ones keep winning their rolls.
   - `cSpecItem::flags` is two bits packed by *addition*: +1 useable, +10
     start-with. The C++ tests them as `flags % 10 == 1` and `flags >= 10`.
-  - Still open in this area: the JOB_BANK talk node and its board dialog (which
-    is what would call `generateJobBank`), `RECEIVE_QUEST`, and the quest pane
-    of the item window.
+  - Still open in this area: the quest pane of the item window. (The JOB_BANK
+    talk node and `RECEIVE_QUEST` landed 2026-07-28 — see the entry at the
+    bottom.)
 
 - **Using an item (M6 / M3's last leftover, 2026-07-27)**: `game/itemUse.ts`
   ports `use_item` (boe.specials.cpp:585, ~620 lines) with `poison_weapon`
@@ -1586,9 +1586,8 @@ playthrough will hit it:
 1. ~~**Party ops**: boats and horses~~ — **done** (2026-07-27), see the entry
    below. `force_town_enter` + `position_party` (a scripted teleport landing
    the party on a specific town square) are still open.
-2. **The job-bank board**: the JOB_BANK talk node and its dialog, which is the
-   only caller of `generateJobBank`; `RECEIVE_QUEST` alongside it. The data
-   behind both is ported.
+2. ~~**The job-bank board**~~ — **done** (2026-07-28), see the entry below.
+   What's left of the quest UI is the quest pane of the item window.
 3. **Alchemy** (`A`), which needs the recipe table and its two ingredients.
    (Item Use landed 2026-07-27.)
 4. **`increase_age`'s remaining upkeep**: hunger and the autosave.
@@ -1937,3 +1936,55 @@ playthrough will hit it:
     FIREWALK, FLIGHT) and their "your footsteps grow louder" messages are
     ported with them; FLIGHT's "you plummet to your deaths" is still TODO(M6),
     since it needs the outdoor terrain check.
+
+- **The job board, and quests handed over by hand (M6, 2026-07-28)**:
+  `game/jobBank.ts` ports `show_job_bank` / `fill_job_bank`
+  (boe.dlgutil.cpp:770/794) and the `RECEIVE_QUEST` arm of `handle_talk_node`
+  (:1148). The **JOB_BANK talk node opens a board** now: four offers with their
+  deadline and pay, a Take beside each, the dispatcher's mood along the bottom,
+  and taking one starts the quest. That was the only caller
+  `generateJobBank` was missing, so the M6 quest chunk from 2026-07-27 is now
+  reachable from inside the game. `RECEIVE_QUEST` — an NPC giving a quest with
+  no board behind it — landed with it. The rules live in `jobBank.ts` so they
+  can be tested headless; `main.ts` owns only the dialog, the same split
+  training uses.
+  - *Gotcha*: a board too angry to deal with the party (`anger >= 50`) doesn't
+    open at all and gives the node's str2 brush-off instead. The test reads the
+    list **without growing it**, so a board that has never been opened is never
+    angry — and since `generate_job_bank` only runs when a board is first
+    opened, anger from a missed deadline bites on the *next* refresh, not this
+    one.
+  - *Gotcha*: taking a job refills its slot from one of the two spares (slots 4
+    and 5), and the C++'s comment says "otherwise, clear space" — but there is
+    no else branch. With both spares empty, which is *every* board
+    `generate_job_bank` rolls (it fills at most four of six), the taken job
+    stays on the board and can be taken again. Kept; the second take just
+    rewrites the same job with today's date.
+  - *Gotcha*: the source recorded on a job taken from a board is the
+    **personality** of whoever is being talked to, not the board number — even
+    though `special_increase_age` then indexes `job_banks` with that source when
+    a deadline is missed. On any scenario with more than one board it angers the
+    wrong dispatcher. Kept, and commented at both ends.
+  - *Gotcha*: `RECEIVE_QUEST` on a quest the party has already **failed**
+    returns without touching the reply at all, so the previous line stays on
+    screen. The C++ has a TODO there wondering what it should do.
+  - *Worth knowing when reading the C++*: `show_job_bank` asks the resource
+    manager for a dialog named `job-bank` while the file that ships is
+    `job-board.xml`, and writes its mood line into a control called `prompt`
+    where that file's field is `feedback`. Neither could work as written; the
+    port does what the code plainly means.
+  - **A dialog fix went with it**: `Dialog`'s single-column rows never measured
+    or wrapped their labels — the panel was sized from its text and buttons
+    alone, so a prose row (a board's offer) ran off the side of the box. Rows
+    now wrap to the same width the text does and grow their own height, with
+    the two-column dense path (the training list) untouched. TODO(M3): the real
+    `job-board.xml` is a picture, a title and four framed blocks with their own
+    buttons; this is the same rules as a list, pending the dialogxml toolkit.
+  - Tests: `test/quests.test.ts` covers the offer text (both deadline
+    spellings), the four bands of the mood line, the lazy roll, the spare-slot
+    swap, and both talk nodes — driven through synthetic talk nodes, since
+    valleydy has neither type. `verify-screen.mjs` opens the board in the real
+    UI, takes the job with a keypress and checks the quest started; it pins the
+    offer rather than letting the board roll itself, because
+    `generate_job_bank` offers each quest on a 50% roll and an unpinned board
+    is empty half the time.

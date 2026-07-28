@@ -85,6 +85,8 @@ interface PlacedDialogRow extends DialogRow {
   rect: UiRect;
   /** Dense rows are too short for the 23px key button, so the key is text. */
   dense: boolean;
+  /** The label, wrapped to the column. Dense rows are always one line. */
+  lines: string[];
 }
 
 /** Rows are spaced 25px apart, as select-pc.xml lays its picks out. */
@@ -149,19 +151,34 @@ export class Dialog {
     const rowH = dense ? ROW_H_DENSE : ROW_H;
     const columns = dense ? 2 : 1;
     const rowsPerColumn = Math.ceil(rows.length / columns);
-    const rowWidth = dense
-      ? Math.max(...rows.map((row) =>
-        this.ctx.measureText(row.label).width + (row.key === undefined ? 0 : ROW_KEY_W + 6) + 12))
-      : 0;
+    /** What a row's key button and item icon take off the front of the label. */
+    const rowIndent = (row: DialogRow): number =>
+      (row.key === undefined ? 0 : dense ? this.ctx.measureText(`${row.key}. `).width : ROW_KEY_W + 6)
+      + (row.itemPic === undefined ? 0 : 22);
+    // A single-column row wraps to the same width the text does; without this
+    // a prose label (the job board's offers) runs off the side of the panel.
+    // Dense rows are short by construction and stay on one line.
+    const rowLines = rows.map((row) => (dense
+      ? [row.label]
+      : wrapLines(this.ctx, row.label, maxTextWidth - rowIndent(row), { size: TEXT_SIZE })));
+    const rowHeights = rows.map((row, i) => (dense
+      ? rowH
+      : Math.max(rowH, rowLines[i]!.length * LINE_HEIGHT + 8)));
+    const rowWidth = rows.length === 0 ? 0 : Math.max(...rows.map((row, i) =>
+      Math.max(...rowLines[i]!.map((line) => this.ctx.measureText(line).width))
+      + rowIndent(row) + 12));
 
     const innerWidth = Math.max(
       textWidth + picWidth,
       buttonsWidth,
       columns * rowWidth + (columns - 1) * PADDING,
     );
+    const rowsHeight = dense
+      ? rowsPerColumn * rowH
+      : rowHeights.reduce((a, b) => a + b, 0);
     const innerHeight =
       Math.max(this.lines.length * LINE_HEIGHT, this.spec.terPic === undefined ? 0 : 36) +
-      (rows.length > 0 ? PADDING + rowsPerColumn * rowH : 0) +
+      (rows.length > 0 ? PADDING + rowsHeight : 0) +
       PADDING +
       BUTTON_H;
 
@@ -180,14 +197,17 @@ export class Dialog {
     const colWidth = dense
       ? rowWidth
       : this.frame.right - this.frame.left - 2 * PADDING;
+    let stacked = 0;
     rows.forEach((row, i) => {
       const column = Math.floor(i / rowsPerColumn);
       const left = this.frame.left + PADDING + column * (colWidth + PADDING);
-      const top = rowsTop + (i % rowsPerColumn) * rowH;
+      const top = dense ? rowsTop + (i % rowsPerColumn) * rowH : rowsTop + stacked;
+      stacked += rowHeights[i]!;
       this.placedRows.push({
         ...row,
         dense,
-        rect: { top, left, bottom: top + rowH, right: left + colWidth },
+        lines: rowLines[i]!,
+        rect: { top, left, bottom: top + rowHeights[i]!, right: left + colWidth },
       });
     });
 
@@ -299,12 +319,16 @@ export class Dialog {
         : row.highlight
           ? Colours.LIGHT_GREEN
           : Colours.LIGHT_BLUE;
-      drawString(
-        ctx,
-        { ...label, left: textLeft2, top: label.top + (row.dense ? 3 : 5) },
-        row.label,
-        { size: TEXT_SIZE, colour },
-      );
+      let lineTop = label.top + (row.dense ? 3 : 5);
+      for (const line of row.lines) {
+        drawString(
+          ctx,
+          { ...label, left: textLeft2, top: lineTop },
+          line,
+          { size: TEXT_SIZE, colour },
+        );
+        lineTop += LINE_HEIGHT;
+      }
     }
 
     for (const btn of this.placed) {
