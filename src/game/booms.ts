@@ -22,6 +22,7 @@
  */
 
 import { Location } from '../core/location';
+import { GameRng } from '../core/rng';
 import { livingSound } from '../universe/living';
 import { animBook, paced } from './anim';
 
@@ -49,9 +50,22 @@ export function boomMs(): number {
   return paced(BOOM_MS);
 }
 
+/**
+ * `boom_type_sound` (do_explosion_anim, boe.newgraph.cpp:562) — **a different
+ * table from `SOUND_LOOKUP` above**, indexed by *boom type* rather than sound
+ * type, and the source of the one noise a whole volley makes. Playing a
+ * volley's explosions through `boom_space`'s table instead is why a fireball
+ * used to land with the wrong sound.
+ */
+const BOOM_TYPE_SOUND = [5, 10, 53, 53, 53, 75];
+
 export interface Boom {
   where: Location;
-  /** 0..6 — the column in booms.png (boom_gr's value for the damage type). */
+  /**
+   * Which explosion, from `boom_gr`. For a single hit it is the column of the
+   * one-frame sprite in row 0 of booms.png; for a volley's explosion it picks
+   * the *row* instead — see `animated`.
+   */
   type: number;
   /** Printed over the sprite; 0 prints nothing. */
   damage: number;
@@ -61,6 +75,28 @@ export interface Boom {
   starts: number;
   /** When it stops being drawn. */
   expires: number;
+  /**
+   * True for a volley's explosion: `do_explosion_anim` plays **eight frames**
+   * out of row `1 + type` of booms.png, where `boom_space` draws a single
+   * frame from row 0. The sheet holds both — one row of hit sprites and six
+   * rows of animation — and this port only ever drew the first, which is why
+   * a fireball's blast looked like a melee hit.
+   */
+  animated: boolean;
+  /**
+   * `store_booms[i].offset` — 0 for the first explosion of a volley and
+   * -1 or -2 for the rest, so a dozen of them don't pulse in lockstep.
+   */
+  offset: number;
+  /** Pixel nudges: a big creature's centre, and place_type 1's scatter. */
+  xAdj: number;
+  yAdj: number;
+  /**
+   * `place_type` — 1 scatters the explosion up to 25px off its square, which
+   * is what the fireball's own blast at the centre of the burn uses. The roll
+   * happens when the volley plays, not when it is queued.
+   */
+  placeType: number;
 }
 
 let sink: ((boom: Boom) => void) | null = null;
@@ -100,16 +136,32 @@ export function startBoomAnim(): void {
  * do_explosion_anim (boe.newgraph.cpp:556) — close the volley and play
  * everything it collected, now that the missiles have landed.
  */
-export function runBoomAnim(): void {
+export function runBoomAnim(rng?: GameRng): void {
   const toPlay = queued;
   volleyOpen = false;
   queued = [];
+  if (toPlay.length === 0) return;
   // One slot for the whole volley: `do_explosion_anim` draws every explosion
   // it collected in the same frames and sleeps once, so they land together —
   // after whatever the missiles booked, and before whatever comes next.
   const starts = animBook(boomMs());
+  // `place_type == 1` scatters an explosion around its square, rolled here
+  // (the C++ does it in the set-up loop of `do_explosion_anim`, before the
+  // sound), which is what keeps the ordering of these two rolls per explosion.
   for (const boom of toPlay) {
-    if (boom.sound > 0) livingSound(boom.sound);
+    if (boom.placeType === 1 && rng) {
+      boom.xAdj += rng.getRan(1, 0, 50) - 25;
+      boom.yAdj += rng.getRan(1, 0, 50) - 25;
+    }
+  }
+  // **One sound for the volley**, from `boom_type_sound` and the *last*
+  // explosion's type — `cur_boom_type` is left holding whatever the set-up
+  // loop saw last. A type of 6 or more finds nothing in the table and the C++
+  // then plays `play_sound(-1 * -1)`, i.e. file 1; ported as written.
+  const curBoomType = toPlay[toPlay.length - 1]!.type;
+  const file = curBoomType < 6 ? (BOOM_TYPE_SOUND[curBoomType] ?? 1) : 1;
+  if (file > 0) livingSound(file);
+  for (const boom of toPlay) {
     if (boom.type < 0 || boom.type > 6) continue;
     sink?.({ ...boom, starts, expires: starts + boomMs() });
   }
@@ -121,19 +173,27 @@ export function runBoomAnim(): void {
  */
 export function boomSpace(
   where: Location, type: number, damage: number, soundType: number,
+  rng?: GameRng,
+  options: { placeType?: number; xAdj?: number; yAdj?: number; uniqueRan?: boolean } = {},
 ): void {
+  const { placeType = 0, xAdj = 0, yAdj = 0, uniqueRan = false } = options;
   if (volleyOpen) {
-    const file = soundType < 0 ? -soundType : (SOUND_LOOKUP[soundType] ?? 0);
     // add_explosion (boe.newgraph.cpp:320) drops a second explosion on a square
     // that already has one, but takes the larger damage number, and holds 30.
+    // It raises **no sound of its own** — the volley makes one noise, in
+    // `runBoomAnim` — and it is the animated explosion, not a hit sprite.
     const already = queued.find((b) => b.where.x === where.x && b.where.y === where.y);
     if (already) {
       if (damage > already.damage) already.damage = damage;
       return;
     }
     if (queued.length >= 30) return;
+    // `offset = (i == 0) ? 0 : -1 * get_ran(1,0,2,use_unique_ran)`. The roll is
+    // part of the sequence, and it comes *after* the two early-outs above.
+    const offset = queued.length === 0 || !rng ? 0 : -rng.getRan(1, 0, 2, uniqueRan);
     queued.push({
-      where: { ...where }, type, damage, sound: file, starts: 0, expires: 0,
+      where: { ...where }, type, damage, sound: 0, starts: 0, expires: 0,
+      animated: true, offset, xAdj, yAdj, placeType,
     });
     return;
   }
@@ -149,5 +209,8 @@ export function boomSpace(
   // landing on top of it, and anything waiting on the timeline — the rest of
   // the monster's turn, the party-death announcement — waits for the blast.
   const starts = animBook(boomMs());
-  sink?.({ where: { ...where }, type, damage, sound: file, starts, expires: starts + boomMs() });
+  sink?.({
+    where: { ...where }, type, damage, sound: file, starts, expires: starts + boomMs(),
+    animated: false, offset: 0, xAdj, yAdj, placeType,
+  });
 }

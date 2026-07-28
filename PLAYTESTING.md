@@ -31,19 +31,20 @@ http://localhost:5199/?scenario=busywork
 
 ### Combat speed (a play-testing knob, not in the original)
 - **-** — slower, **=** — faster. Works mid-fight, even while the monsters are
-  going; the transcript reports the new pace (`1.00x` is the original's own
-  timing).
-- **`?pace=1`** in the URL starts at a given speed, e.g.
-  `http://localhost:5199/?pace=1`.
-- It ships at **3x** while combat is being play-tested: the view rests on each
-  monster before it acts, the bar above the map names it (`Guard (ap: 4)`) and
-  a projectile is slow enough to follow — the camera swings onto its target
-  half way through the flight.
+  going; the transcript reports the new pace.
+- **`?pace=`** in the URL starts at a given speed, e.g.
+  `http://localhost:5199/?pace=2`.
+- **1.00x is normal** — the speed settled on in play-testing, which is 0.9 of
+  the original's own timings (`PACE_BASELINE` in `src/game/anim.ts`, if you
+  ever want exactly the C++'s pace back). At normal speed the view still rests
+  on each monster before it acts, the bar above the map names it
+  (`Guard (ap: 4)`), and the camera swings onto a projectile's target half way
+  through its flight.
 - **A blow waits for its explosion.** The health only comes off, the death
   only happens and the turn only changes hands once the blast has finished
   playing, as in the original. Keys pressed during it are dropped rather than
-  queued (also as in the original), so at 3x a crowded round takes a while —
-  press `=` a couple of times if you want it brisk.
+  queued (also as in the original), so a crowded round takes real time —
+  press `=` a couple of times if you want it brisker.
 
 ### Actions
 - **F** — fight / attack at close range

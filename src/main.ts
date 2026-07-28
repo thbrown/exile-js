@@ -60,9 +60,9 @@ function scenarioFromQuery(): string {
 }
 
 /**
- * `?pace=1` runs combat at the original's own speed; larger numbers are slow
- * motion. See `combatPace` — the default is set there, and `-`/`=` change it
- * while the game is running.
+ * `?pace=` overrides the combat animation speed: 1 is normal, larger is slow
+ * motion, smaller is brisk. See `combatPace` — the default is set there, and
+ * `-`/`=` change it while the game is running.
  */
 function applyPaceFromQuery(): void {
   const q = new URLSearchParams(window.location.search).get('pace');
@@ -1033,7 +1033,7 @@ async function main(): Promise<void> {
       if (key === '-' || key === '_' || key === '=' || key === '+') {
         const slower = key === '-' || key === '_';
         setCombatPace(combatPace() * (slower ? 1.5 : 1 / 1.5));
-        univ.addStringToBuf(`(Combat pace: ${combatPace().toFixed(2)}x, 1 = original)`);
+        univ.addStringToBuf(`(Combat pace: ${combatPace().toFixed(2)}x, 1 = normal)`);
         redraw();
         return;
       }

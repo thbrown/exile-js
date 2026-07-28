@@ -38,17 +38,29 @@ export const TICK_MS = 1000 / 60;
 
 /**
  * **A play-testing knob that is not in the original.** Every animation length
- * below is multiplied by this, so `1` is the faithful speed and larger numbers
- * are slow motion. The original's own answer to "combat is too fast" is the
- * GameSpeed preference, which only stretches one of the pauses (see
- * `MONSTER_DWELL_TICKS`); this stretches all of them together, which is what
- * you want while checking that a monster's turn does what it should.
+ * below is multiplied by it: bigger is slower, smaller is faster, and `-`/`=`
+ * in the running game move it in steps (`setCombatPace`).
  *
- * Left at 3 while combat is being play-tested. Set it back to 1 — or press
- * `-`/`=` in the running game, which is `setCombatPace` — once a fight reads
- * correctly at speed.
+ * **`1` is the pace this game settled on in play-testing, not the C++'s own.**
+ * The two are close: `PACE_BASELINE` below is the ratio, and it came out at
+ * 0.9 — a shade quicker than the original — after watching fights at a range
+ * of speeds. Indexing the knob to the chosen speed rather than to the
+ * original's keeps the number a player sees meaningful ("1 is normal"); the
+ * divergence lives in one named constant instead of in everybody's head.
+ *
+ * The original's own answer to "combat is too fast" is the GameSpeed
+ * preference, which only stretches one of the pauses (see
+ * `MONSTER_DWELL_TICKS`); this stretches all of them together.
  */
-const DEFAULT_COMBAT_PACE = 3;
+const DEFAULT_COMBAT_PACE = 1;
+
+/**
+ * What a pace of `1` is worth against the C++'s timings. Set this to 1 to run
+ * a fight at exactly the original's speed — every constant in this file is the
+ * C++'s own number, so that really is the faithful setting; this is the
+ * play-tested taste on top of it.
+ */
+const PACE_BASELINE = 0.9;
 
 let pace = DEFAULT_COMBAT_PACE;
 
@@ -57,12 +69,12 @@ export function combatPace(): number {
 }
 
 export function setCombatPace(value: number): void {
-  pace = Math.max(0.25, Math.min(10, value));
+  pace = Math.max(0.1, Math.min(10, value));
 }
 
-/** A faithful duration in ms, stretched by the current play-testing pace. */
+/** A faithful duration in ms, at the current pace. */
 export function paced(ms: number): number {
-  return ms * pace;
+  return ms * pace * PACE_BASELINE;
 }
 
 /** When the next animation should start. Never earlier than now. */

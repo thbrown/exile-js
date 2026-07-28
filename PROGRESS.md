@@ -1824,3 +1824,50 @@ playthrough will hit it:
     health is untouched while the blast is on screen and lands when it clears,
     a monster dies after its own blast, and the active PC does not change
     until the swing has finished playing.
+
+- **A volley's explosion is a different animation *and* a different sound
+  table (2026-07-27).** Play-test report: a fireball's impact is "not the same
+  graphic or sound as in the original". Both halves were real, and both come
+  from the same mistake — treating `do_explosion_anim` as a row of
+  `boom_space` hits.
+  - **booms.png holds two things.** Row 0 is the one-frame hit sprites, a
+    column per `boom_gr` type — that is what `boom_space` draws
+    (boe.graphics.cpp:1553). Rows 1..6 are **eight-frame explosions**, one row
+    per boom type, and that is what `do_explosion_anim` plays
+    (`28 * (t + offset)`, `36 * (1 + boom_type)`, boe.newgraph.cpp:636). This
+    port drew everything with row 0, so a fireball landed like a punch. `Boom`
+    now carries `animated`, and the renderer steps the frame from the blast's
+    own elapsed time, drawing nothing once `t + offset` leaves 0..7 — the tail
+    of the C++'s `t < 11` loop.
+  - **One sound for the volley, from the other table.** `do_explosion_anim`
+    plays `boom_type_sound[cur_boom_type]` = `{5,10,53,53,53,75}` once, on the
+    *last* explosion's type; `add_explosion` raises nothing. This port played
+    `sound_lookup[...]` per queued hit — `boom_space`'s table, indexed by
+    sound type rather than boom type — so a fireball made several of the wrong
+    noise. Measured after the fix: `[11, 5]`, the missile's launch and the
+    fire explosion, which is what the C++ plays.
+  - **The stagger, and the RNG that goes with it.** `add_explosion` rolls
+    `offset = (i == 0) ? 0 : -get_ran(1,0,2)` so a dozen explosions don't
+    pulse in lockstep, and `do_explosion_anim` rolls two more per `place_type
+    1` explosion to scatter it around its square. Both are ported, which means
+    `boomSpace`/`runBoomAnim` now take a `GameRng` — those rolls are part of
+    the sequence.
+  - **The fireball's own blast at the centre.** `ashes_loc` (boe.combat.cpp:
+    1425) — the fire spells mark the middle of the burn and add an explosion
+    there if none of the mass damage already lit it, so the scorch always has
+    a blast over it. Ported for FIREBALL/FLAMESTRIKE, FIRESTORM and
+    DIVINE_THUD, including the `use_unique_ran` flag the C++ passes so the
+    extra roll can't shift an older replay. TODO(M6): `set_ash` itself, the
+    scorch mark left on the ground.
+  - Also ported while here: `add_explosion`'s `14 * (x_width - 1)` /
+    `18 * (y_width - 1)` nudge, which centres a blast on a big creature
+    instead of on its top-left square.
+
+- **The pace knob is indexed to the play-tested speed, not the C++'s
+  (2026-07-27).** After watching fights at several settings the one that read
+  best was 0.9 of the original's timings, so `1` now *means* that: `paced()`
+  multiplies by `PACE_BASELINE = 0.9` as well as the knob, and the default
+  knob position is 1. The point is that the number a player sees stays
+  meaningful — 1 is normal, 2 is slow motion — while the divergence from the
+  original lives in one named constant. Set `PACE_BASELINE` to 1 for exactly
+  the C++'s speed; every other constant in `anim.ts` is already its number.

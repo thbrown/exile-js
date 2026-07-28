@@ -237,23 +237,28 @@ describe('monst_fire_missile dispatch', () => {
  * same *order* as a fast one, and that `1` is still the faithful timing.
  */
 describe('the combat pace knob', () => {
-  it('scales every animation length together, and 1 is the original', async () => {
+  it('scales every animation length together', async () => {
     const original = combatPace();
     try {
+      // Pace 1 is the play-tested speed, not the C++'s own: `PACE_BASELINE`
+      // sits between them, so what is pinned here is the *ratio* between
+      // settings, and that each length stays in the neighbourhood of its C++
+      // constant rather than drifting off it.
       setCombatPace(1);
-      expect(actionPauseMs()).toBeCloseTo(ACTION_PAUSE_MS);
-      expect(boomMs()).toBe(BOOM_MS);
-      const dwell = monsterPauseMs();
-      // A missile carries its own extra slowdown on top of the shared pace —
-      // it crosses the whole view in one hop — so it is pinned by its ratio
-      // rather than by the faithful constant.
+      const beat = actionPauseMs();
       const flight = missileMs();
+      const blast = boomMs();
+      const dwell = monsterPauseMs();
+      expect(beat).toBeGreaterThan(ACTION_PAUSE_MS / 2);
+      expect(beat).toBeLessThanOrEqual(ACTION_PAUSE_MS);
+      expect(blast).toBeGreaterThan(BOOM_MS / 2);
+      expect(blast).toBeLessThanOrEqual(BOOM_MS);
       expect(flight).toBeGreaterThanOrEqual(MISSILE_MS);
 
       setCombatPace(4);
-      expect(actionPauseMs()).toBeCloseTo(ACTION_PAUSE_MS * 4);
+      expect(actionPauseMs()).toBeCloseTo(beat * 4);
       expect(missileMs()).toBeCloseTo(flight * 4);
-      expect(boomMs()).toBe(BOOM_MS * 4);
+      expect(boomMs()).toBeCloseTo(blast * 4);
       expect(monsterPauseMs()).toBeCloseTo(dwell * 4);
     } finally {
       setCombatPace(original);
@@ -269,7 +274,7 @@ describe('the combat pace knob', () => {
       setMissileSink((m) => { seen.push(m); });
       runAMissile({ x: 9, y: 9 }, { x: 5, y: 5 }, 3, 0, 0);
       setMissileSink(null);
-      expect(seen[0]!.dur).toBe(missileMs());
+      expect(seen[0]!.dur).toBeCloseTo(missileMs());
       // The turn waits on the queue, so the booking has to be the paced
       // length too — otherwise the slowdown would be drawing only.
       expect(animPending()).toBeGreaterThan(MISSILE_MS);

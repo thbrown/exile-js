@@ -207,7 +207,7 @@ export async function damagePc(
     if (howMuch < 0) howMuch = 0;
     pc.markedDamage += howMuch;
     boomSpace(hitLocation(univ, pc), boomType(damType), howMuch,
-      getSoundType(damType, options.soundType ?? -1));
+      getSoundType(damType, options.soundType ?? -1), univ.rng);
     return howMuch;
   }
 
@@ -223,7 +223,7 @@ export async function damagePc(
   if (doPrint) univ.addStringToBuf(`  ${pc.name} takes ${howMuch}.`);
   if (damType !== DamageType.MARKED && boom) {
     boomSpace(hitLocation(univ, pc), boomType(damType), howMuch,
-      getSoundType(damType, options.soundType ?? -1));
+      getSoundType(damType, options.soundType ?? -1), univ.rng);
     // `boom_space`'s sleep. Nothing below here — the health, the death, the
     // "is dead" line — happens until the blast has been seen.
     await animSettle();
@@ -374,7 +374,10 @@ export async function damageMonst(
   if (boomAnimActive()) {
     if (howMuch < 0) howMuch = 0;
     victim.markedDamage += howMuch;
-    boomSpace(victim.curLoc, boomType(damType), howMuch, getSoundType(damType));
+    // add_explosion nudges a big creature's blast to its middle
+    // (boe.specials.cpp:1507); a 1x1 monster gets no offset at all.
+    boomSpace(victim.curLoc, boomType(damType), howMuch, getSoundType(damType), univ.rng,
+      { xAdj: 14 * (victim.xWidth - 1), yAdj: 18 * (victim.yWidth - 1) });
     return howMuch;
   }
 
@@ -387,7 +390,7 @@ export async function damageMonst(
   if (doPrint) victim.damagedMsg(howMuch, 0);
   if (damType !== DamageType.MARKED) {
     boomSpace(victim.curLoc, boomType(damType), howMuch,
-      getSoundType(damType, options.soundType ?? -1));
+      getSoundType(damType, options.soundType ?? -1), univ.rng);
     // The blast blocks here in the C++, so the health only comes off — and
     // the thing only dies — once it has played. See `damagePc`.
     await animSettle();

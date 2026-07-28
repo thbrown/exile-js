@@ -1597,7 +1597,7 @@ export class GameSession {
       await hit(r1, DamageType.COLD);
       // The C++ booms on the *party's* square, not the one stepped into, and
       // only outside combat. Kept.
-      if (!isCombat(this.mode)) boomSpace(this.univ.party.townLoc, 4, r1, 7);
+      if (!isCombat(this.mode)) boomSpace(this.univ.party.townLoc, 4, r1, 7, this.univ.rng);
     }
     if (town.hasField(where.x, where.y, FieldType.WALL_BLADES)) {
       say('  Blade wall!');

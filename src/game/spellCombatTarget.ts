@@ -15,7 +15,7 @@
  *   spells that fly at a square, and spells that need somebody standing there.
  */
 
-import { Location, dist } from '../core/location';
+import { Location, dist, locsEqual } from '../core/location';
 import { FieldType } from '../data/fields';
 import { DamageType } from '../data/monster';
 import { SpellPat } from '../data/pattern';
@@ -28,14 +28,14 @@ import { livingSound } from '../universe/living';
 import { Player } from '../universe/player';
 import { Race, Skill, Status, Trait } from '../universe/skills';
 import { takeAp } from './combat';
-import { damageMonst, damagePc, handleMarkedDamage, hitChance } from './damage';
+import { boomType, damageMonst, damagePc, handleMarkedDamage, hitChance } from './damage';
 import { targetThere } from './missiles';
 import { GameMode } from './modes';
 import { getSummonMonster, summonMonster } from './monsterPlace';
 import { Attitude } from '../data/monster';
 import { animSettle } from './anim';
 import { runAMissile } from './missileAnim';
-import { runBoomAnim, startBoomAnim } from './booms';
+import { boomSpace, runBoomAnim, startBoomAnim } from './booms';
 import { hitSpace } from './processFields';
 import { placeSpellPattern } from './spellPatterns';
 import { makeTownHostile } from './townAttitude';
@@ -322,6 +322,9 @@ export async function doCombatCast(session: GameSession, target: Location): Prom
    * a volley of arrows lands together rather than one at a time.
    */
   const deferred: { at: Location; type: DamageType; dam: number }[] = [];
+  // `ashes_loc` — the fire spells mark the middle of the burn, so that the
+  // scorch they leave has a blast over it even when nothing there was hurt.
+  const ashes: { at: Location | null } = { at: null };
   /**
    * `store_missiles` and `store_sound`. Most arms only queue their projectile
    * and let the shared `do_missile_anim` at the end of `do_combat_cast` fly it;
@@ -375,7 +378,7 @@ export async function doCombatCast(session: GameSession, target: Location): Prom
     }
 
     await resolveOne(session, spell, at, i, {
-      pattern: armed.pattern, level, bonus, who, rng, min, deferred, missiles, shared,
+      pattern: armed.pattern, level, bonus, who, rng, min, deferred, missiles, shared, ashes,
     });
   }
 
@@ -388,6 +391,20 @@ export async function doCombatCast(session: GameSession, target: Location): Prom
   // calls sit between do_missile_anim and do_explosion_anim (:1412 and :1435).
   for (const d of deferred) {
     await hitSpace(session, d.at, d.dam, d.type, 1, 0, who);
+  }
+
+  // "If ashes are going to appear, there'd better be a visible blast on the
+  // spot" (boe.combat.cpp:1425). Only when none of the mass damage above
+  // already lit that square. The roll it would make comes off the *unique*
+  // stream, which the C++ does deliberately so the extra explosion can't
+  // shift an older replay's dice.
+  if (ashes.at !== null) {
+    const alreadyLit = deferred.some((d) => d.dam > 0 && locsEqual(d.at, ashes.at!));
+    if (!alreadyLit) {
+      boomSpace(ashes.at, boomType(DamageType.FIRE), 0, 0, univ.rng,
+        { xAdj: 1, uniqueRan: true });
+    }
+    // TODO(M6): `set_ash` — the scorch mark the fire leaves on the ground.
   }
   } finally {
     // do_explosion_anim, then handle_marked_damage (boe.combat.cpp:1435/1439):
@@ -418,6 +435,7 @@ async function resolveOne(
     pattern: SpellPat; level: number; bonus: number; who: number;
     rng: GameSession['univ']['rng']; min: typeof Math.min;
     deferred: { at: Location; type: DamageType; dam: number }[];
+    ashes: { at: Location | null };
     missiles: QueuedMissile[];
     shared: { sound: number };
   },
@@ -426,7 +444,7 @@ async function resolveOne(
   const town = univ.town;
   if (!town) return;
   const caster = univ.currentPc;
-  const { pattern: pat, level, bonus, who, rng, min, deferred, missiles, shared } = ctx;
+  const { pattern: pat, level, bonus, who, rng, min, deferred, missiles, shared, ashes } = ctx;
 
   /** add_missile aimed at this square. */
   const missile = (type: number, xAdj = 0, yAdj = 0): void => {
@@ -502,6 +520,7 @@ async function resolveOne(
       shared.sound = 11;
       await blast(DamageType.MAGIC, min(18, Math.trunc((level * 7) / 10) + 2 * bonus),
         SpellPat.RADIUS_2);
+      ashes.at = { ...target };
       return;
     case Spell.SPARK:
     case Spell.ICE_BOLT: {
@@ -551,6 +570,7 @@ async function resolveOne(
       else if (dam > 10) dam = Math.trunc((dam * 8) / 10);
       if (dam <= 0) dam = 1;
       await blast(DamageType.FIRE, dam, SpellPat.SQUARE);
+      ashes.at = { ...target };
       return;
     }
     case Spell.FIRESTORM:
@@ -562,6 +582,8 @@ async function resolveOne(
       if (dam > 20) dam = Math.trunc((dam * 8) / 10);
       await blast(spell === Spell.FIRESTORM ? DamageType.FIRE : DamageType.COLD,
         dam, SpellPat.RADIUS_2);
+      // Only the fire half scorches the ground.
+      if (spell === Spell.FIRESTORM) ashes.at = { ...target };
       return;
     }
     case Spell.KILL:

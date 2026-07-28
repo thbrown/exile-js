@@ -911,10 +911,27 @@ export class Screen {
       const q = boom.where.x - center.x + TER_VIEW_CENTER;
       const row = boom.where.y - center.y + TER_VIEW_CENTER;
       if (q < 0 || row < 0 || q >= TER_VIEW_TILES || row >= TER_VIEW_TILES) continue;
-      const pos = terrainSpotPos(q, row);
+      const base = terrainSpotPos(q, row);
+      const pos = { x: base.x + boom.xAdj, y: base.y + boom.yAdj };
+      // booms.png is one row of single-frame hit sprites (row 0, a column per
+      // `boom_gr` type) and six rows of eight-frame explosions under it. A
+      // blow uses the first, a volley the second — `boom_space` versus
+      // `do_explosion_anim`, and drawing every hit with the first is what made
+      // a fireball land like a punch.
+      let src: { col: number; row: number } | null = { col: boom.type, row: 0 };
+      if (boom.animated) {
+        // `for(t = 0; t < 11; t++)` with the sprite drawn while
+        // `t + offset` is in 0..7 — the tail of the loop is the frames after
+        // this explosion's own have run out.
+        const span = Math.max(1, boom.expires - boom.starts);
+        const t = Math.min(10, Math.floor(((now - boom.starts) / span) * 11));
+        const col = t + boom.offset;
+        src = col >= 0 && col <= 7 ? { col, row: 1 + boom.type } : null;
+      }
+      if (src === null) continue;
       if (img) {
         this.ctx.drawImage(
-          img, boom.type * TILE_W, 0, TILE_W, TILE_H,
+          img, src.col * TILE_W, src.row * TILE_H, TILE_W, TILE_H,
           pos.x, pos.y, TILE_W, TILE_H,
         );
       }
