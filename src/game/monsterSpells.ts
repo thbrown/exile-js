@@ -335,7 +335,7 @@ export async function monstCastMage(
   };
 
   switch (spell) {
-    case Spell.SPARK: hit(rng.getRan(2, 1, 4), DamageType.MAGIC); break;
+    case Spell.SPARK: await hit(rng.getRan(2, 1, 4), DamageType.MAGIC); break;
     case Spell.HASTE_MINOR: livingSound(25); caster.slow(-2); break;
     case Spell.STRENGTH: livingSound(25); caster.curse(-3); break;
     case Spell.CLOUD_FLAME:
@@ -343,7 +343,7 @@ export async function monstCastMage(
         { field: FieldType.WALL_FIRE, whoHit: 7 });
       break;
     case Spell.FLAME:
-      hit(rng.getRan(Math.min(15, caster.getLevel()), 1, 4), DamageType.FIRE);
+      await hit(rng.getRan(Math.min(15, caster.getLevel()), 1, 4), DamageType.FIRE);
       break;
     case Spell.POISON_MINOR:
       victim?.poison(2 + rng.getRan(1, 0, Math.trunc(caster.getLevel() / 2)), rng);
@@ -392,7 +392,7 @@ export async function monstCastMage(
       victim?.poison(4 + rng.getRan(1, 0, Math.trunc(caster.getLevel() / 2)), rng);
       break;
     case Spell.ICE_BOLT:
-      hit(rng.getRan(5 + Math.trunc(caster.getLevel() / 5), 1, 8), DamageType.COLD);
+      await hit(rng.getRan(5 + Math.trunc(caster.getLevel() / 5), 1, 8), DamageType.COLD);
       break;
     case Spell.SLOW_GROUP: {
       livingSound(25);
@@ -433,7 +433,7 @@ export async function monstCastMage(
       victim?.poison(6 + rng.getRan(1, 1, 2), rng);
       break;
     case Spell.KILL:
-      hit(35 + rng.getRan(3, 1, 10), DamageType.MAGIC);
+      await hit(35 + rng.getRan(3, 1, 10), DamageType.MAGIC);
       break;
     case Spell.DEMON:
       livingSound(25);
@@ -515,7 +515,7 @@ export async function monstCastPriest(
       caster.attitude, caster.isFriendly, true);
 
   switch (spell) {
-    case Spell.WRACK: hit(rng.getRan(2, 1, 4), DamageType.UNBLOCKABLE); break;
+    case Spell.WRACK: await hit(rng.getRan(2, 1, 4), DamageType.UNBLOCKABLE); break;
     case Spell.GOO:
       livingSound(24);
       await placeSpellPattern(session, SpellPat.SINGLE, victLoc,
@@ -527,7 +527,7 @@ export async function monstCastPriest(
       livingSound(4);
       break;
     case Spell.CURSE: victim?.curse(2 + rng.getRan(1, 0, 1)); break;
-    case Spell.WOUND: hit(rng.getRan(2, 1, 6) + 2, DamageType.UNBLOCKABLE); break;
+    case Spell.WOUND: await hit(rng.getRan(2, 1, 6) + 2, DamageType.UNBLOCKABLE); break;
     case Spell.SUMMON_SPIRIT: case Spell.SUMMON_GUARDIAN:
       livingSound(24);
       summon1(spell === Spell.SUMMON_SPIRIT ? 125 : 122, 3);
@@ -544,7 +544,7 @@ export async function monstCastPriest(
         victim?.curse(rng.getRan(1, 0, 2));
       }
       break;
-    case Spell.SMITE: hit(rng.getRan(4, 1, 6) + 2, DamageType.COLD); break;
+    case Spell.SMITE: await hit(rng.getRan(4, 1, 6) + 2, DamageType.COLD); break;
     case Spell.STICKS_TO_SNAKES: {
       livingSound(24);
       const n = rng.getRan(1, 1, 4) + 2;
@@ -615,7 +615,7 @@ export async function monstCastPriest(
       break;
     case Spell.UNHOLY_RAVAGING: {
       const r2 = rng.getRan(1, 0, 2);
-      hit(rng.getRan(4, 1, 8), DamageType.MAGIC);
+      await hit(rng.getRan(4, 1, 8), DamageType.MAGIC);
       victim?.slow(6);
       victim?.poison(5 + r2, rng);
       break;

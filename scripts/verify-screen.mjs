@@ -649,6 +649,34 @@ const roam = await page.evaluate(async () => {
 });
 console.log('ROAMED:', JSON.stringify(roam));
 
+// 4a. Looking around outdoors must not blank the world. Ending a look calls
+// the "put the view back" helper, which used to recentre on `town_loc` — a
+// coordinate from the last town, or from a combat arena — and the whole 9x9
+// window went black until the party moved.
+await press('l');
+await page.waitForTimeout(80);
+await press('ArrowRight');
+await page.waitForTimeout(120);
+const lookOut = await page.evaluate(async () => {
+  const s = window.__session;
+  const univ = s.univ;
+  const scr = await import('/src/render/screen.ts');
+  const dim = Math.min(96, 48 * univ.scenario.outWidth);
+  let drawn = 0;
+  for (let q = 0; q < 9; q++)
+    for (let r = 0; r < 9; r++) {
+      const x = s.center.x + q - 4;
+      const y = s.center.y + r - 4;
+      if (scr.canDrawTerrainSpot(s, x, y, dim, dim)) drawn++;
+    }
+  window.__redraw();
+  return {
+    drawn, mode: s.mode, centre: { ...s.center }, party: { ...univ.party.outLoc },
+    tail: univ.transcript.slice(-2),
+  };
+});
+console.log('LOOK OUTDOORS:', JSON.stringify(lookOut));
+
 // 4b. The map again, outdoors — a different branch of draw_map (the sector
 // window, offset by the party's quadrant of the 96x96 outdoor block).
 await press('a');
@@ -1316,19 +1344,24 @@ const combatSpell = await page.evaluate(async () => {
 
   // Now the spell itself, at a monster three squares east.
   sc.missiles.length = 0;
+  // Recorded as they launch: a cast waits for its own explosion now, so by
+  // the time it returns the renderer has swept the sky clean.
+  const flew = [];
+  window.__watchAnim((m) => flew.push({ type: m.type, from: m.from, dest: m.dest }), null);
   const at = { x: pc.combatPos.x + 3, y: pc.combatPos.y };
   const monst = s.univ.town.monsters.find((m) => m.isAlive);
   if (monst) { monst.curLoc = { ...at }; monst.attitude = 2; }
   const hpBefore = monst ? monst.health : null;
   tgt.startSpellTargeting(s, sp.Spell.FLAME, false, 1);
   await tgt.doCombatCast(s, at);
+  window.__watchAnim(null, null);
   window.__redraw();
   return {
     scroll: { shift, moved, before, scrolled },
     scrolledView,
     hpBefore,
     hpAfter: monst ? monst.health : null,
-    missiles: sc.missiles.map((m) => ({ type: m.type, from: m.from, dest: m.dest })),
+    missiles: flew,
   };
 });
 console.log('COMBAT SPELL:', JSON.stringify(combatSpell));
@@ -1475,6 +1508,13 @@ const encounterOut = await page.evaluate(async () => {
     monsters: univ.town ? univ.town.monsters.filter((m) => m.isAlive).length : 0,
     arena: s.arena ? s.arena.name : null,
     pcPlaced: { ...univ.party.pcs[0].combatPos },
+    // `hor_vert_place` — the wedge the party forms up in, as offsets from the
+    // first PC: one in front, two behind, three across the back. This used to
+    // be a 2x3 block invented in outCombat.ts.
+    wedge: univ.party.pcs.map((p) => ({
+      dx: p.combatPos.x - univ.party.pcs[0].combatPos.x,
+      dy: p.combatPos.y - univ.party.pcs[0].combatPos.y,
+    })),
     monstY: univ.town ? [...new Set(univ.town.monsters.filter((m) => m.isAlive)
       .map((m) => m.curLoc.y))].sort((a, b) => a - b) : [],
     tail: univ.transcript.slice(-3),
@@ -1511,6 +1551,8 @@ const ok =
     encounterOut.started === true &&
     encounterOut.combatType === 0 &&
     encounterOut.monsters >= 15 &&
+    JSON.stringify(encounterOut.wedge) === JSON.stringify(
+      [[0, 0], [-1, 1], [1, 1], [-2, 2], [0, 2], [2, 2]].map(([dx, dy]) => ({ dx, dy }))) &&
     encounterEnd.refused === false &&
     encounterEnd.ended === true &&
     encounterEnd.mode === 0)) &&
@@ -1551,6 +1593,9 @@ const ok =
   (sign.skipped === true || (sign.readable === true && signShown.dialogOpen === true)) &&
   outdoors.inTown === false &&
   roam.moves > 0 &&
+  // The world is still there after a look, and the view is back on the party.
+  lookOut.drawn > 0 &&
+  lookOut.centre.x === lookOut.party.x && lookOut.centre.y === lookOut.party.y &&
   (combat.skipped === true || (combat.mode === 9 && combat.placed > 1
     && combat.hurt > 0 && combatEnd.ended === true && combatEnd.mode === 1
     && combatEnd.placed === 0)) &&

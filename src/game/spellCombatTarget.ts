@@ -412,7 +412,14 @@ export async function doCombatCast(session: GameSession, target: Location): Prom
     // `finally` because a handler that throws must not leave the volley open —
     // every later boom in the session would be swallowed, and the damage with
     // it.
-    runBoomAnim();
+    runBoomAnim(univ.rng);
+    // `do_explosion_anim` blocks for the whole explosion before
+    // `handle_marked_damage` runs (boe.combat.cpp:1435/1439). Without this
+    // wait the cast returned while its blast was still on screen: the damage
+    // it stood for landed early, and — the visible half — the camera, which
+    // the missile had swung onto the target, was yanked back to the caster
+    // over the top of the explosion.
+    await animSettle();
     await handleMarkedDamage(univ, session);
   }
 

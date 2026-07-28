@@ -278,3 +278,50 @@ describe('the animation timeline', () => {
     expect(animPending()).toBe(0);
   });
 });
+
+/**
+ * "Protection, etc." (boe.actions.cpp:3451) — the protections tick down on
+ * *every* turn, in town and on the road, not only during a combat round. This
+ * port decayed them only in `combat_run_monst`, so Resist Magic cast in a
+ * fight was still up long after the fight, out in the wilderness.
+ */
+describe('the protections wearing off', () => {
+  it('decays magic resistance and its neighbours every turn', async () => {
+    const s = inTown();
+    const pc = s.univ.party.pcs[0]!;
+    pc.status[Status.MAGIC_RESISTANCE] = 8;
+    pc.status[Status.INVISIBLE] = 5;
+    pc.status[Status.MARTYRS_SHIELD] = 3;
+    const at = s.univ.party.townLoc;
+    await s.moveTo({ x: at.x, y: at.y + 1 });
+    expect(pc.status[Status.MAGIC_RESISTANCE]).toBe(7);
+    expect(pc.status[Status.INVISIBLE]).toBe(4);
+    expect(pc.status[Status.MARTYRS_SHIELD]).toBe(2);
+  });
+
+  it('runs down to nothing over enough turns, outdoors too', async () => {
+    const s = inTown();
+    const pc = s.univ.party.pcs[0]!;
+    pc.status[Status.MAGIC_RESISTANCE] = 4;
+    for (let i = 0; i < 6; i++) {
+      const at = s.univ.party.getLoc();
+      await s.moveTo({ x: at.x, y: at.y + (i % 2 ? 1 : -1) });
+    }
+    expect(pc.status[Status.MAGIC_RESISTANCE]).toBe(0);
+  });
+
+  /**
+   * The C++'s `if` has no braces, so it guards only the first `move_to_zero`
+   * — on the turn any of the six is about to expire, INVULNERABLE is decayed
+   * twice. Ported as written, and pinned here so it can't be "tidied".
+   */
+  it('decays invulnerability twice on the turn something else expires', async () => {
+    const s = inTown();
+    const pc = s.univ.party.pcs[0]!;
+    pc.status[Status.INVULNERABLE] = 5;
+    pc.status[Status.INVISIBLE] = 1; // about to run out: the quirk's trigger
+    const at = s.univ.party.townLoc;
+    await s.moveTo({ x: at.x, y: at.y + 1 });
+    expect(pc.status[Status.INVULNERABLE]).toBe(3);
+  });
+});

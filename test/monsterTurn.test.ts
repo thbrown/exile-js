@@ -175,11 +175,29 @@ describe('a monster taking its turn', () => {
     pc.traits[Trait.PACIFIST] = true;
     monst.active = CreatureStatus.ALERTED;
     monst.curLoc = loc(pc.combatPos.x + 2, pc.combatPos.y);
+    const before = monst.health;
 
     await doMonsterTurn(session);
 
+    // It walked up to them and took nothing for it. (Parry itself is *not*
+    // what to assert on here: the turn ends with everyone's guard cleared,
+    // which is `do_monster_turn`'s own last act.)
     expect(monstAdjacent(monst, pc.combatPos)).toBe(true);
-    expect(pc.parry).toBe(100);
+    expect(monst.health).toBe(before);
+    expect(univ.transcript.some((l) => l.includes(`${pc.name} swings`))).toBe(false);
+  });
+
+  it('a guard lasts one round: the monsters\' turn clears it', async () => {
+    const { univ, session, monst } = combatWithOne();
+    const pc = univ.party.pcs[0]!;
+    pc.parry = 40;
+    monst.active = CreatureStatus.ALERTED;
+
+    await doMonsterTurn(session);
+
+    // `for(cPlayer& pc : univ.party) pc.parry = 0` — without it a parry's
+    // damage reduction and to-hit bonus stayed up for the whole fight.
+    expect(pc.parry).toBe(0);
   });
 
   it('monsterAttack rolls each of its attacks', async () => {

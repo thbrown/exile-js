@@ -374,10 +374,8 @@ export async function damageMonst(
   if (boomAnimActive()) {
     if (howMuch < 0) howMuch = 0;
     victim.markedDamage += howMuch;
-    // add_explosion nudges a big creature's blast to its middle
-    // (boe.specials.cpp:1507); a 1x1 monster gets no offset at all.
     boomSpace(victim.curLoc, boomType(damType), howMuch, getSoundType(damType), univ.rng,
-      { xAdj: 14 * (victim.xWidth - 1), yAdj: 18 * (victim.yWidth - 1) });
+      bigCreatureAdj(victim));
     return howMuch;
   }
 
@@ -390,7 +388,7 @@ export async function damageMonst(
   if (doPrint) victim.damagedMsg(howMuch, 0);
   if (damType !== DamageType.MARKED) {
     boomSpace(victim.curLoc, boomType(damType), howMuch,
-      getSoundType(damType, options.soundType ?? -1), univ.rng);
+      getSoundType(damType, options.soundType ?? -1), univ.rng, bigCreatureAdj(victim));
     // The blast blocks here in the C++, so the health only comes off — and
     // the thing only dies — once it has played. See `damagePc`.
     await animSettle();
@@ -648,6 +646,22 @@ export async function handleMarkedDamage(
       await damageMonst(univ, monst, univ.curPc, marked, DamageType.MARKED, { session });
     }
   }
+}
+
+/**
+ * Where a blast sits on a creature bigger than one square. `boom_space` looks
+ * up whatever monster is on the square it was handed and shifts the sprite by
+ * `14 * (x_width - 1)` / `18 * (y_width - 1)` (boe.graphics.cpp:1541), which
+ * is half a tile per extra column and row — i.e. onto the creature's middle.
+ * `add_explosion` is passed the same thing (boe.specials.cpp:1507).
+ *
+ * Done at the call site rather than inside `boomSpace`, which has no way to
+ * ask what is standing there; every caller that could be aiming at a big
+ * creature has the creature in hand. Without it a bear takes its damage
+ * number on its top-left square, which reads as "to the left of the bear".
+ */
+function bigCreatureAdj(victim: Creature): { xAdj: number; yAdj: number } {
+  return { xAdj: 14 * (victim.xWidth - 1), yAdj: 18 * (victim.yWidth - 1) };
 }
 
 /** The explosion graphic a damage type uses, for whoever draws it. */

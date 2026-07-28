@@ -31,7 +31,7 @@ import type { Item } from '../data/item';
  * cardinal (hor_vert_place) and a diagonal (diag_place) facing —
  * boe.combat.cpp:77. Index 0 is where the party itself stood.
  */
-const HOR_VERT_PLACE: Location[] = [
+export const HOR_VERT_PLACE: Location[] = [
   loc(0, 0), loc(-1, 1), loc(1, 1), loc(-2, 2), loc(0, 2),
   loc(2, 2), loc(0, 1), loc(-1, 2), loc(1, 2), loc(-1, 3),
   loc(1, 3), loc(0, 3), loc(0, 4), loc(0, 5),

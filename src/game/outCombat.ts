@@ -19,7 +19,7 @@ import { defaultTownperson } from '../data/town';
 import { Status } from '../universe/skills';
 import { Universe } from '../universe/universe';
 import { GameMode } from './modes';
-import { NO_ONE, pickNextPc, setPcMoves } from './combat';
+import { NO_ONE, pickNextPc, setPcMoves, HOR_VERT_PLACE } from './combat';
 import type { GameSession } from './session';
 
 /** The 48×48 arena's dimension (AREA_MEDIUM). */
@@ -29,10 +29,6 @@ export const ARENA_DIM = 48;
 const OUT_START_LOC = loc(20, 27);
 
 /** hor_vert_place — the six PC offsets from that square. */
-const HOR_VERT_PLACE: Location[] = [
-  loc(0, 0), loc(1, 0), loc(0, 1), loc(1, 1), loc(0, 2), loc(1, 2),
-];
-
 /** `ter_base` — the ground each arena kind is floored with. */
 const TER_BASE = [
   2, 0, 36, 50, 71, 0, 0, 0, 0, 2,
@@ -281,6 +277,10 @@ export function startOutdoorCombat(
 
   // Place the party, carving a hole in anything that blocks the square.
   univ.party.pcs.forEach((pc, i) => {
+    // `hor_vert_place` — the same wedge town combat forms up in: one in
+    // front, two behind, three across the back. This used to be a 2x3 block
+    // invented here, which put the party in the wrong shape (and, being two
+    // squares wide, funnelled them).
     const offset = HOR_VERT_PLACE[i] ?? loc(0, 0);
     pc.combatPos = loc(OUT_START_LOC.x + offset.x, OUT_START_LOC.y + offset.y);
     if (blockage(univ, arenaTown, pc.combatPos) > 0) {

@@ -384,7 +384,14 @@ async function main(): Promise<void> {
    */
   const getItems = async (): Promise<void> => {
     if (dialogs.active) return;
-    const reachable = session.reachableItems(univ.party.townLoc);
+    // `handle_get_items` (boe.actions.cpp:1389) reaches from the party's
+    // square in town and from the **acting PC's** in combat, where it also
+    // costs four action points. Gating this on town alone is why "g" after an
+    // arena fight said there was nothing here while the loot was in plain
+    // sight on the floor.
+    const inFight = isCombat(session.mode);
+    const from = inFight ? univ.currentPc.combatPos : univ.party.townLoc;
+    const reachable = session.reachableItems(from);
     if (reachable.length === 0) {
       univ.addStringToBuf('Get: nothing here');
       redraw();
@@ -394,6 +401,10 @@ async function main(): Promise<void> {
     // PC buttons, take as many things as you like, then Done.
     await dialogs.runScreen(
       new GetItemsDialog(ctx, store, session, reachable, 'Getting all adjacent items:'));
+    if (inFight) {
+      takeAp(univ, 4);
+      session.afterCombatAction();
+    }
     setStatus();
     redraw();
   };
@@ -713,9 +724,14 @@ async function main(): Promise<void> {
    * every targeting mode restores it when it resolves.
    */
   const recentre = (): void => {
+    // `party.getLoc()` for the non-combat case, not `townLoc`: outdoors that
+    // field still holds wherever the party last stood *in a town* (or in a
+    // combat arena), and centring the outdoor view on it drew a 9x9 window of
+    // unexplored nothing — the "looking at a sign turns everything black" bug,
+    // since ending a look is one of the things that calls this.
     session.center = isCombat(session.mode)
       ? { ...univ.currentPc.combatPos }
-      : { ...univ.party.townLoc };
+      : { ...univ.party.getLoc() };
   };
 
   /** Act on a target space according to what the player asked for. */
@@ -968,7 +984,18 @@ async function main(): Promise<void> {
         if (pending === null && !isAiming()) {
           const dx = Math.sign(cell.q - 4);
           const dy = Math.sign(cell.r - 4);
-          if (dx === 0 && dy === 0) return;
+          // `if(offset.x == 0 && offset.y == 0) handle_pause()`
+          // (boe.actions.cpp:325) — clicking the middle of the view is Wait,
+          // and in combat that is Stand Ready: the acting PC guards, and any
+          // monster that steps up to them takes a free swing for it. This
+          // port dropped the click on the floor instead, so clicking your own
+          // figure did nothing at all.
+          if (dx === 0 && dy === 0) {
+            void actOn(clicked);
+            setStatus();
+            redraw();
+            return;
+          }
           void actOn({ x: from.x + dx, y: from.y + dy });
         } else {
           void actOn(clicked);
@@ -1090,7 +1117,8 @@ async function main(): Promise<void> {
           session.rest();
           break;
         case 'g': case 'G':
-          if (session.inTown) void getItems();
+          // MODE_TOWN *or* MODE_COMBAT (boe.actions.cpp:3105).
+          if (session.inTown || inCombat) void getItems();
           else univ.addStringToBuf('Get: nothing here');
           break;
         case 'a':

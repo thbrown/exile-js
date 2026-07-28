@@ -549,7 +549,7 @@ export async function monsterAttack(
 
     // Touch abilities fire off a blow that landed — the burning touch, the
     // paralysing touch, the pickpocket.
-    monsterTouches(session, monst, target, i);
+    await monsterTouches(session, monst, target, i);
 
     // And what being hit sets off on the target's side.
     if (pcTarget) {
@@ -931,14 +931,14 @@ export async function doMonsterTurn(session: GameSession): Promise<void> {
             // it does still require `monst` to be hostile, since a charmed
             // creature wandering next to a parrying PC shouldn't provoke one.
             seekParty(session, monst, targSpace);
-            if (!monst.isFriendly) checkParryOpportunity(session, monst);
+            if (!monst.isFriendly) await checkParryOpportunity(session, monst);
           } else {
             const moveTarget = target !== NO_ONE ? target : closestPc(univ, monst.curLoc);
             if (!monst.isFriendly && moveTarget < NO_ONE) {
               const pc = univ.party.pcs[moveTarget]!;
               if (pc.isAlive) {
                 seekParty(session, monst, pc.combatPos);
-                checkParryOpportunity(session, monst);
+                await checkParryOpportunity(session, monst);
               }
             }
           }
@@ -976,6 +976,13 @@ export async function doMonsterTurn(session: GameSession): Promise<void> {
     if (session.mode !== GameMode.COMBAT) {
       session.center = { ...univ.party.townLoc };
     }
+    // `for(cPlayer& pc : univ.party) pc.parry = 0;` (boe.combat.cpp:2623) —
+    // a guard lasts until the monsters have had their go, and no longer. This
+    // was missing, so a parry's damage reduction and to-hit bonus stayed up
+    // for the rest of the fight, and a stand-ready PC (parry 100) kept its
+    // free swing in hand round after round without ever spending a turn on
+    // it again. On the main exit only, as in the C++.
+    for (const pc of univ.party.pcs) pc.parry = 0;
   } finally {
     session.monstersGoing = false;
   }

@@ -1871,3 +1871,69 @@ playthrough will hit it:
   meaningful — 1 is normal, 2 is slow motion — while the divergence from the
   original lives in one named constant. Set `PACE_BASELINE` to 1 for exactly
   the C++'s speed; every other constant in `anim.ts` is already its number.
+
+- **Nine from the eleventh play-test round (2026-07-28).** Reported together;
+  two of them turned out to be fallout from the async refactor, which is worth
+  knowing on its own.
+  - **Floating promises the refactor left behind.** `checkParryOpportunity`,
+    `monsterTouches` and `monsterSpells`' `hit()` helper all became async and
+    were still being called without `await` — the earlier audit only covered
+    the exported damage functions, and these are local. Their damage was
+    landing detached from the turn that caused it. The audit is now
+    declaration-based (find every `async function`/`async method`/`= async`,
+    then every call that isn't awaited, voided or returned) and comes back
+    clean; run it again after any async change.
+  - **A volley didn't wait for its own explosion.** `doCombatCast`'s tail ran
+    `runBoomAnim()` and returned — `handle_marked_damage` needs no blast of
+    its own, so nothing waited. The C++ blocks inside `do_explosion_anim`
+    before it. That is the "camera doesn't linger on the target" report: the
+    missile swings the view onto the target, the blast starts, and the caller
+    immediately recentred over the top of it. *Measured after the fix*: camera
+    to the target's frame at 297ms, blast until 725ms, view back at 737ms.
+  - **`parry` was never cleared.** `do_monster_turn` ends with
+    `for(cPlayer& pc : univ.party) pc.parry = 0` (boe.combat.cpp:2623) — a
+    guard lasts one round. Without it the damage reduction and the to-hit
+    bonus stayed up for the whole fight and a stand-ready PC kept its free
+    swing in hand round after round, which is the "parry does damage too
+    often" report. (`char_parry`, `char_stand_ready`, the `parry/4` reduction
+    and the `5 * parry` to-hit penalty all matched already.)
+  - **Looking around outdoors blanked the world.** `recentre()` in main.ts put
+    the view back on `party.townLoc` for anything that wasn't combat — a
+    coordinate left over from the last town, or from a combat arena — so the
+    outdoor window drew 9x9 squares of unexplored nothing until the party
+    moved. It uses `party.getLoc()` now. (The C++ never had the bug because
+    `draw_terrain` takes its origin from `univ.party.out_loc` outdoors and
+    only uses `center` in town.)
+  - **The arena formed the party up in the wrong shape.** `outCombat.ts` had
+    an invented 2x3 block where the C++ uses `hor_vert_place` — the same wedge
+    town combat forms up in: one in front, two behind, three across the back.
+    Now shared from `combat.ts`, and `verify-screen` pins the six offsets.
+  - **A big creature took its damage number on its top-left square.**
+    `boom_space` adds `14 * (x_width - 1)` / `18 * (y_width - 1)`
+    (boe.graphics.cpp:1541) to centre the blast; the port only did it in the
+    volley path, so a melee hit on a bear drew the number to the bear's left.
+  - **"Get" did nothing in combat.** `handle_get_items` works in MODE_TOWN
+    *or* MODE_COMBAT, reaching from the party's square in town and the acting
+    PC's in a fight, where it also costs 4 AP (boe.actions.cpp:1389). This
+    port gated the key on town alone, which is why "g" over a pile of arena
+    loot said there was nothing there.
+  - **Clicking your own figure did nothing.** `handle_terrain_screen_actions`
+    sends a click with zero offset to `handle_pause` (boe.actions.cpp:325),
+    which in combat is Stand Ready. The port had the branch but never reached
+    it: the click handler discarded a centre click (`dx === 0 && dy === 0`)
+    before the dispatch could see it.
+  - **Stink Cloud has no projectile, and this port doesn't draw one.**
+    `CLOUD_STINK`/`FOUL_VAPOR` are a bare `place_spell_pattern` in both
+    `do_combat_cast` and the town cast; checked in the browser, the cast
+    launches nothing. Whatever was seen flying was another spell (Flame and
+    the fire family do throw one) or the targeting overlay.
+  - **Resist Magic never wore off outside a fight.** `increase_age`'s
+    "Protection, etc." block decays INVULNERABLE, MAGIC_RESISTANCE, INVISIBLE,
+    MARTYRS_SHIELD, ASLEEP and PARALYZED **every turn** (and POISONED_WEAPON
+    every fortieth); this port decayed them only in `combat_run_monst`. Ported
+    with the C++'s own brace-less `if`, which decays INVULNERABLE *twice* on
+    the turn any of the six is about to expire — pinned by a test so it can't
+    be tidied away. The four party-wide effects (STEALTH, DETECT_LIFE,
+    FIREWALK, FLIGHT) and their "your footsteps grow louder" messages are
+    ported with them; FLIGHT's "you plummet to your deaths" is still TODO(M6),
+    since it needs the outdoor terrain check.

@@ -21,7 +21,8 @@ import { DamageType } from '../data/monster';
 import { ItemAbil } from '../data/item';
 import { hasAbilEquip } from '../universe/inventory';
 import { Player } from '../universe/player';
-import { MainStatus, Race, Status, Trait } from '../universe/skills';
+import { MainStatus, PartyStatus, Race, Status, Trait } from '../universe/skills';
+import { Party } from '../universe/party';
 import { damagePc } from './damage';
 import { GameMode } from './modes';
 import type { GameSession } from './session';
@@ -31,6 +32,13 @@ function moveToZero(pc: Player, which: Status): void {
   const v = pc.status[which] ?? 0;
   if (v > 0) pc.status[which] = v - 1;
   else if (v < 0) pc.status[which] = v + 1;
+}
+
+/** The same, for one of the four whole-party effects. */
+function partyMoveToZero(party: Party, which: PartyStatus): void {
+  const v = party.partyStatus[which];
+  if (v > 0) party.partyStatus[which] = v - 1;
+  else if (v < 0) party.partyStatus[which] = v + 1;
 }
 
 function livePcs(session: GameSession): Player[] {
@@ -161,6 +169,58 @@ export async function increaseAgeEffects(session: GameSession): Promise<void> {
       && pc.curHealth < pc.maxHealth) pc.heal(2);
     if (pc.traits[Trait.CHRONIC_DISEASE] && univ.rng.getRan(1, 0, 110) === 1) {
       pc.disease(4, univ.rng);
+    }
+  }
+
+  // --- The party's own spell effects wearing off ----------------------------
+  // increase_age's first block (boe.actions.cpp:3374): each is a countdown,
+  // and each says so on the turn it runs out. FLIGHT's "you plummet to your
+  // deaths" is not ported — flight over impassable ground needs the terrain
+  // check the C++ does against the *outdoor* map. TODO(M6).
+  if (party.partyStatus[PartyStatus.STEALTH] === 1) {
+    univ.addStringToBuf('Your footsteps grow louder.');
+  }
+  partyMoveToZero(party, PartyStatus.STEALTH);
+  if (party.partyStatus[PartyStatus.DETECT_LIFE] === 1) {
+    univ.addStringToBuf('You stop detecting monsters.');
+  }
+  partyMoveToZero(party, PartyStatus.DETECT_LIFE);
+  if (party.partyStatus[PartyStatus.FIREWALK] === 1) {
+    univ.addStringToBuf('Your feet stop glowing.');
+  }
+  partyMoveToZero(party, PartyStatus.FIREWALK);
+  if (party.partyStatus[PartyStatus.FLIGHT] === 2) {
+    univ.addStringToBuf('You are starting to descend.');
+  }
+  if (party.partyStatus[PartyStatus.FLIGHT] === 1) {
+    univ.addStringToBuf('  You land safely.');
+  }
+  partyMoveToZero(party, PartyStatus.FLIGHT);
+
+  // --- The protections wearing off ------------------------------------------
+  // "Protection, etc." (boe.actions.cpp:3451). Every one of these is decayed
+  // **every turn**, in town and outdoors alike; this port decayed them only
+  // during a combat round (`combat_run_monst`), which is why Resist Magic cast
+  // in a fight was still up long after it, out on the road.
+  //
+  // The `if` is the C++'s, brace-for-brace: it guards only the *first*
+  // `move_to_zero`, so on the turn any one of these six is about to expire,
+  // INVULNERABLE is decayed twice. Kept, quirk and all.
+  for (const pc of party.pcs) {
+    const s = (which: Status): number => pc.status[which] ?? 0;
+    if (s(Status.INVULNERABLE) === 1 || Math.abs(s(Status.MAGIC_RESISTANCE)) === 1
+      || s(Status.INVISIBLE) === 1 || s(Status.MARTYRS_SHIELD) === 1
+      || Math.abs(s(Status.ASLEEP)) === 1 || s(Status.PARALYZED) === 1) {
+      moveToZero(pc, Status.INVULNERABLE);
+    }
+    moveToZero(pc, Status.INVULNERABLE);
+    moveToZero(pc, Status.MAGIC_RESISTANCE);
+    moveToZero(pc, Status.INVISIBLE);
+    moveToZero(pc, Status.MARTYRS_SHIELD);
+    moveToZero(pc, Status.ASLEEP);
+    moveToZero(pc, Status.PARALYZED);
+    if (age % 40 === 0 && s(Status.POISONED_WEAPON) > 0) {
+      moveToZero(pc, Status.POISONED_WEAPON);
     }
   }
 
