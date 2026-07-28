@@ -30,7 +30,13 @@ const shot = (n) => page.screenshot({ path: `${SHOTS}/${n}.png`, clip: { x: 12, 
  * action would have its key thrown away, so every keypress waits for this
  * first.
  */
-const idle = () => page.evaluate(() => window.__session.settled());
+const idle = async () => {
+  await page.evaluate(() => window.__session.settled());
+  // …and for the animation queue: a blast books its own time now, and input
+  // is dropped while anything is still on screen (`flushingInput`). Both have
+  // to be quiet or the keystroke goes nowhere.
+  await page.waitForFunction(() => window.__animPending() === 0, { timeout: 30000 });
+};
 const press = async (key) => { await idle(); await page.keyboard.press(key); };
 
 // 1. Every panel should be painted, not left as bare background.

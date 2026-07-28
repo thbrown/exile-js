@@ -8,15 +8,22 @@
  * only `SOUND_LOOKUP` turns that into a file. Playing the type directly is how
  * a rat's bite ends up sounding like a cash register.
  *
- * The C++ draws the sprite, plays the sound and then sleeps. This port can't
- * block, so the request goes to a sink the renderer owns: it keeps each boom
- * for `BOOM_MS` and redraws until they've all expired. Same thing on screen,
- * no blocking.
+ * The C++ draws the sprite, plays the sound and then **sleeps** — 300ms in the
+ * WASM build (boe.graphics.cpp:1594) — so nothing else happens until the blast
+ * has been seen. This port can't block, so the request goes to a sink the
+ * renderer owns and the blast **books its slot on the shared timeline**: that
+ * is what makes a caller sitting in `animSettle` wait for it, which is the
+ * nearest thing to the sleep. Two hits in one turn play one after the other,
+ * as they do in the original, rather than both at once.
+ *
+ * A *volley* is the exception, and matches `do_explosion_anim`: everything it
+ * collected is drawn together over one animation, so it books one slot between
+ * the lot of them.
  */
 
 import { Location } from '../core/location';
 import { livingSound } from '../universe/living';
-import { animAt, paced } from './anim';
+import { animBook, paced } from './anim';
 
 /**
  * sound_lookup (boom_space) — sound type to sound file. A *negative* sound
@@ -97,8 +104,10 @@ export function runBoomAnim(): void {
   const toPlay = queued;
   volleyOpen = false;
   queued = [];
-  // `animAt()` is read now, so these sit after whatever the missiles booked.
-  const starts = animAt();
+  // One slot for the whole volley: `do_explosion_anim` draws every explosion
+  // it collected in the same frames and sleeps once, so they land together —
+  // after whatever the missiles booked, and before whatever comes next.
+  const starts = animBook(boomMs());
   for (const boom of toPlay) {
     if (boom.sound > 0) livingSound(boom.sound);
     if (boom.type < 0 || boom.type > 6) continue;
@@ -135,9 +144,10 @@ export function boomSpace(
   // reached until the thing has landed.
   if (file > 0) livingSound(file);
   if (type < 0 || type > 6) return;
-  // A hit shows at the front of the queue rather than booking its own slot:
-  // several blows in one turn land together, but a hit that follows a missile
-  // still waits for the missile to arrive.
-  const starts = animAt();
+  // A hit takes a slot of its own, because `boom_space` sleeps for its whole
+  // length: a second blow in the same turn follows the first rather than
+  // landing on top of it, and anything waiting on the timeline — the rest of
+  // the monster's turn, the party-death announcement — waits for the blast.
+  const starts = animBook(boomMs());
   sink?.({ where: { ...where }, type, damage, sound: file, starts, expires: starts + boomMs() });
 }

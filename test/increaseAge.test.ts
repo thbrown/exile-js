@@ -17,7 +17,9 @@ import { buildOpcodeTable } from '../src/fileio/specialParse';
 import {
   MISSILE_MS, Missile, runAMissile, setMissileSink,
 } from '../src/game/missileAnim';
-import { Boom, boomSpace, setBoomSink } from '../src/game/booms';
+import {
+  Boom, boomMs, boomSpace, runBoomAnim, setBoomSink, startBoomAnim,
+} from '../src/game/booms';
 import {
   FocusEvent, animBook, animClear, animPending, focusOn, setFocusSink,
 } from '../src/game/anim';
@@ -183,14 +185,33 @@ describe('the animation timeline', () => {
     expect(booms[0]!.starts).toBeGreaterThan(missiles[0]!.started + MISSILE_MS - EPSILON);
   });
 
-  it('shows several blows in one turn together, since none books a slot', () => {
+  /**
+   * `boom_space` **sleeps** for the blast (300ms in the WASM build,
+   * boe.graphics.cpp:1594), so two blows in one turn are two blasts one after
+   * the other — not one frame with both damage numbers on it, which is what
+   * this port used to draw.
+   */
+  it('plays two blows in one turn one after the other', () => {
     const { booms } = capture(() => {
       boomSpace({ x: 1, y: 1 }, 3, 4, 0);
       boomSpace({ x: 2, y: 2 }, 3, 5, 0);
     });
-    // Both take the front of the queue; they differ only by the microseconds
-    // between the two `performance.now()` reads.
-    expect(booms[1]!.starts - booms[0]!.starts).toBeLessThan(5);
+    expect(booms[1]!.starts - booms[0]!.starts).toBeGreaterThan(boomMs() - EPSILON);
+    // And the first is off the screen by the time the second arrives.
+    expect(booms[0]!.expires).toBeLessThanOrEqual(booms[1]!.starts + EPSILON);
+  });
+
+  it('a volley books one slot for everything it collected', () => {
+    // do_explosion_anim draws every explosion in the same frames and sleeps
+    // once, so a fireball's hits land together however many there are.
+    const { booms } = capture(() => {
+      startBoomAnim();
+      boomSpace({ x: 1, y: 1 }, 3, 4, 0);
+      boomSpace({ x: 2, y: 2 }, 3, 5, 0);
+      runBoomAnim();
+    });
+    expect(booms.length).toBe(2);
+    expect(booms[1]!.starts).toBe(booms[0]!.starts);
   });
 
   it('a camera move takes its own slot in the queue', () => {
@@ -229,14 +250,26 @@ describe('the animation timeline', () => {
     expect(focus[1]!.at).toBeLessThan(m.started + m.dur);
   });
 
-  it('stops queueing once the backlog is long, so a mob does not stall', () => {
+  /**
+   * The depth cap this used to pin is **gone**. It made a booking past 1500ms
+   * of backlog start at once, which is an ordering violation dressed up as a
+   * safety valve: once a blast books time of its own, a busy queue handed a
+   * hit and the missile it belongs to the same start, and the explosion beat
+   * its projectile. Nothing needs the valve now — the turn waits on the queue
+   * and so does the player's input — so what is pinned instead is that the
+   * queue stays strictly in order however deep it gets.
+   */
+  it('keeps strict order however deep the backlog gets', () => {
     animClear();
-    // Book well past the cap; the next booking should start immediately.
-    for (let i = 0; i < 40; i++) animBook(MISSILE_MS);
-    const pendingBefore = animPending();
-    expect(pendingBefore).toBeGreaterThan(1500);
-    const at = animBook(MISSILE_MS);
-    expect(at).toBeLessThan(performance.now() + 1);
+    let last = -Infinity;
+    for (let i = 0; i < 40; i++) {
+      const at = animBook(MISSILE_MS);
+      expect(at).toBeGreaterThanOrEqual(last);
+      last = at;
+    }
+    expect(animPending()).toBeGreaterThan(40 * MISSILE_MS - 100);
+    // And the next thing booked still lands after all of it.
+    expect(animBook(MISSILE_MS)).toBeGreaterThan(last);
     animClear();
   });
 

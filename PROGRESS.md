@@ -1720,3 +1720,47 @@ playthrough will hit it:
     early return, and the bar's wording), `test/missileAnim.test.ts` (the pace
     scaling), `test/increaseAge.test.ts` (the camera following a shot without
     lengthening it) and `test/location.test.ts` (`between_anchor_points`).
+
+- **The blast is part of the turn now: `boom_space` books its time, and the
+  party-death announcement waits (2026-07-27).** Reported from play-testing:
+  "some blasts/damages are happening after the effect (death of party for
+  instance)". They were — the blast was drawn on a timeline nothing waited
+  for, so a consequence could arrive before the animation that explained it.
+  - `boom_space` **sleeps** for the whole blast (300ms in the WASM build,
+    boe.graphics.cpp:1594) and only then does `damage_pc` subtract the health,
+    decide the death and call `kill_pc` (boe.party.cpp:2660-2686). This port
+    drew the boom at the front of the queue without booking anything, so
+    nothing downstream waited for it. `boomSpace` now books `boomMs()` — two
+    blows in one turn play one after the other, as they do in the original,
+    instead of sharing a frame.
+  - A **volley** still books one slot for everything it collected, matching
+    `do_explosion_anim`: it draws every explosion in the same frames and
+    sleeps once, which is why a fireball's hits land together.
+  - **`onPartyDeath` waits for the queue** (`checkPartyDeath`). The latch is
+    set when the damage resolves, but the announcement goes through
+    `animSettle` — the C++ reaches `handle_party_death` from the main loop,
+    long after the blocking blast has played, and telling the player they are
+    dead over the top of an unfinished explosion is the wrong order.
+  - **`animBook`'s depth cap is gone.** It let a booking past 1500ms of
+    backlog start at once — a safety valve from when the game logic ran ahead
+    of the display. Once a blast books time, that valve broke the one thing
+    the timeline guarantees: `verify-screen` caught an explosion being handed
+    the same start as the missile it belonged to. Nothing needs the valve now
+    (see the next point), and the C++ has no equivalent.
+  - **Player input waits on the animation queue** (`midAction` in main.ts,
+    now `acting || session.busy || animPending() > 0`). This is what makes
+    "wait for the blast, then carry on" true for the party's own blows as well
+    as the monsters', and it is faithful: `flushingInput = true` is set in
+    `damage_pc` immediately after `boom_space` returns. It is also what keeps
+    the queue shallow without a cap — the model cannot outrun the screen if
+    the player cannot act. `window.__animPending` is exposed for drivers, and
+    `verify-screen`'s `idle()` waits on it as well as `settled()`.
+  - **Still not faithful, and knowingly so**: a PC's health *number* drops
+    when the blow resolves, where the C++ subtracts it after the blast. Doing
+    that properly means `damagePc`/`damageMonst` becoming async — they have
+    dozens of synchronous callers across specials, fields, items and spells —
+    or deferring the state change, which is the second-source-of-truth
+    approach rejected when the monsters' turn was paced. Everything *after*
+    the blast (the death, the "is dead" line, the next monster's move, the
+    party-death dialog, the player's next key) is correctly ordered; what
+    still leads is that one number.

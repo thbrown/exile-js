@@ -72,22 +72,26 @@ export function animAt(): number {
 }
 
 /**
- * How far ahead the queue is allowed to run. The C++ has no such limit — it
- * blocks, so a turn takes exactly as long as its animations do. A crowded
- * fight can queue a *lot* of them, though, and a player watching damage
- * numbers arrive ten seconds after the turn resolved is worse than a player
- * watching two spears overlap, so past this depth new animations start at once.
+ * Book `ms` on the timeline, and hand back when that slot starts.
  *
- * Scaled by the pace with everything else: at three times the length, three
- * animations deep is the same *number* of animations, and a cap that didn't
- * scale would silently undo the slowdown exactly when the screen is busiest.
+ * **There is no depth cap.** There used to be one — past 1500ms of backlog a
+ * new animation started at once rather than queueing — from when the game
+ * logic ran straight through underneath the display and a crowded fight could
+ * leave damage numbers arriving ten seconds after the turn had resolved.
+ * Two things retired it:
+ * - The turn `animSettle`s now, and the player's input waits on the queue too
+ *   (`midAction` in main.ts, which is the C++'s `flushingInput`), so the model
+ *   can no longer run away from the screen in the first place.
+ * - The cap broke the one thing this queue exists to guarantee. Once a blast
+ *   books time of its own, a busy queue meant `animBook` handed a hit and the
+ *   missile it belongs to the *same* start — and an explosion that beats its
+ *   projectile is the exact bug the timeline was built to fix.
+ *
+ * The C++ has no such limit either: it blocks, so a turn takes exactly as long
+ * as its animations do. If a fight ever does feel too long, that is what the
+ * pace knob is for.
  */
-const MAX_QUEUE_MS = 1500;
-
-/** Book `ms` on the timeline, and hand back when that slot starts. */
 export function animBook(ms: number): number {
-  const now = performance.now();
-  if (cursor - now > paced(MAX_QUEUE_MS)) return now;
   const at = animAt();
   cursor = at + ms;
   return at;

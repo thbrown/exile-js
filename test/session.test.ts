@@ -465,6 +465,13 @@ describe('party death', () => {
    * hooked up at all, so a party that died just kept sitting there with the
    * game still accepting input.
    */
+  /**
+   * The announcement waits for the animation queue, so that the blast that
+   * killed the party is over before the player is told about it. With no
+   * animation waiter installed that wait is a microtask, not real time.
+   */
+  const flush = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 0); });
+
   it('fires onPartyDeath exactly once when the last PC dies', async () => {
     const s = newSession();
     s.startNewGame();
@@ -472,10 +479,26 @@ describe('party death', () => {
     s.onPartyDeath = () => { fired++; };
     for (const pc of s.univ.party.pcs) pc.mainStatus = MainStatus.DEAD;
     s.pause();
+    await flush();
     expect(fired).toBe(1);
     // Upkeep keeps running on a dead party (nothing un-registers it), but the
     // hook must not fire again.
     s.pause();
+    await flush();
+    expect(fired).toBe(1);
+  });
+
+  it('waits for the blast that killed you before saying so', async () => {
+    const s = newSession();
+    s.startNewGame();
+    let fired = 0;
+    s.onPartyDeath = () => { fired++; };
+    for (const pc of s.univ.party.pcs) pc.mainStatus = MainStatus.DEAD;
+    s.pause();
+    // Not on the same tick the damage resolved: `handle_party_death` is
+    // reached from the C++'s main loop, after the blocking blast has played.
+    expect(fired).toBe(0);
+    await flush();
     expect(fired).toBe(1);
   });
 
@@ -486,6 +509,7 @@ describe('party death', () => {
     s.onPartyDeath = () => { fired++; };
     for (const pc of s.univ.party.pcs.slice(1)) pc.mainStatus = MainStatus.DEAD;
     s.pause();
+    await flush();
     expect(fired).toBe(0);
   });
 });

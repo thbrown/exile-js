@@ -680,15 +680,23 @@ async function main(): Promise<void> {
 
   /**
    * Whether the game is mid-action and input should be ignored: the party's own
-   * half (`acting`), or the monsters' (`session.busy`, a queued monster round
-   * still playing out on the animation timeline).
+   * half (`acting`), the monsters' (`session.busy`, a queued monster round
+   * still playing out), or **an animation still on screen** (`animPending`).
    *
-   * The C++ needs neither flag — `do_monster_turn` blocks, and it goes further
-   * and throws away anything typed while it does (`flushingInput = true`,
-   * boe.combat.cpp:2432). Dropping the input rather than buffering it is the
-   * behaviour being matched here.
+   * The C++ needs none of these — it blocks, and it goes further and throws
+   * away anything typed while it does (`flushingInput = true`, set in
+   * `damage_pc` right after `boom_space` returns, boe.party.cpp:2669, and
+   * again in `do_monster_turn`). Dropping the input rather than buffering it
+   * is the behaviour being matched.
+   *
+   * The animation term is what makes "wait for the blast, then carry on" true
+   * for the *player's* own blows as well as the monsters': a swing that sets
+   * off an explosion holds the keyboard until the explosion is over, exactly
+   * as `boom_space`'s sleep does. It is also what keeps the queue shallow now
+   * that `animBook` has no depth cap — the model cannot run away from the
+   * screen if the player cannot act.
    */
-  const midAction = (): boolean => acting || session.busy;
+  const midAction = (): boolean => acting || session.busy || animPending() > 0;
 
   /**
    * Whether a click on the terrain is a *shot* rather than a step: a loaded
@@ -1249,6 +1257,9 @@ async function main(): Promise<void> {
     __screen: screen,
     __scen: scen,
     __redraw: redraw,
+    // How long the animation queue still has to run. A driver has to wait for
+    // this as well as `settled()` — input is dropped while it is non-zero.
+    __animPending: animPending,
     // The protective circle, for the verifier's place_spell_pattern check.
     __placePattern: (at: Location) =>
       placeSpellPattern(session, SpellPat.PROT, at, { whoHit: univ.curPc }),

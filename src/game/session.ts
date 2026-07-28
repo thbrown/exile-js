@@ -24,6 +24,7 @@ import { Vehicle } from '../data/vehicle';
 import { Snd, SoundPlayer } from '../platform/sound';
 import { Creature, CreatureStatus, assignCreature } from '../universe/creature';
 import { DamageType } from '../data/monster';
+import { animSettle } from './anim';
 import { damagePc, hitParty } from './damage';
 import {
   NO_ONE, endTownCombat, pcAttack, pickNextPc, setPcMoves, startTownCombat, takeAp,
@@ -1841,7 +1842,14 @@ export class GameSession {
     }
 
     this.partyDead = true;
-    this.onPartyDeath?.();
+    // The latch is set now, but the *announcement* waits for the screen to
+    // catch up. The C++ reaches `handle_party_death` from the main loop, by
+    // which time every blocking blast and sleep in the blow that killed you
+    // has already played; here the blast is still in the queue when the
+    // damage resolves, so telling the player they are dead over the top of it
+    // is the wrong order. Fire-and-forget, like the other chains launched
+    // from a synchronous path — nothing here depends on the dialog.
+    void animSettle().then(() => { this.onPartyDeath?.(); });
   }
 
   /**
