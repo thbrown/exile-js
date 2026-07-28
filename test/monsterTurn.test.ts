@@ -5,9 +5,11 @@ import { dist, loc } from '../src/core/location';
 import { GameRng } from '../src/core/rng';
 import { Attitude } from '../src/data/monster';
 import { Scenario } from '../src/data/scenario';
+import { animClear, animPending } from '../src/game/anim';
 import { NO_ONE } from '../src/game/combat';
 import {
   closestPc, combatRunMonst, doMonsterTurn, doMonsters, monstAdjacent, monsterAttack,
+  monstPickTarget,
 } from '../src/game/monsterTurn';
 import { FORCED_ENTRY, GameSession } from '../src/game/session';
 import { loadScenario } from '../src/fileio/loadScenario';
@@ -15,7 +17,7 @@ import { FsSource } from '../src/fileio/source';
 import { buildOpcodeTable } from '../src/fileio/specialParse';
 import { Creature, CreatureStatus, assignCreature } from '../src/universe/creature';
 import { PartyPreset } from '../src/universe/player';
-import { MainStatus, Status } from '../src/universe/skills';
+import { MainStatus, Status, Trait } from '../src/universe/skills';
 import { Universe } from '../src/universe/universe';
 
 const opcodes = buildOpcodeTable(
@@ -98,6 +100,85 @@ describe('a monster taking its turn', () => {
     }
     expect(hurt).toBe(true);
     expect(univ.party.totalDamTaken).toBeGreaterThan(0);
+  });
+
+  /**
+   * do_monster_turn's `print_buf(); pause(8);` (boe.combat.cpp:2428) runs
+   * after any action that "acted" — flee, a spell, a ranged shot or a melee
+   * swing — and unlike the camera-dwell pause it isn't gated by GameSpeed at
+   * all. This port had nothing booking that beat, which was most of why
+   * combat read faster than the original regardless of any speed setting.
+   */
+  it('a landed melee swing books the post-action pause on the timeline', () => {
+    const { univ, session, monst } = combatWithOne();
+    animClear();
+    const pc = univ.party.pcs[0]!;
+    monst.curLoc = loc(pc.combatPos.x + 1, pc.combatPos.y);
+    monst.active = CreatureStatus.ALERTED;
+    doMonsterTurn(session);
+    // `focusOn` alone (the pre-existing camera dwell, MONSTER_PAUSE_MS=16)
+    // would only ever push this a little past zero; asserting a much bigger
+    // number is what actually pins ACTION_PAUSE_MS's ~133ms landing too.
+    expect(animPending()).toBeGreaterThan(100);
+    animClear();
+    expect(univ.party.totalDamTaken).toBeGreaterThanOrEqual(0); // sanity: ran without throwing
+  });
+
+  /**
+   * combat_move_monster (boe.monster.cpp:721) plays a footstep on the way,
+   * same as the party's own movement — this port had never wired it up, so
+   * monsters closing the distance in a fight moved in total silence.
+   */
+  it('plays a footstep when a monster moves on screen', () => {
+    const { session, monst } = combatWithOne();
+    monst.active = CreatureStatus.ALERTED;
+    // Two squares off, in the open, so the only thing that can happen this
+    // turn is a step toward the party.
+    monst.curLoc = loc(monst.curLoc.x + 5, monst.curLoc.y);
+    session.center = { ...monst.curLoc };
+    const played: number[] = [];
+    session.sound = { play: (n: number) => { played.push(n); } } as never;
+    const before = { ...monst.curLoc };
+    doMonsterTurn(session);
+    expect(monst.curLoc).not.toEqual(before);
+    expect(played.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * do_monster_turn's opportunity-attack check (boe.combat.cpp:2445): a PC
+   * standing ready (`parry > 99`, from Space/W or the SHIELD toolbar button)
+   * gets a free swing the instant a monster closes to melee range of them,
+   * spending the stand-ready to do it. This port had `char_parry`/`char_stand_ready`
+   * themselves right, but nothing on the monster's-turn side ever checked
+   * `parry` at all.
+   */
+  it('a PC standing ready swings for free when a monster closes on them', () => {
+    const { univ, session, monst } = combatWithOne();
+    const pc = univ.party.pcs[0]!;
+    pc.parry = 100;
+    monst.active = CreatureStatus.ALERTED;
+    // Two squares off — seek_party's first step should land it adjacent.
+    monst.curLoc = loc(pc.combatPos.x + 2, pc.combatPos.y);
+
+    doMonsterTurn(session);
+
+    expect(monstAdjacent(monst, pc.combatPos)).toBe(true);
+    // The stand-ready is spent whether or not the free swing actually landed.
+    expect(pc.parry).toBe(0);
+  });
+
+  it('does not trigger the opportunity attack for a pacifist', () => {
+    const { univ, session, monst } = combatWithOne();
+    const pc = univ.party.pcs[0]!;
+    pc.parry = 100;
+    pc.traits[Trait.PACIFIST] = true;
+    monst.active = CreatureStatus.ALERTED;
+    monst.curLoc = loc(pc.combatPos.x + 2, pc.combatPos.y);
+
+    doMonsterTurn(session);
+
+    expect(monstAdjacent(monst, pc.combatPos)).toBe(true);
+    expect(pc.parry).toBe(100);
   });
 
   it('monsterAttack rolls each of its attacks', () => {
@@ -207,6 +288,78 @@ describe('a monster taking its turn', () => {
     expect(near).toBe(1);
     univ.party.pcs.forEach((pc) => { pc.mainStatus = MainStatus.DEAD; });
     expect(closestPc(univ, loc(0, 0))).toBe(NO_ONE);
+  });
+});
+
+describe('a charmed monster fights its former allies', () => {
+  /**
+   * charm_odds's success arm (Creature.sleep, boe.combat.cpp/creature.cpp)
+   * flips `attitude` to FRIENDLY — it never touches `status[CHARM]`, so the
+   * only way charm does anything is through `attitude`. `doMonsterTurn` used
+   * to gate every attack (melee, and the wake-up checks) on `!isFriendly`
+   * unconditionally, which is right for "don't attack the party" but wrong
+   * for "don't attack another monster" — a FRIENDLY creature should still
+   * fight a HOSTILE one, and vice versa.
+   */
+  function twoMonstersAdjacent(): {
+    univ: Universe; session: GameSession; charmed: Creature; hostile: Creature;
+  } {
+    const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
+    const session = new GameSession(univ);
+    session.startTownMode(0, FORCED_ENTRY);
+    univ.town!.monsters.length = 0;
+
+    const makeMonst = (index: number, attitude: Attitude, at: ReturnType<typeof loc>): Creature => {
+      const template = { ...scen.scenMonsters[index]!, resist: [...scen.scenMonsters[index]!.resist] };
+      template.attacks = [{ dice: 3, sides: 6, type: 0 }];
+      template.skill = 20;
+      template.speed = 12;
+      template.armor = 0;
+      const m = assignCreature(0, {
+        number: index, startAttitude: attitude, startLoc: at,
+        mobility: 1, timeFlag: 0, timeCode: 0, monsterTime: 0, spec1: -1, spec2: -1,
+        specEncCode: 0, personality: -1, facialPic: -1, specialOnTalk: -1, specialOnKill: -1,
+      } as never, template);
+      m.health = m.maxHealth = 500;
+      m.active = CreatureStatus.ALERTED;
+      m.mobile = true;
+      return m;
+    };
+
+    const base = univ.party.townLoc;
+    const charmed = makeMonst(1, Attitude.FRIENDLY, loc(base.x + 2, base.y));
+    const hostile = makeMonst(2, Attitude.HOSTILE_A, loc(base.x + 3, base.y));
+    univ.town!.monsters.push(charmed, hostile);
+
+    session.startCombat(univ.party.direction);
+    // Move the party well out of the way so nobody targets a PC instead.
+    univ.party.pcs.forEach((pc, i) => {
+      pc.combatPos = loc(base.x - 10, base.y + i);
+    });
+    return { univ, session, charmed, hostile };
+  }
+
+  it('picks the other side as a target', () => {
+    const { session, charmed, hostile } = twoMonstersAdjacent();
+    // A friendly creature never targets a PC at all (pickTargetPc refuses
+    // outright), so this alone proves it falls back to the hostile monster.
+    const target = monstPickTarget(session, charmed);
+    expect(target).toBe(100 + session.univ.town!.monsters.indexOf(hostile));
+
+    // A hostile monster still prefers a reachable PC over a friendly
+    // creature — sideline the party so this checks the fallback specifically.
+    for (const pc of session.univ.party.pcs) pc.mainStatus = MainStatus.DEAD;
+    const backTarget = monstPickTarget(session, hostile);
+    expect(backTarget).toBe(100 + session.univ.town!.monsters.indexOf(charmed));
+  });
+
+  it('a charmed creature attacks the hostile one next to it', () => {
+    const { session, charmed, hostile } = twoMonstersAdjacent();
+    const before = hostile.health;
+    doMonsterTurn(session);
+    expect(hostile.health).toBeLessThan(before);
+    // And the party, which was never in reach, took nothing.
+    expect(session.univ.party.pcs.every((pc) => pc.curHealth === pc.maxHealth)).toBe(true);
   });
 });
 

@@ -1339,6 +1339,179 @@ definitions is still the long-term M3 item.
     encounter check meets it on the next turn. `ex1a` outside 0-3 prints the
     original's error and places nothing.
 
+- **Nine things from a sixth play-test (2026-07-27)**, spanning outdoor
+  specials/terrain, combat, and audio — all now closed:
+  - **`AFFECT_STATUS` was a stub wearing a costume.** It nudged
+    `status[which]` with a generic add-and-clamp instead of routing through
+    each status's own `iLiving` method (`poison`/`disease`/`slow`/`curse`/
+    `dumbfound`/`sleep`/`web`/`acid`), so a scripted "you feel ill" node
+    changed the number but printed nothing, skipped the frailty/protection
+    rolls, and used the wrong sign convention for several statuses. Rewritten
+    as a real per-status switch mirroring `affect_spec` (boe.specials.cpp:2981).
+  - **A ford across water didn't work.** `outdMoveParty` ran a destination
+    square's special node and used its `blocked` return but silently dropped
+    `forced` — so a `CANT_ENTER` node with `ex2a>0` (the same "walk through a
+    wall" trick town scripting already used) could run and print its message,
+    but the water still refused the step right after. `forced` now bypasses
+    the blockage test outdoors too, the same as it always did in town.
+  - **No fleeing an outdoor arena by reaching its edge.** Terrain 90 marks an
+    arena's border wall, and stepping onto it during `whichCombatType===0`
+    combat is a 30% roll to flee (`pc_combat_move`, boe.combat.cpp:247) —
+    this port's `combatMove` had no handling for it at all.
+  - **Spellcasters had infinite AP.** `combatCastSpell` and `doCombatCast` are
+    free functions, not `GameSession` methods, so — unlike `attackAt`/`parry`
+    — neither called `afterCombatAction` after spending AP. The turn simply
+    never advanced, and nothing else gated re-casting on `ap > 0`. Both now
+    call it (`afterCombatAction` is public for exactly this reason), as does
+    the `NO_ENCUMBERED` refusal in `main.ts` that also takes 6 AP.
+  - **Clicking your own figure on the battlefield did nothing.**
+    `handle_terrain_screen_actions`'s `offset.x==0 && offset.y==0` case
+    (boe.actions.cpp:323) is Pause — `char_stand_ready` in combat — and this
+    port's click dispatch had no equivalent, so a self-click just fell
+    through to the ordinary move code. Added in `main.ts`, ahead of the
+    move/combatMove dispatch, for all three plain modes (matching the C++,
+    not just combat).
+  - **Nothing happened when the whole party died.** `handle_party_death`
+    (boe.actions.cpp:1431) had no port at all. `Party.isAlive()` plus a
+    latched `GameSession.checkPartyDeath` (called from `afterPartyTurn` and
+    `afterCombatAction`, mirroring `advance_time`'s own check) now fire
+    `onPartyDeath` once; the host shows an unclosable "Your entire party has
+    died." dialog and reloads on acknowledgement — there's no load/new-game
+    flow to offer yet without M7's save system.
+  - **A charmed monster never fought its former allies.** Two separate bugs
+    stacked here. First, `Creature.sleep`'s CHARM branch (already correct)
+    flips `attitude` to FRIENDLY rather than touching `status[CHARM]` — the
+    C++ never reads that status either, by design. But `giveMonstersMoves`
+    was missing two of `do_monster_turn`'s wake-up checks (boe.combat.cpp:
+    2088, 2098): a hostile monster noticing a nearby friendly one, and a
+    FRIENDLY creature noticing a nearby hostile one (which also forces
+    `mobile = true`, so a stationary charmed shopkeeper can actually give
+    chase). Second, and bigger: `doMonsterTurn`'s whole action loop
+    (spells/ranged/melee) was unconditionally gated on `!isFriendly`, where
+    the C++ only gates *attacking a PC* on that — attacking another
+    *creature* only needs `attitude !== DOCILE`
+    (boe.combat.cpp:2405-2420). Target selection was PC-only too (a
+    `TODO(M5b)` the port's own authors had left in place). Added
+    `pickTargetMonst`/the `100+i` monster-target encoding `monst_pick_target`
+    uses, and fixed the melee/movement gates to match the C++'s per-target-type
+    rule. Spells and ranged abilities still only fire at PC targets — a
+    smaller, explicitly-noted remaining gap.
+  - **Terrain looked foggier than the monsters standing on it while
+    Looking.** The combat draw gate already bypassed the explored map while
+    aiming (a earlier fix); the plain-town gate has the same fallback for
+    `MODE_LOOK_TOWN` specifically (boe.graphics.cpp:945) and this port never
+    had it, so scrolling with the pointing arrows during Look kept unexplored
+    ground black even where `party_can_see` said otherwise — while NPCs
+    (gated on `partyCanSeeMonst`, no `isExplored` check at all) drew fine.
+    Pulled the whole gate out of `Screen` into an exported `canDrawTerrainSpot`
+    so it's unit-testable without a canvas.
+  - **Some sounds never played — audited, found real gap: item pickup.**
+    `get_item` (boe.items.cpp:483-510) plays a sound on every successful
+    pickup — gold, food, and everything else each their own, plus a
+    too-heavy refusal — and this port's `takeItem` played none of them.
+    Fixed; shops, item-shop services (identify/recharge/sell), doors, rest,
+    training and status effects were all already wired correctly, so this
+    looks like the one real gap rather than a systemic problem.
+  - `test/vehicles.test.ts` was unaffected; new coverage landed in
+    `test/specials.test.ts`, `test/session.test.ts`, `test/spellCombat.test.ts`,
+    `test/wandering.test.ts`, `test/monsterTurn.test.ts`, the new
+    `test/screen.test.ts`, and `test/inventory.test.ts`.
+
+- **Two more from the same play-test (2026-07-27): parry's free swing, and
+  combat's missing beat.**
+  - **Parry didn't punish a monster for closing the distance.** The C++'s
+    `char_parry`/`char_stand_ready` were both already right, but
+    `do_monster_turn` has its own check right after `seek_party` moves a
+    monster (boe.combat.cpp:2445/2456): any PC with `parry > 99` who now
+    finds that monster adjacent spends the stand-ready on a free swing at it.
+    This port had nothing on the monster-movement side reading `parry` at
+    all. Added as `checkParryOpportunity` in `monsterTurn.ts`, called after
+    both `seek_party` sites (seeking a PC, seeking another creature) the same
+    way the C++ does, including the pacifist exemption.
+  - **Combat read faster than the original at every speed setting.** Two
+    separate causes, both timing:
+    - `do_monster_turn` has *two* pauses, and this port only ever had one.
+      `pause(get_int_pref("GameSpeed"))` before centering the camera on the
+      acting monster was already ported faithfully as `MONSTER_PAUSE_MS`
+      (16ms, matching GameSpeed's default of 0). But `print_buf(); pause(8);`
+      right after a flee/spell/ranged/melee action lands
+      (boe.combat.cpp:2428) is a **fixed 8 ticks (~133ms), not gated by
+      GameSpeed at all** — every action gets this beat regardless of speed
+      setting, and it simply didn't exist in the port. Added as
+      `ACTION_PAUSE_MS`/`bookActionPause()` in `anim.ts`, booked on the same
+      shared timeline `focusOn` and the missile animations already use.
+    - `combat_move_monster` (boe.monster.cpp:721) plays a footstep
+      (`move_sound`, the same the party's own steps use) when a monster's
+      destination is on screen — the port's `combatMoveMonster` never called
+      it, so monster movement in a fight was silent. Wired up with
+      `session.moveSound` (now public) gated on `pointOnScreen`.
+    - Both ride the existing timeline architecture (`animBook`/transcript
+      lines stamped by `animAt()`), so nothing about *how* combat paces
+      itself changed — only that two real sources of pacing that existed in
+      the C++ now exist here too.
+    - **Follow-up, same day: tried bumping `ACTION_PAUSE_MS` to 600ms to see
+      if it read as slower. It didn't — not even a little.** Root cause,
+      and it's a real one, not a tuning problem: **`doMonsterTurn` resolves
+      every monster's move, attack and damage roll synchronously before any
+      of this pacing is ever observed.** By the time the first booked pause
+      or camera move actually plays back, HP bars, monster positions and
+      combat outcomes are *already* at their final values — `redraw()` is
+      called once, immediately, right after the whole turn finishes. The
+      600ms window that follows is genuinely a static frame unless a
+      missile is flying or the camera happens to pan (and even then, the
+      numbers don't move — only the camera and the transcript text do).
+      **The real fix is the same shape as `boom_anim_active`'s marked-damage
+      system** (`booms.ts`/`handleMarkedDamage`, the 2026-07-27 entry
+      above, which already solves exactly this problem for spell volleys):
+      state changes from a monster's turn need to be *deferred* onto the
+      timeline and applied at their booked moment, not applied the instant
+      `doMonsterTurn` computes them. Concretely, for whoever picks this up:
+      - `doMonsterTurn`'s per-monster loop would need to open something like
+        `startBoomAnim()`'s volley for the *whole turn* (or per-action), and
+        route `monsterAttack`'s damage through `damagePc`/`damageMonst`'s
+        existing `MARKED` path (already used by spell volleys) instead of
+        applying it inline.
+      - Movement (`combatMoveMonster`) would need its position change (not
+        just its sound) to land at the booked pause's timestamp, likely via
+        `animSchedule` — right now `monst.curLoc` is mutated immediately and
+        only the *sound* is deferred.
+      - `ACTION_PAUSE_MS` is back at the faithful 133ms — worth revisiting
+        once the above lands, since only then will a bigger number actually
+        translate into a visibly slower fight.
+      - This is a genuinely separable piece of work — self-contained to
+        `monsterTurn.ts` (plus reusing the existing `booms.ts` machinery),
+        doesn't touch anything else this document covers, and a fresh
+        session can pick it up from this note alone.
+
+- **Two more bugs found re-testing the same day's fixes (2026-07-27).**
+  - **Fleeing an entire outdoor fight reported a party wipe.** `isAlive()` —
+    on both `Player`/`cPlayer` and `Party`/`cParty` — is `main_status ===
+    ALIVE`, which is also false for FLED, not just DEAD/DUST/STONE. The
+    C++'s `handle_party_death` (boe.actions.cpp:1431) accounts for this: it
+    resets every FLED PC back to ALIVE *first*, then rechecks — if that
+    brings the party back, it's a rout, not a death, and combat ends instead
+    (`end_town_mode`); only if nobody comes back this way does it fall
+    through to the actual game-over dialog. `checkPartyDeath` (from the
+    entry above) skipped this reset-and-recheck step entirely, so a party
+    that ran from an arena fight — everyone FLED, nobody DEAD — got the
+    "Your entire party has died" dialog instead of just... having fled.
+    Fixed by porting the same two-step check, and factoring `endOutdoorCombat`'s
+    body into a shared `exitArenaCombat` so the automatic exit-on-flee path
+    can use it without also inheriting the "Enemies are still alive!"
+    refusal that only makes sense for a *voluntary* End Combat click.
+  - **The outdoor "you feel ill" special (same one from the entry above)
+    still did nothing after the AFFECT_STATUS fix.** The fix itself routed
+    each status through the right `iLiving` method, but read the status type
+    from the wrong field: `spec.ex2a` instead of `spec.ex1c`
+    (boe.specials.cpp:2982 is `switch(eStatus(spec.ex1c))`, not `ex2a`). On
+    a real node `ex2a` is always -1 (unused), so the range guard caught it
+    and bailed before the switch ever ran — silent no-op, same symptom as
+    the original bug, different cause. Found by reproducing the exact
+    scenario node (valleydy `out2~0.spec` node 2, reached from node 1's
+    "Do you drink some?" prompt) directly in a test rather than guessing
+    further from the source alone; `test/specials.test.ts` now pins that
+    exact node's data so this can't silently flip back.
+
 ## Next steps
 
 M5 is closed and the first slice of **M6** landed 2026-07-27 (quests, job

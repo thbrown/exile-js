@@ -393,6 +393,14 @@ export function doCombatCast(session: GameSession, target: Location): void {
     runBoomAnim();
     handleMarkedDamage(univ, session);
   }
+
+  // Only advance the turn if the cast actually took AP — every target
+  // refused (out of range, obstructed, ...) spends nothing and leaves the
+  // caster free to try again, matching `apTaken`'s guard above. Without this
+  // a targeted combat spell could be cast over and over with the caster
+  // never running out of AP, since `doCombatCast` is a free function and
+  // can't trigger GameSession's own turn-advance on its own.
+  if (apTaken) session.afterCombatAction();
 }
 
 /** Everything `do_combat_cast` does to one square. */

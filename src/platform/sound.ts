@@ -24,6 +24,12 @@ export const Snd = {
   LOCK_OPENED: 9,
   /** A lockpick failing (boe.town.cpp:1194). */
   LOCK_FAILED: 41,
+  /** get_item picking up gold/food/anything else (boe.items.cpp:486-508). */
+  GOT_GOLD: 39,
+  GOT_FOOD: 62,
+  GOT_ITEM: 0,
+  /** get_item refusing an overweight pickup — the same cue as a failed lockpick. */
+  TOO_HEAVY: 41,
 } as const;
 
 export class SoundPlayer {

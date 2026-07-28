@@ -6,7 +6,7 @@
 import { animAt, animSchedule } from './game/anim';
 import { useItem } from './game/itemUse';
 import type { SpecialHost } from './game/specials/context';
-import { Location, shiftLoc } from './core/location';
+import { Location, locsEqual, shiftLoc } from './core/location';
 import { SpellPat } from './data/pattern';
 import { statusName } from './data/statusIcons';
 import { SPELLS, Spell, spellName } from './data/spell';
@@ -199,6 +199,20 @@ async function main(): Promise<void> {
       ],
     });
     return choice === 'under';
+  };
+
+  /**
+   * party-death.xml — the whole party has died. `handle_death` offers
+   * Load/New/Quit; there's no save system yet (M7), so this only offers a
+   * fresh start. The dialog has no Escape button, which is what freezes
+   * input — `InputRouter.dialogStack` gates every game key and click while
+   * one is open, and nothing ever closes this one.
+   */
+  session.onPartyDeath = () => {
+    void dialogs.run({
+      text: 'Your entire party has died.',
+      buttons: [{ name: 'new', label: 'New Game' }],
+    }).then(() => window.location.reload());
   };
 
   /**
@@ -441,7 +455,10 @@ async function main(): Promise<void> {
       const status = pcCanCastType(session, univ.currentPc, type);
       if (status !== CastStatus.OK) {
         univ.addStringToBuf(castStatusLine(status, kind, univ.currentPc.name));
-        if (status === CastStatus.NO_ENCUMBERED) takeAp(univ, 6);
+        if (status === CastStatus.NO_ENCUMBERED) {
+          takeAp(univ, 6);
+          session.afterCombatAction();
+        }
         setStatus();
         redraw();
         return;
@@ -725,6 +742,23 @@ async function main(): Promise<void> {
       setStatus();
       redraw();
       return;
+    }
+    // handle_terrain_screen_actions's offset==0 case (boe.actions.cpp:323):
+    // clicking the square you (or the acting PC) are already standing on is
+    // Pause/Wait, not a degenerate zero-length move — in combat that's
+    // `char_stand_ready`, i.e. clicking your own figure on the battlefield
+    // parries. This port's move dispatch below had no such check, so a
+    // self-click fell through to the ordinary move code and just wasted the
+    // turn without the stand-ready bonus.
+    if (what !== 'use') {
+      const self = isCombat(session.mode) ? univ.currentPc.combatPos
+        : session.inTown ? univ.party.townLoc : univ.party.outLoc;
+      if (locsEqual(target, self)) {
+        session.pause();
+        setStatus();
+        redraw();
+        return;
+      }
     }
     if (acting) return;
     acting = true;

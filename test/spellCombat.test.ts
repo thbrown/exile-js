@@ -107,6 +107,23 @@ describe('the refer dispatcher', () => {
     expect(pc.ap).toBe(ap - 6);
   });
 
+  /**
+   * `combatCastSpell` is a free function, not a `GameSession` method, so it
+   * has to trigger the same turn-advance `pc_combat_move`/`char_parry`/etc.
+   * get from their own call to `afterCombatAction` — otherwise the caster's
+   * AP hits 0 but the game never hands the turn to anyone else, and nothing
+   * stops the same PC opening the spell dialog and casting again forever.
+   */
+  it('running out of AP after a cast hands the turn to the next PC', () => {
+    const { s, pc } = inCombat();
+    pc.ap = 6; // exactly enough for one REFER_YES cast
+    const next = s.univ.party.pcs[1]!;
+    next.ap = 20;
+    combatCastSpell(s, Spell.LIGHT);
+    expect(pc.ap).toBe(0);
+    expect(s.univ.curPc).not.toBe(0);
+  });
+
   it('REFER_IMMED resolves at once', () => {
     const { s, pc } = inCombat();
     expect(SPELLS[Spell.HASTE]?.refer).toBe(SpellRefer.IMMED);
@@ -202,6 +219,25 @@ describe('do_combat_cast', () => {
     doCombatCast(s, at);
     return at;
   }
+
+  /**
+   * `doCombatCast` is also a free function with its own AP deduction (5 for
+   * a targeted spell), and needs the same `afterCombatAction` trigger as
+   * `combatCastSpell` — otherwise a targeted spell could be fired over and
+   * over with the caster's turn never ending.
+   */
+  it('running out of AP after a targeted cast hands the turn to the next PC', () => {
+    const { s, pc } = inCombat();
+    s.univ.party.pcs[1]!.ap = 20;
+    pc.curSp = 500;
+    pc.ap = 5; // exactly enough for one targeted cast
+    s.mode = GameMode.COMBAT;
+    combatCastSpell(s, Spell.SPARK);
+    const at = { x: pc.combatPos.x + 2, y: pc.combatPos.y };
+    doCombatCast(s, at);
+    expect(pc.ap).toBe(0);
+    expect(s.univ.curPc).not.toBe(0);
+  });
 
   it('Spark hurts whatever is on the square', () => {
     const { s, pc } = inCombat();

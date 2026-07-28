@@ -312,12 +312,16 @@ export function combatCastSpell(
       takeAp(univ, SPELL_AP);
       if (isPriest) doPriestSpell(session, pcNum, spellNum, freebie);
       else doMageSpell(session, pcNum, spellNum, freebie);
+      // Casting is a free function, not a GameSession method, so it has to
+      // trigger the turn advance itself — see afterCombatAction's doc.
+      session.afterCombatAction();
       break;
 
     case SpellRefer.IMMED:
       takeAp(univ, SPELL_AP);
       if (isPriest) combatImmedPriestCast(session, pcNum, spellNum, freebie);
       else combatImmedMageCast(session, pcNum, spellNum, freebie);
+      session.afterCombatAction();
       break;
 
     case SpellRefer.TARGET:

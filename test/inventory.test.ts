@@ -241,6 +241,41 @@ describe('picking things up and putting them down', () => {
     expect(town.record.itemTaken[target.isSpecial - 1]).toBe(true);
   });
 
+  /**
+   * get_item (boe.items.cpp:483-510) plays a sound on every successful
+   * pickup — gold, food and everything else each get their own — and this
+   * port's `takeItem` used to play none of them at all.
+   */
+  it('plays get_item\'s sound for each item kind', () => {
+    const session = newSession();
+    const played: number[] = [];
+    session.sound = { play: (n: number) => { played.push(n); } } as never;
+    const pc = session.univ.party.pcs[0]!;
+
+    const gold = item({ variety: ItemType.GOLD, itemLevel: 10, weight: 0 });
+    session.univ.town!.items.push({ ...gold, itemLoc: { ...pc.combatPos } });
+    session.takeItem(session.univ.town!.items.at(-1)!, 0);
+    expect(played).toEqual([39]);
+
+    played.length = 0;
+    const food = item({ variety: ItemType.FOOD, itemLevel: 10, weight: 0 });
+    session.univ.town!.items.push({ ...food, itemLoc: { ...pc.combatPos } });
+    session.takeItem(session.univ.town!.items.at(-1)!, 0);
+    expect(played).toEqual([62]);
+
+    played.length = 0;
+    const rock = item({ name: 'Rock', weight: 0 });
+    session.univ.town!.items.push({ ...rock, itemLoc: { ...pc.combatPos } });
+    session.takeItem(session.univ.town!.items.at(-1)!, 0);
+    expect(played).toEqual([0]);
+
+    played.length = 0;
+    const boulder = item({ name: 'Boulder', weight: 9999 });
+    session.univ.town!.items.push({ ...boulder, itemLoc: { ...pc.combatPos } });
+    session.takeItem(session.univ.town!.items.at(-1)!, 0);
+    expect(played).toEqual([41]);
+  });
+
   it('drops an item back onto the party\'s space', () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;

@@ -15,12 +15,12 @@ import { Creature, CreatureStatus } from '../universe/creature';
 import { Living, SpellNote, livingSound } from '../universe/living';
 import { MonstMelee } from '../data/monster';
 import { Player } from '../universe/player';
-import { MainStatus, Race, Skill, Status } from '../universe/skills';
+import { MainStatus, Race, Skill, Status, Trait } from '../universe/skills';
 import { Universe } from '../universe/universe';
 import {
   MonstAbil, MonstAbilCat, MonstGen, abilityCategory,
 } from '../data/monsterAbility';
-import { NO_ONE } from './combat';
+import { NO_ONE, pcAttack } from './combat';
 import {
   abilityCost, monstFireMissile, monsterBasicAbil, monsterSummon, pickMonsterAbility,
 } from './monsterAbilities';
@@ -30,12 +30,13 @@ import { onHitTargetSpecial } from './weaponAbilities';
 import { ItemAbil } from '../data/item';
 import { FieldType } from '../data/fields';
 import { hasAbilEquip } from '../universe/inventory';
-import { focusOn } from './anim';
+import { bookActionPause, focusOn } from './anim';
 import { doPoison, handleAcid, handleDisease } from './increaseAge';
 import { processFields } from './processFields';
 import { specialIncreaseAge } from './specialIncreaseAge';
 import { monstCastMage, monstCastPriest } from './monsterSpells';
 import { placeSpellPattern } from './spellPatterns';
+import { pointOnScreen } from './session';
 import type { GameSession } from './session';
 
 /** move_to_zero — one step toward zero from either side. */
@@ -94,6 +95,47 @@ function closestPcLoc(univ: Universe, where: Location): Location {
 }
 
 /**
+ * `univ.get_target` — a target index names either a PC (0-5) or, from 100 up,
+ * a monster (`100 + town.monsters` index), the same encoding `monst_pick_target`
+ * uses. Resolves to the `Living` it names, or null for NO_ONE / a stale index.
+ */
+function resolveTarget(session: GameSession, target: number): Living | null {
+  if (target < NO_ONE) return session.univ.party.pcs[target] ?? null;
+  if (target >= 100) return session.univ.town?.monsters[target - 100] ?? null;
+  return null;
+}
+
+/** Where a target index is standing, or the monster's own square for none. */
+function targetLoc(session: GameSession, monst: Creature, target: number): Location {
+  return resolveTarget(session, target)?.getLoc() ?? monst.curLoc;
+}
+
+/**
+ * `monst_pick_target_monst` — the other half of target selection: a friendly
+ * (charmed) creature fights hostiles instead of the party, and a hostile one
+ * that can't reach any PC will go after a friendly creature instead (this is
+ * what the "PC-friendly monsters" wake-up check in `giveMonstersMoves` is
+ * for). Picks the nearest visible creature on the opposing side.
+ */
+function pickTargetMonst(session: GameSession, monst: Creature): number {
+  const town = session.univ.town;
+  if (!town) return NO_ONE;
+  let best = NO_ONE;
+  let bestDist = Infinity;
+  for (let i = 0; i < town.monsters.length; i++) {
+    const other = town.monsters[i]!;
+    if (other === monst || !other.isAlive || monst.isFriendlyTo(other)) continue;
+    if (!monstCanSee(session, monst, other.curLoc)) continue;
+    const d = dist(monst.curLoc, other.curLoc);
+    if (d < bestDist) {
+      best = 100 + i;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+/**
  * monst_pick_target_pc (boe.monster.cpp) — a visible PC at random, then a
  * second pass preferring one within four squares. The rolls are kept because
  * the number of them is part of the RNG sequence.
@@ -127,25 +169,40 @@ function pickTargetPc(session: GameSession, monst: Creature): number {
 }
 
 /**
- * monst_pick_target (boe.monster.cpp) — cut down to the PC half. A monster
- * drops a dead target, sometimes drops a live one just to shift attention, and
- * otherwise keeps whoever it was already after.
+ * monst_pick_target (boe.monster.cpp) — a monster drops a dead target,
+ * sometimes drops a live one just to shift attention, and otherwise keeps
+ * whoever it was already after.
  *
- * TODO(M5b): monst_pick_target_monst, so a charmed monster or a summoned ally
- * can be picked on, and the spell-caster/missile-firer priority (which needs
- * those two actions to exist first).
+ * A friendly (charmed) creature never targets a PC — `pickTargetPc` refuses
+ * outright — so it goes straight to `pickTargetMonst`. A hostile one prefers
+ * a PC as always, but falls back to a nearby friendly creature (a charmed
+ * ally, a summoned guardian) when no PC is reachable, which is
+ * `monst_pick_target_monst`'s other half.
+ *
+ * The ranged-ability/spell-caster priority `monst_pick_target` itself also
+ * has isn't ported — those still only ever fire at a PC target (see the
+ * `target < NO_ONE` guards in `doMonsterTurn`); only melee and movement reach
+ * a monster target so far.
  */
 export function monstPickTarget(session: GameSession, monst: Creature): number {
   const univ = session.univ;
   if (monst.target < NO_ONE) {
     const pc = univ.party.pcs[monst.target];
     if (!pc || !pc.isAlive || univ.rng.getRan(1, 0, 3) === 1) monst.target = NO_ONE;
+  } else if (monst.target >= 100) {
+    const other = univ.town?.monsters[monst.target - 100];
+    if (!other || !other.isAlive || monst.isFriendlyTo(other)) monst.target = NO_ONE;
   }
   if (monst.target < NO_ONE) {
     const pc = univ.party.pcs[monst.target]!;
     if (monstCanSee(session, monst, pc.combatPos)) return monst.target;
+  } else if (monst.target >= 100) {
+    const other = univ.town?.monsters[monst.target - 100];
+    if (other && monstCanSee(session, monst, other.curLoc)) return monst.target;
   }
-  return pickTargetPc(session, monst);
+  if (monst.isFriendly) return pickTargetMonst(session, monst);
+  const pcTarget = pickTargetPc(session, monst);
+  return pcTarget !== NO_ONE ? pcTarget : pickTargetMonst(session, monst);
 }
 
 /** combat_move_monster (boe.monster.cpp:710) — one step, if the square allows it. */
@@ -154,6 +211,11 @@ function combatMoveMonster(session: GameSession, monst: Creature, dest: Location
   // TODO(M5b): monst_check_special_terrain and monst_inflict_fields.
   monst.direction = dirToward(monst.curLoc, dest);
   monst.curLoc = { ...dest };
+  // A footstep, same as the party's own — only when the step lands on
+  // screen, and only this one didn't play at all before.
+  if (pointOnScreen(session.center, dest)) {
+    session.moveSound(session.univ.town?.record.terrain[dest.x]?.[dest.y] ?? 0, monst.ap);
+  }
   return true;
 }
 
@@ -169,6 +231,25 @@ function dirToward(from: Location, to: Location): number {
   if (dx === -1 && dy === 0) return 6;
   if (dx === -1 && dy === -1) return 7;
   return 8;
+}
+
+/**
+ * The attack-of-opportunity check `do_monster_turn` runs right after a
+ * monster closes on its target (boe.combat.cpp:2445/2456): any PC standing
+ * ready (`parry > 99`) who now finds the monster adjacent spends that
+ * stand-ready to swing at it for free — the payoff for choosing to defend
+ * instead of act. Kept out of `char_parry`/`handle_pause` themselves because
+ * it's the monster's *movement*, not the PC's own turn, that triggers it.
+ */
+function checkParryOpportunity(session: GameSession, monst: Creature): void {
+  if (!monst.isAlive) return;
+  for (const pc of session.univ.party.pcs) {
+    if (pc.parry <= 99) continue;
+    if (!monstAdjacent(monst, pc.combatPos)) continue;
+    if (pc.traits[Trait.PACIFIST]) continue;
+    pc.parry = 0;
+    pcAttack(session.univ, session.univ.party.pcs.indexOf(pc), monst, session);
+  }
 }
 
 /**
@@ -616,6 +697,34 @@ function giveMonstersMoves(session: GameSession): void {
         }
       }
     }
+    // "Now it looks for PC-friendly monsters" (boe.combat.cpp:2088) — a
+    // hostile monster that spots a friendly one nearby (a charmed former ally,
+    // a summoned guardian, ...) wakes up for it even with no PC in sight.
+    if (monst.active === CreatureStatus.IDLE && !monst.isFriendly) {
+      for (const other of univ.town?.monsters ?? []) {
+        if (other.isAlive && other.isFriendly && dist(monst.curLoc, other.curLoc) <= 6
+          && session.canSeeLight(monst.curLoc, other.curLoc) < 5) {
+          monst.active = CreatureStatus.ALERTED;
+        }
+      }
+    }
+    // "See if friendly, fighting monster see hostile monster. If so, make
+    // mobile" (boe.combat.cpp:2098) — attitude must be exactly FRIENDLY, not
+    // merely DOCILE (`isFriendly` is true for both). This is what makes a
+    // charmed monster actually turn on its former allies: charm sets
+    // attitude to FRIENDLY (Creature.sleep's CHARM branch), and without this
+    // check nothing ever gives it a combat turn at all. Forcing `mobile`
+    // matters too — a normally-stationary monster (a shopkeeper, say) needs
+    // it to be able to close the distance once it's fighting for the party.
+    if (monst.active === CreatureStatus.IDLE && monst.attitude === Attitude.FRIENDLY) {
+      for (const other of univ.town?.monsters ?? []) {
+        if (other.isAlive && !other.isFriendly && dist(monst.curLoc, other.curLoc) <= 6
+          && session.canSeeLight(monst.curLoc, other.curLoc) < 5) {
+          monst.active = CreatureStatus.ALERTED;
+          monst.mobile = true;
+        }
+      }
+    }
 
     monst.ap = 0;
     if (monst.active === CreatureStatus.ALERTED) {
@@ -677,7 +786,7 @@ export function doMonsterTurn(session: GameSession): void {
       monst.target = target;
       const targSpace = !inCombat
         ? univ.party.townLoc
-        : target < NO_ONE ? univ.party.pcs[target]!.combatPos : monst.curLoc;
+        : targetLoc(session, monst, target);
 
       // "Draw w. monster in center, if can see" — the view follows whichever
       // monster is about to act, so you see where the spear comes from rather
@@ -761,25 +870,51 @@ export function doMonsterTurn(session: GameSession): void {
         }
       }
 
-      // Melee, if it can reach.
+      // Melee, if it can reach. Attacking a PC still needs `!isFriendly` (a
+      // charmed creature never swings at the party); attacking another
+      // creature only needs `attitude !== DOCILE`, already true here — this
+      // is what lets a charmed monster actually fight its former allies.
       if (!actedYet && target !== NO_ONE && monst.attitude !== Attitude.DOCILE) {
-        // In town, whoever the blow lands on is picked at random.
-        const victim = inCombat ? target : selectActivePc(univ);
-        const who: Living | null = target < NO_ONE ? univ.party.pcs[victim]! : null;
-        if (who && who.isAlive && monstAdjacent(monst, targSpace) && !monst.isFriendly) {
+        let who: Living | null;
+        if (target >= 100) {
+          who = univ.town?.monsters[target - 100] ?? null;
+        } else {
+          // In town, whoever the blow lands on is picked at random.
+          const victim = inCombat ? target : selectActivePc(univ);
+          who = monst.isFriendly ? null : univ.party.pcs[victim]!;
+        }
+        if (who && who.isAlive && monstAdjacent(monst, targSpace)) {
           monsterAttack(session, monst, who);
           monst.ap = Math.max(0, monst.ap - 4);
           actedYet = true;
         }
       }
 
+      // The post-action beat (boe.combat.cpp:2428) — flee, spec attacks and
+      // melee all fall through to here; plain movement doesn't (it has its
+      // own footstep sound instead, in combatMoveMonster).
+      if (actedYet && inCombat) bookActionPause();
+
       // Otherwise close the distance — but only in combat; town-mode movement
       // is do_monsters' job and has already happened.
       if (!actedYet && monst.mobile && inCombat) {
-        const moveTarget = target !== NO_ONE ? target : closestPc(univ, monst.curLoc);
-        if (!monst.isFriendly && moveTarget < NO_ONE) {
-          const pc = univ.party.pcs[moveTarget]!;
-          if (pc.isAlive) seekParty(session, monst, pc.combatPos);
+        if (target >= 100) {
+          // A creature target: `seek_party` runs unconditionally in the C++
+          // (there's no is_friendly gate on this branch), whichever side
+          // `monst` is fighting for. The opportunity-attack check right after
+          // it does still require `monst` to be hostile, since a charmed
+          // creature wandering next to a parrying PC shouldn't provoke one.
+          seekParty(session, monst, targSpace);
+          if (!monst.isFriendly) checkParryOpportunity(session, monst);
+        } else {
+          const moveTarget = target !== NO_ONE ? target : closestPc(univ, monst.curLoc);
+          if (!monst.isFriendly && moveTarget < NO_ONE) {
+            const pc = univ.party.pcs[moveTarget]!;
+            if (pc.isAlive) {
+              seekParty(session, monst, pc.combatPos);
+              checkParryOpportunity(session, monst);
+            }
+          }
         }
         monst.ap = Math.max(0, monst.ap - 1);
         actedYet = true;

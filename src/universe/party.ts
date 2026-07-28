@@ -269,6 +269,11 @@ export class Party {
     for (const row of this.stuffDone) row.fill(0);
   }
 
+  /** cParty::is_alive (party.cpp:440) — true while anyone still stands. */
+  isAlive(): boolean {
+    return this.pcs.some((pc) => pc.isAlive);
+  }
+
   sdLegit(row: number, col: number): boolean {
     return row >= 0 && row < SDF_ROWS && col >= 0 && col < SDF_COLUMNS;
   }

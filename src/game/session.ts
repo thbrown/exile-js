@@ -308,6 +308,17 @@ export class GameSession {
    * TODO(M6): increase_age's hunger and autosave.
    */
   private afterPartyTurn(): void {
+    try {
+      this.afterPartyTurnInner();
+    } finally {
+      // handle_monster_actions ends with this check (boe.actions.cpp:1932) —
+      // upkeep (poison, disease, a field) or a monster's turn can be what
+      // finishes the party off outside of combat.
+      this.checkPartyDeath();
+    }
+  }
+
+  private afterPartyTurnInner(): void {
     // increase_age's upkeep — poison biting, wounds closing, blessings running
     // out. Without this a status effect is only ever a line in the transcript.
     increaseAgeEffects(this);
@@ -398,6 +409,19 @@ export class GameSession {
       univ.addStringToBuf('Enemies are still alive!');
       return false;
     }
+    this.exitArenaCombat();
+    return true;
+  }
+
+  /**
+   * The guts of leaving an outdoor arena, shared by `endOutdoorCombat`'s
+   * voluntary exit (monster-alive check already passed) and the automatic
+   * exit when everyone has fled — the C++'s `end_town_mode` call from
+   * `handle_party_death` (boe.actions.cpp:1436) has no such check at all,
+   * because there's nobody left standing to still be fighting.
+   */
+  private exitArenaCombat(): void {
+    const univ = this.univ;
     for (const pc of univ.party.pcs) {
       if (pc.mainStatus === MainStatus.FLED) pc.mainStatus = MainStatus.ALIVE;
       pc.status[Status.POISONED_WEAPON] = 0;
@@ -424,7 +448,6 @@ export class GameSession {
       void this.runSpecial(
         SpecCtx.WIN_ENCOUNTER, SpecCtxType.OUTDOOR, won.specOnWin, univ.party.locInSec);
     }
-    return true;
   }
 
   private outdIsBlocked(where: Location): boolean {
@@ -476,14 +499,22 @@ export class GameSession {
     // this is what poisons you in a swamp and burns you in lava out here.
     if (!this.checkSpecialTerrain(destination)) return false;
 
-    // A special on the destination square can block the step outright.
+    // A special on the destination square can block the step outright, or
+    // force it through otherwise-blocking terrain (its `b` return) — that's
+    // how a scenario walks you across water at a ford, the same trick
+    // town_move_party's CANT_ENTER handling uses for a wall. This port used
+    // to read only `blocked` here and silently drop `forced`, so a ford's
+    // special ran (and could print its message) but the water still refused
+    // the step right after.
     const special = this.specialAt(destination);
+    let specialForced = false;
     if (special >= 0) {
-      const { blocked } = await this.runSpecial(
+      const { blocked, forced: nodeForced } = await this.runSpecial(
         SpecCtx.OUT_MOVE, SpecCtxType.OUTDOOR, special,
         // The chain sees sector coordinates, as check_special_terrain passes.
         this.univ.party.globalToLocal(destination));
       if (blocked) return false;
+      specialForced = nodeForced;
     }
 
     const offset = { x: destination.x - party.outLoc.x, y: destination.y - party.outLoc.y };
@@ -511,8 +542,11 @@ export class GameSession {
     }
 
     // The boat/horse block runs before `party.direction` is set in the C++
-    // too — a leave/board decision doesn't need it.
-    let forced = false;
+    // too — a leave/board decision doesn't need it. `forced` starts from the
+    // special node's own `forced` return and the boat-bridge prompt can also
+    // set it — either one bypasses the blockage test below, same as the C++'s
+    // single combined `forced` local.
+    let forced = specialForced;
     const ter = out.at(realDest.x, realDest.y);
     const terType = this.univ.terrainType(ter);
     const diagonal = realDest.x !== party.outLoc.x && realDest.y !== party.outLoc.y;
@@ -637,7 +671,12 @@ export class GameSession {
   }
 
   /** move_sound (boe.main.cpp:1995), minus the boat/horse/swamp special cases. */
-  private moveSound(ter: number, step: number): void {
+  /**
+   * Public because `combat_move_monster` (boe.monster.cpp:721) plays this
+   * too, from `monsterTurn.ts`'s free-function combat movement, not just the
+   * party's own moves.
+   */
+  moveSound(ter: number, step: number): void {
     if (!this.sound) return;
     switch (this.univ.terrainType(ter).stepSound) {
       case StepSound.SQUISH:
@@ -1197,6 +1236,9 @@ export class GameSession {
     const result = giveItem(pc, this.univ.party, item);
     if (result.status !== GiveStatus.OK) {
       this.univ.addStringToBuf(`  ${result.message}`);
+      // get_item (boe.items.cpp:501): an overweight pickup gets its own cue,
+      // the same one a failed lockpick uses.
+      if (result.status === GiveStatus.TOO_HEAVY) this.sound?.play(Snd.TOO_HEAVY);
       return result.message;
     }
     const index = town.items.indexOf(item);
@@ -1204,6 +1246,11 @@ export class GameSession {
     // Remember that a preset item has been taken, so it doesn't come back.
     if (item.isSpecial > 0) town.record.itemTaken[item.isSpecial - 1] = true;
     this.univ.addStringToBuf(result.message);
+    // get_item (boe.items.cpp:486-508): gold and food each get their own
+    // sound, everything else the generic pickup cue.
+    if (item.variety === ItemType.GOLD) this.sound?.play(Snd.GOT_GOLD);
+    else if (item.variety === ItemType.FOOD) this.sound?.play(Snd.GOT_FOOD);
+    else this.sound?.play(Snd.GOT_ITEM);
     // get_item (boe.items.cpp:286) — taking something that isn't yours in
     // sight of anyone friendly turns the whole town on the party.
     if (item.property) {
@@ -1679,6 +1726,56 @@ export class GameSession {
    * through); `false` (including no handler) means "leave the boat".
    */
   onConfirmBoatBridge: (() => Promise<boolean>) | null = null;
+
+  /**
+   * Set by the host: `party-death.xml`'s "the whole party has died" prompt
+   * (`handle_death`, boe.actions.cpp:3713). Fires once, the first time
+   * `party.isAlive()` goes false *and stays false after fled PCs are given a
+   * chance to come back* — see `checkPartyDeath`; `partyDead` latches so
+   * upkeep ticking on a dead party doesn't fire it again. There's no
+   * load/new-game flow to offer yet (that needs M7's save system), so the
+   * host's only real option today is to freeze input and say what happened.
+   */
+  onPartyDeath: (() => void) | null = null;
+  private partyDead = false;
+
+  /**
+   * `handle_party_death` (boe.actions.cpp:1431). `isAlive()` is `main_status
+   * === ALIVE`, in this port and the original both — so a party that's
+   * FLED, not dead, also reads as "not alive". The C++ handles that by
+   * resetting every FLED PC back to ALIVE *first* and rechecking: if that
+   * brings the party back, it's not death, it's a rout, and combat ends
+   * instead (`end_town_mode`) — only if nobody comes back this way is it
+   * really game over. Skipping this check is exactly the bug that made
+   * fleeing an entire outdoor fight read as a party wipe.
+   */
+  private checkPartyDeath(): void {
+    if (this.partyDead || this.univ.party.isAlive()) return;
+
+    const fledPcs = this.univ.party.pcs.filter((pc) => pc.mainStatus === MainStatus.FLED);
+    if (fledPcs.length > 0) {
+      for (const pc of fledPcs) pc.mainStatus = MainStatus.ALIVE;
+      if (this.univ.party.isAlive()) {
+        if (this.mode === GameMode.COMBAT) {
+          if (this.whichCombatType === 0) this.exitArenaCombat();
+          else {
+            const direction = endTownCombat(this);
+            if (direction !== Direction.Here) {
+              this.univ.party.direction = direction;
+              this.mode = GameMode.TOWN;
+              this.center = { ...this.univ.party.townLoc };
+              this.updateExplored(this.univ.party.townLoc);
+              this.univ.addStringToBuf('End combat.');
+            }
+          }
+        }
+        return;
+      }
+    }
+
+    this.partyDead = true;
+    this.onPartyDeath?.();
+  }
 
   /**
    * force_town_enter — pin where the party lands before start_town_mode runs,
@@ -2291,13 +2388,22 @@ export class GameSession {
    * when nobody has moves left start a new round.
    *
    * `combat_run_monst` is what happens between rounds — the monsters act, then
-   * everyone gets fresh moves.
+   * everyone gets fresh moves. Public because it's the equivalent of the
+   * C++'s `advance_time`-driven `combat_next_step` call, which runs after
+   * *every* action including ones this class doesn't itself perform — casting
+   * a spell is a free function (`combatCastSpell`/`doCombatCast` in
+   * spellCombat.ts/spellCombatTarget.ts) that takes AP and has to be able to
+   * trigger the same turn advance, or the caster never runs out of AP.
    */
-  private afterCombatAction(): void {
-    if (this.univ.currentPc.ap > 0) return;
+  afterCombatAction(): void {
+    if (this.univ.currentPc.ap > 0) {
+      this.checkPartyDeath();
+      return;
+    }
     if (pickNextPc(this.univ, this.combatActivePc)) this.startCombatRound();
     this.center = { ...this.univ.currentPc.combatPos };
     this.onRedraw?.();
+    this.checkPartyDeath();
   }
 
   /**
@@ -2326,6 +2432,25 @@ export class GameSession {
     if (this.locOffActiveArea(destination) && this.whichCombatType === 1
       && !this.townIsBlocked(destination)) {
       this.univ.addStringToBuf("Move: Can't leave town during combat.");
+      return true;
+    }
+    // pc_combat_move (boe.combat.cpp:242): terrain 90 marks the edge of an
+    // outdoor arena. Stepping onto it is a 30% roll to flee — the acting PC
+    // leaves the fight and loses their remaining AP; a failed roll still
+    // costs 1 AP as if they'd tried to bolt and been dragged back. Only
+    // arena combat (whichCombatType === 0) has this border; town fights use
+    // the "can't leave town" refusal above instead.
+    if (town.record.terrain[destination.x]?.[destination.y] === 90 && this.whichCombatType === 0) {
+      if (this.univ.rng.getRan(1, 1, 10) < 3) {
+        pc.mainStatus = MainStatus.FLED;
+        if (this.combatActivePc === this.univ.curPc) this.combatActivePc = NO_ONE;
+        pc.ap = 0;
+        this.univ.addStringToBuf('Moved: Fled.');
+      } else {
+        takeAp(this.univ, 1);
+        this.univ.addStringToBuf("Moved: Couldn't flee.");
+      }
+      this.afterCombatAction();
       return true;
     }
 

@@ -95,6 +95,34 @@ export function animSchedule(fn: () => void, at: number): void {
  */
 export const MONSTER_PAUSE_MS = 16;
 
+/**
+ * The beat after a monster's action lands — `do_monster_turn`'s own
+ * `print_buf(); pause(8);` (boe.combat.cpp:2428), right after a flee, a
+ * spell, a ranged shot or a melee swing resolves and before the loop moves
+ * on. Unlike `MONSTER_PAUSE_MS` this one is **not** gated by GameSpeed at
+ * all — it always runs, which is what gives every monster's turn a
+ * perceptible beat regardless of the speed setting. 8 ticks at ~16.67ms
+ * each (`time_in_ticks`, mathutil.cpp:67) is ~133ms.
+ *
+ * This was missing outright rather than approximated, unlike
+ * `MONSTER_PAUSE_MS` — there was no placeholder for it at all, which is most
+ * of why combat read as faster than the original: nothing paced the moment
+ * *between* one monster's swing and the next monster's turn starting.
+ *
+ * Tried bumped to 600ms to see if it read as slower — it didn't, because
+ * `doMonsterTurn` resolves all state (HP, position) synchronously before any
+ * of this is ever observed, so the booked time mostly guards a static frame.
+ * See the "Next steps" handoff in PROGRESS.md for the actual fix that's
+ * needed before this constant is worth tuning again. Back to the faithful
+ * value.
+ */
+export const ACTION_PAUSE_MS = 133;
+
+/** Book the post-action beat on the shared timeline; see `ACTION_PAUSE_MS`. */
+export function bookActionPause(): void {
+  animBook(ACTION_PAUSE_MS);
+}
+
 /** A scheduled camera move — `center = cur_monst->cur_loc; draw_terrain(0);` */
 export interface FocusEvent {
   center: Location;

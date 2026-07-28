@@ -11,6 +11,7 @@ import { loadScenario } from '../src/fileio/loadScenario';
 import { FsSource } from '../src/fileio/source';
 import { buildOpcodeTable } from '../src/fileio/specialParse';
 import { PartyPreset } from '../src/universe/player';
+import { Status } from '../src/universe/skills';
 import { Universe } from '../src/universe/universe';
 
 const opcodes = buildOpcodeTable(
@@ -475,6 +476,64 @@ describe('affect nodes', () => {
     const before = univ.party.pcs[0]!.skills[15]!;
     await run();
     expect(univ.party.pcs[0]!.skills[15]).toBe(before + 3);
+  });
+
+  /**
+   * A generic add-and-clamp on `status[]` used to land the number with no
+   * visible effect: the message ("X diseased.") and the sound both come from
+   * `cPlayer::disease`, not from the special node, so a scenario's "you feel
+   * ill" node looked like a no-op even though the status array changed.
+   *
+   * The status type lives in **ex1c**, not ex2a — the first pass at this fix
+   * read the wrong field, so a real node (ex2a always -1, unused) still hit
+   * the range guard and bailed before doing anything. This scenario node
+   * (valleydy out2~0.spec node 2, the "drink the tainted water" event) is
+   * what caught it: `ex1a=5, ex1b=1, ex1c=7` (DISEASE).
+   */
+  it('AFFECT_STATUS routes disease through cPlayer::disease, with its message', async () => {
+    const { univ, run } = withNodes({
+      0: { type: SpecType.AFFECT_STATUS, ex1a: 5, ex1b: 1, ex1c: Status.DISEASE },
+    });
+    const pc = univ.party.pcs[0]!;
+    pc.status[Status.DISEASE] = 0;
+    await run();
+    expect(pc.status[Status.DISEASE]).toBeGreaterThan(0);
+    expect(univ.transcript.some((l) => l.includes('diseased'))).toBe(true);
+  });
+
+  it('AFFECT_STATUS poisons with the saving-throw method, not a raw set', async () => {
+    const { univ, run } = withNodes({
+      0: { type: SpecType.AFFECT_STATUS, ex1a: 4, ex1b: 1, ex1c: Status.POISON },
+    });
+    const pc = univ.party.pcs[0]!;
+    pc.status[Status.POISON] = 0;
+    await run();
+    expect(pc.status[Status.POISON]).toBeGreaterThan(0);
+    expect(univ.transcript.some((l) => l.includes('poisoned'))).toBe(true);
+  });
+
+  /**
+   * The exact real node this was found from: valleydy's out2~0.spec node 2,
+   * reached from node 1's "Do you drink some?" dialog (ONCE_DIALOG, ex1a=28
+   * "Drink" jumping to node 2). Pinned directly against the scenario's own
+   * data rather than a synthetic node, so a future field-numbering slip in
+   * either direction shows up here too.
+   */
+  it('the scenario\'s own "drink the tainted water" node diseases the party', async () => {
+    const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
+    const session = new GameSession(univ);
+    session.attachSpecials(new TestHost());
+    session.startNewGame();
+    univ.party.outdoorCorner = { x: 2, y: 0 };
+    univ.party.iwc = { x: 0, y: 0 };
+    const node = univ.out.sector.specials.get(2)!;
+    expect(node.type).toBe(SpecType.AFFECT_STATUS);
+    expect(node.ex1c).toBe(Status.DISEASE);
+
+    for (const pc of univ.party.pcs) pc.status[Status.DISEASE] = 0;
+    await session.runSpecialRaw(SpecCtx.OUT_MOVE, SpecCtxType.OUTDOOR, 2, { x: 0, y: 0 });
+    expect(univ.party.pcs.every((pc) => (pc.status[Status.DISEASE] ?? 0) > 0)).toBe(true);
+    expect(univ.transcript.some((l) => l.includes('diseased'))).toBe(true);
   });
 });
 

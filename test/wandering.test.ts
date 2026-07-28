@@ -22,6 +22,7 @@ import {
   countWalls, doOutdoorMonsters, outEncLevTot, placeOutdWandMonst, wanderingIsNull,
 } from '../src/game/wandering';
 import { PartyPreset } from '../src/universe/player';
+import { MainStatus } from '../src/universe/skills';
 import { Universe } from '../src/universe/universe';
 
 const opcodes = buildOpcodeTable(
@@ -187,6 +188,66 @@ describe('the arena', () => {
     expect(s.univ.town).toBeNull();
     expect(s.arena).toBeNull();
     expect(s.univ.party.outLoc).toEqual(where);
+  });
+
+  /**
+   * pc_combat_move (boe.combat.cpp:242): terrain 90 is the arena's border
+   * wall, and stepping onto it in an *outdoor* fight (whichCombatType === 0)
+   * is a 30% roll to flee rather than a plain "blocked". This port used to
+   * have no handling for it at all, so running to the edge of an outdoor
+   * combat map did nothing.
+   */
+  it('running to the border of an outdoor arena gives a chance to flee', async () => {
+    const s = await outdoors();
+    startOutdoorCombat(s, aGroup(), s.univ.party.outLoc, 0);
+    const pc = s.univ.party.pcs[s.univ.curPc]!;
+    pc.combatPos = { x: 9, y: 20 };
+    const border = { x: 8, y: 20 };
+    expect(s.univ.town!.record.terrain[border.x]![border.y]).toBe(90);
+
+    let fled = false;
+    let failed = false;
+    for (let i = 0; i < 100 && !(fled && failed); i++) {
+      pc.mainStatus = MainStatus.ALIVE;
+      pc.ap = 4;
+      pc.combatPos = { x: 9, y: 20 };
+      await s.combatMove(border);
+      const last = s.univ.transcript.at(-1);
+      if (last === 'Moved: Fled.') {
+        fled = true;
+        expect(pc.mainStatus).toBe(MainStatus.FLED);
+        expect(pc.ap).toBe(0);
+      } else if (last === "Moved: Couldn't flee.") {
+        failed = true;
+        expect(pc.ap).toBeLessThan(4);
+      }
+    }
+    expect(fled).toBe(true);
+    expect(failed).toBe(true);
+  });
+
+  /**
+   * `handle_party_death` (boe.actions.cpp:1431) resets every FLED PC back to
+   * ALIVE before deciding whether the party is really dead — `is_alive()` is
+   * `main_status === ALIVE` for both a corpse and a PC that just ran away, so
+   * without that reset step a party that fled an entire fight read as a
+   * party wipe. `checkPartyDeath` used to skip straight to declaring death.
+   */
+  it('fleeing every PC ends the fight instead of reporting a party wipe', async () => {
+    const s = await outdoors();
+    startOutdoorCombat(s, aGroup(), s.univ.party.outLoc, 0);
+    for (const pc of s.univ.party.pcs) pc.mainStatus = MainStatus.FLED;
+    let died = 0;
+    s.onPartyDeath = () => { died++; };
+
+    s.pause();
+
+    expect(died).toBe(0);
+    expect(s.mode).toBe(GameMode.OUTDOORS);
+    expect(s.univ.town).toBeNull();
+    expect(s.arena).toBeNull();
+    expect(s.univ.party.pcs.every((pc) => pc.mainStatus === MainStatus.ALIVE)).toBe(true);
+    expect(s.univ.transcript.some((l) => l === 'End combat.')).toBe(true);
   });
 });
 

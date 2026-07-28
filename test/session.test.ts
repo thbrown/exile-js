@@ -6,16 +6,18 @@ import { GameRng } from '../src/core/rng';
 import { FieldType } from '../src/data/fields';
 import { SECTOR_SIZE } from '../src/data/outdoors';
 import { Scenario } from '../src/data/scenario';
-import { TerSpec } from '../src/data/terrain';
+import { SpecType, emptySpecialNode } from '../src/data/special';
+import { TerObstruct, TerSpec } from '../src/data/terrain';
 import { GameMode } from '../src/game/modes';
 import { FORCED_ENTRY, GameSession } from '../src/game/session';
+import { SpecialHost } from '../src/game/specials/context';
 import { loadScenario } from '../src/fileio/loadScenario';
 import { FsSource } from '../src/fileio/source';
 import { buildOpcodeTable } from '../src/fileio/specialParse';
 import { OUT_HALF_DIM } from '../src/universe/curOut';
 import { TOWN_NUM_OUTDOORS } from '../src/universe/party';
 import { PartyPreset } from '../src/universe/player';
-import { Status } from '../src/universe/skills';
+import { MainStatus, Status } from '../src/universe/skills';
 import { Universe } from '../src/universe/universe';
 
 const opcodes = buildOpcodeTable(
@@ -328,6 +330,48 @@ describe('outdoor terrain specials', () => {
     }
   });
 
+  /**
+   * A river ford: the special node on the far bank of a blocking (deep
+   * water) square returns `b` (forced) to walk the party through anyway —
+   * the same CANT_ENTER trick a walk-through-a-wall node uses in town.
+   * `outdMoveParty` used to read only the node's `blocked` return and drop
+   * `forced` on the floor, so the ford's special could run and print its
+   * message but the water still refused the step right after.
+   */
+  it('a forced CANT_ENTER node lets the party cross otherwise-blocked terrain', async () => {
+    const s = outdoors();
+    const host: SpecialHost = {
+      async message() {},
+      async choice(_strs, buttons) { return buttons.length - 1; },
+      async askText() { return ''; },
+      async selectPc() { return 0; },
+      startShop() { return true; },
+      startTalk() {},
+      sound() {},
+      rest() {},
+      moveParty() {},
+      changeLevel() {},
+      endScenario() {},
+    };
+    s.attachSpecials(host);
+
+    const idx = scen.terTypes.findIndex((t) => t.blockage === TerObstruct.BLOCK_MOVE);
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const from = s.univ.party.outLoc;
+    const to = { x: from.x + 1, y: from.y };
+    s.univ.out.set(to.x, to.y, idx);
+
+    const local = s.univ.party.globalToLocal(to);
+    s.univ.out.sector.specialLocs.push({ x: local.x, y: local.y, spec: 0 });
+    s.univ.out.sector.specials.set(0, {
+      ...emptySpecialNode(), type: SpecType.CANT_ENTER, ex1a: 0, ex2a: 1,
+    });
+
+    const moved = await s.moveTo(to);
+    expect(moved).toBe(true);
+    expect(s.univ.party.outLoc).toEqual(to);
+  });
+
   it('hurts the party on damaging terrain', async () => {
     const s = outdoors();
     const idx = scen.terTypes.findIndex((t) => t.special === TerSpec.DAMAGING);
@@ -411,5 +455,37 @@ describe('walking into things: webs, crates and conveyors', () => {
     } finally {
       scen.terTypes[idx] = saved;
     }
+  });
+});
+
+describe('party death', () => {
+  /**
+   * `handle_party_death` (boe.actions.cpp:1431), called from the tail of
+   * `advance_time` whenever `!univ.party.is_alive()`. This port had nothing
+   * hooked up at all, so a party that died just kept sitting there with the
+   * game still accepting input.
+   */
+  it('fires onPartyDeath exactly once when the last PC dies', async () => {
+    const s = newSession();
+    s.startNewGame();
+    let fired = 0;
+    s.onPartyDeath = () => { fired++; };
+    for (const pc of s.univ.party.pcs) pc.mainStatus = MainStatus.DEAD;
+    s.pause();
+    expect(fired).toBe(1);
+    // Upkeep keeps running on a dead party (nothing un-registers it), but the
+    // hook must not fire again.
+    s.pause();
+    expect(fired).toBe(1);
+  });
+
+  it('does not fire while anyone is still alive', async () => {
+    const s = newSession();
+    s.startNewGame();
+    let fired = 0;
+    s.onPartyDeath = () => { fired++; };
+    for (const pc of s.univ.party.pcs.slice(1)) pc.mainStatus = MainStatus.DEAD;
+    s.pause();
+    expect(fired).toBe(0);
   });
 });

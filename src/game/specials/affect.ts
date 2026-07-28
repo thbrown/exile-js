@@ -16,6 +16,7 @@ import { GiveStatus, giveItem } from '../../universe/inventory';
 import { Player } from '../../universe/player';
 import { MainStatus, Skill, Status } from '../../universe/skills';
 import { Universe } from '../../universe/universe';
+import { poisonWeapon } from '../itemUse';
 import { SpecialCtx } from './context';
 import { reportUnsupported } from './general';
 import { handleMessage } from './vm';
@@ -116,12 +117,83 @@ export async function affectSpec(univ: Universe, ctx: SpecialCtx): Promise<void>
       break;
 
     case SpecType.AFFECT_STATUS: {
-      if (spec.ex2a < 0 || spec.ex2a > 15) break;
-      const status = spec.ex2a as Status;
+      // affect_spec's AFFECT_STATUS (boe.specials.cpp:2981) routes each
+      // status through its own iLiving method rather than nudging the raw
+      // number — that's what prints "X poisoned."/"X diseased." and rolls
+      // frailty/protection/save-vs-level, so a generic add-and-clamp landed
+      // the status with no visible effect at all.
+      // The status type lives in ex1c, not ex2a — a slip in the first pass
+      // at this fix, and exactly why "you feel ill" still did nothing after
+      // it: ex2a is -1 on a real node (unused), so the range guard below
+      // caught it and bailed before ever reaching the switch.
+      if (spec.ex1c < 0 || spec.ex1c > 15) break;
+      const status = spec.ex1c as Status;
+      const give = spec.ex1b === 0;
+      const amount = spec.ex1a;
       for (const pc of targets()) {
         if (pc.mainStatus !== MainStatus.ALIVE) continue;
-        pc.status[status] = clamp(-8, 8, (pc.status[status] ?? 0) + signed(spec.ex1a));
+        switch (status) {
+          case Status.POISON:
+            if (give) pc.cure(amount); else pc.poison(amount, univ.rng);
+            break;
+          case Status.HASTE_SLOW:
+            pc.slow(give ? -amount : amount);
+            break;
+          case Status.INVULNERABLE:
+            pc.applyStatus(Status.INVULNERABLE, give ? amount : -amount);
+            break;
+          case Status.MAGIC_RESISTANCE:
+            pc.applyStatus(Status.MAGIC_RESISTANCE, give ? amount : -amount);
+            break;
+          case Status.WEBS:
+            if (give) pc.applyStatus(Status.WEBS, -amount); else pc.web(amount);
+            break;
+          case Status.DISEASE:
+            if (give) pc.applyStatus(Status.DISEASE, -amount); else pc.disease(amount, univ.rng);
+            break;
+          case Status.INVISIBLE:
+            pc.applyStatus(Status.INVISIBLE, give ? amount : -amount);
+            break;
+          case Status.BLESS_CURSE:
+            pc.curse(give ? -amount : amount);
+            break;
+          case Status.DUMB:
+            if (give) pc.applyStatus(Status.DUMB, -amount); else pc.dumbfound(amount, univ.rng);
+            break;
+          case Status.ASLEEP:
+            if (give) pc.applyStatus(Status.ASLEEP, -amount);
+            else pc.sleep(Status.ASLEEP, amount, 10, univ.rng);
+            break;
+          case Status.PARALYZED:
+            if (give) pc.applyStatus(Status.PARALYZED, -amount);
+            else pc.sleep(Status.PARALYZED, amount, 10, univ.rng);
+            break;
+          case Status.POISONED_WEAPON: {
+            const pcNum = party.pcs.indexOf(pc);
+            if (give) pc.applyStatus(Status.POISONED_WEAPON, -amount);
+            else poisonWeapon(univ, pcNum, amount, true);
+            break;
+          }
+          case Status.MARTYRS_SHIELD:
+            pc.applyStatus(Status.MARTYRS_SHIELD, give ? amount : -amount);
+            break;
+          case Status.ACID:
+            if (give) pc.applyStatus(Status.ACID, -amount); else pc.acid(amount);
+            break;
+          case Status.FORCECAGE:
+            // is_out(): a forcecage only exists indoors.
+            if (univ.isInTown()) {
+              if (give) pc.applyStatus(Status.FORCECAGE, -amount);
+              else pc.sleep(Status.FORCECAGE, amount, 10, univ.rng);
+            }
+            break;
+          // MAIN and CHARM aren't valid targets here (kept, matching the C++).
+          case Status.MAIN:
+          case Status.CHARM:
+            break;
+        }
       }
+      ctx.redraw = true;
       break;
     }
 
