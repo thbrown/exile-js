@@ -11,7 +11,7 @@ describe('trim source rects', () => {
   const SHEET_W = 224;
   const SHEET_H = 72;
 
-  it('keeps all twelve trim shapes inside the sheet', () => {
+  it('keeps all twelve trim shapes inside the sheet', async () => {
     expect(TRIM_RECTS).toHaveLength(12);
     for (const rect of TRIM_RECTS) {
       expect(rect.left).toBeGreaterThanOrEqual(0);
@@ -21,7 +21,7 @@ describe('trim source rects', () => {
     }
   });
 
-  it('places the edge shapes along the correct edges of their cell', () => {
+  it('places the edge shapes along the correct edges of their cell', async () => {
     const cell = (i: number): { x: number; y: number; w: number; h: number } => {
       const rect = TRIM_RECTS[i]!;
       return {
@@ -48,7 +48,7 @@ describe('trim source rects', () => {
     expect(TRIM_RECTS[8]!.left).not.toBe(TRIM_RECTS[4]!.left);
   });
 
-  it('gives every walkway shape a whole cell', () => {
+  it('gives every walkway shape a whole cell', async () => {
     expect(WALKWAY_RECTS).toHaveLength(9);
     for (const rect of WALKWAY_RECTS) {
       expect(rect.right - rect.left).toBe(TILE_W);
@@ -62,7 +62,7 @@ describe('trim source rects', () => {
     expect(WALKWAY_RECTS[8]).toEqual({ top: 0, left: 196, bottom: TILE_H, right: 196 + TILE_W });
   });
 
-  it('does not overlap walkway cells with trim cells', () => {
+  it('does not overlap walkway cells with trim cells', async () => {
     const cellsOf = (rect: { top: number; left: number; bottom: number; right: number }): string[] => {
       const out: string[] = [];
       for (let x = Math.floor(rect.left / TILE_W); x <= Math.floor((rect.right - 1) / TILE_W); x++)

@@ -49,7 +49,7 @@ function item(over: Partial<Item> = {}): Item {
 }
 
 describe('item varieties', () => {
-  it('matches load_item_type_info', () => {
+  it('matches load_item_type_info', async () => {
     // Two one-handed weapons or two rings can be worn; one of everything else.
     expect(variety(ItemType.ONE_HANDED).equipCount).toBe(2);
     expect(variety(ItemType.RING).equipCount).toBe(2);
@@ -76,7 +76,7 @@ describe('item varieties', () => {
 });
 
 describe('weight', () => {
-  it('counts stacked ammo and potions per charge', () => {
+  it('counts stacked ammo and potions per charge', async () => {
     expect(itemWeight(item({ variety: ItemType.ARROW, weight: 2, charges: 10 }))).toBe(20);
     expect(itemWeight(item({ variety: ItemType.POTION, weight: 3, charges: 4 }))).toBe(12);
     // Everything else weighs the same however many charges it has.
@@ -84,7 +84,7 @@ describe('weight', () => {
     expect(itemWeight(item({ variety: ItemType.NO_ITEM, weight: 99 }))).toBe(0);
   });
 
-  it('derives capacity from strength and traits', () => {
+  it('derives capacity from strength and traits', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     pc.skills[Skill.STRENGTH] = 8;
@@ -102,7 +102,7 @@ describe('weight', () => {
     expect(maxWeight(pc)).toBe(100 + 15 * 20);
   });
 
-  it('shifts the carried total for lightening and heavying items', () => {
+  it('shifts the carried total for lightening and heavying items', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     pc.items[0] = item({ weight: 40 });
@@ -115,7 +115,7 @@ describe('weight', () => {
 });
 
 describe('giving items', () => {
-  it('routes gold, food and special items to the party', () => {
+  it('routes gold, food and special items to the party', async () => {
     const session = newSession();
     const { party } = session.univ;
     const pc = party.pcs[0]!;
@@ -133,7 +133,7 @@ describe('giving items', () => {
     expect(pc.items.every((i) => i.variety === ItemType.NO_ITEM)).toBe(true);
   });
 
-  it('puts an ordinary item in the first free slot and clears floor flags', () => {
+  it('puts an ordinary item in the first free slot and clears floor flags', async () => {
     const session = newSession();
     const { party } = session.univ;
     const pc = party.pcs[0]!;
@@ -146,7 +146,7 @@ describe('giving items', () => {
     expect(result.message).toContain('Jenneke gets');
   });
 
-  it('refuses when too heavy, when full, and when the PC is dead', () => {
+  it('refuses when too heavy, when full, and when the PC is dead', async () => {
     const session = newSession();
     const { party } = session.univ;
     const pc = party.pcs[0]!;
@@ -162,7 +162,7 @@ describe('giving items', () => {
 });
 
 describe('equipping', () => {
-  it('allows two one-handed weapons but not three', () => {
+  it('allows two one-handed weapons but not three', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     for (let i = 0; i < 3; i++) pc.items[i] = item({ variety: ItemType.ONE_HANDED, weight: 0 });
@@ -172,7 +172,7 @@ describe('equipping', () => {
     expect(equipItem(pc, 2).ok).toBe(false);
   });
 
-  it('needs two free hands for a two-hander', () => {
+  it('needs two free hands for a two-hander', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     pc.items[0] = item({ variety: ItemType.ONE_HANDED, weight: 0 });
@@ -184,7 +184,7 @@ describe('equipping', () => {
     expect(equipItem(pc, 1).ok).toBe(true);
   });
 
-  it('allows only one missile weapon and one kind of ammo', () => {
+  it('allows only one missile weapon and one kind of ammo', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     pc.items[0] = item({ variety: ItemType.BOW, weight: 0 });
@@ -197,7 +197,7 @@ describe('equipping', () => {
     expect(equipItem(pc, 3).ok).toBe(false);
   });
 
-  it('refuses to equip things that are not equipment', () => {
+  it('refuses to equip things that are not equipment', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     pc.items[0] = item({ variety: ItemType.POTION, weight: 0 });
@@ -205,7 +205,7 @@ describe('equipping', () => {
     expect(pc.equip[0]).toBe(false);
   });
 
-  it('will not unequip a cursed item', () => {
+  it('will not unequip a cursed item', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     pc.items[0] = item({ variety: ItemType.ARMOR, weight: 0, cursed: true });
@@ -214,7 +214,7 @@ describe('equipping', () => {
     expect(pc.equip[0]).toBe(true);
   });
 
-  it('finds abilities only on equipped items', () => {
+  it('finds abilities only on equipped items', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     pc.items[0] = item({ variety: ItemType.TOOL, weight: 0, ability: ItemAbil.LOCKPICKS });
@@ -225,7 +225,7 @@ describe('equipping', () => {
 });
 
 describe('picking things up and putting them down', () => {
-  it('reaches adjacent floor items and hands them over', () => {
+  it('reaches adjacent floor items and hands them over', async () => {
     const session = newSession();
     const town = session.univ.town!;
     const target = town.items.find((i) => !i.contained)!;
@@ -246,7 +246,7 @@ describe('picking things up and putting them down', () => {
    * pickup — gold, food and everything else each get their own — and this
    * port's `takeItem` used to play none of them at all.
    */
-  it('plays get_item\'s sound for each item kind', () => {
+  it('plays get_item\'s sound for each item kind', async () => {
     const session = newSession();
     const played: number[] = [];
     session.sound = { play: (n: number) => { played.push(n); } } as never;
@@ -276,7 +276,7 @@ describe('picking things up and putting them down', () => {
     expect(played).toEqual([41]);
   });
 
-  it('drops an item back onto the party\'s space', () => {
+  it('drops an item back onto the party\'s space', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     pc.items[0] = item({ name: 'Rock', weight: 0 });
@@ -288,7 +288,7 @@ describe('picking things up and putting them down', () => {
     expect(dropped.at(-1)!.itemLoc).toEqual(session.univ.party.townLoc);
   });
 
-  it('hands an item to another PC, refusing when it would not fit', () => {
+  it('hands an item to another PC, refusing when it would not fit', async () => {
     const session = newSession();
     const [from, to] = [session.univ.party.pcs[0]!, session.univ.party.pcs[1]!];
     from.items[0] = item({ name: 'Rope', weight: 5 });
@@ -302,7 +302,7 @@ describe('picking things up and putting them down', () => {
     expect(from.items[0]!.name).toBe('Anvil');
   });
 
-  it('only offers a lockpick prompt to whoever has picks equipped', () => {
+  it('only offers a lockpick prompt to whoever has picks equipped', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[2]!;
     let options = session.selectPcOptions('lockpick', Skill.LOCKPICKING);
@@ -326,7 +326,7 @@ describe('picking things up and putting them down', () => {
     expect(options[2]!.label).toContain('Lockpicks x4');
   });
 
-  it('lets a PC with equipped picks actually open a lock', () => {
+  it('lets a PC with equipped picks actually open a lock', async () => {
     const session = newSession();
     const pc = session.univ.party.pcs[0]!;
     pc.skills[Skill.LOCKPICKING] = 20;

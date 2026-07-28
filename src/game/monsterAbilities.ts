@@ -169,7 +169,7 @@ export async function monstFireMissile(
         extra: DamageType.FIRE,
       },
     };
-    monsterBasicAbil(session, monst, MonstAbil.DAMAGE, proxy, target);
+    await monsterBasicAbil(session, monst, MonstAbil.DAMAGE, proxy, target);
     return;
   }
 
@@ -206,7 +206,7 @@ export async function monstFireMissile(
     runAMissile(source, targSpace, abil.gen.pic, pathType, snd, 0, 0, 100);
     await animSettle();
   }
-  monsterBasicAbil(session, monst, key, abil, target);
+  await monsterBasicAbil(session, monst, key, abil, target);
 }
 
 /**
@@ -261,9 +261,9 @@ async function monstFireMissileProper(
     const dmg = univ.rng.getRan(abil.missile.dice, 1, abil.missile.sides) + Math.min(10, bless);
     target.spellNote(SpellNote.HITS);
     if (pcTarget) {
-      damagePc(univ, pcTarget, dmg, DamageType.WEAPON, monst.mon.race, { soundType: 13 });
+      await damagePc(univ, pcTarget, dmg, DamageType.WEAPON, monst.mon.race, { soundType: 13 });
     } else if (mTarget) {
-      damageMonst(univ, mTarget, 7, dmg, DamageType.WEAPON, { soundType: 13, session });
+      await damageMonst(univ, mTarget, 7, dmg, DamageType.WEAPON, { soundType: 13, session });
     }
   } else {
     target.spellNote(SpellNote.MISSES);
@@ -277,13 +277,13 @@ async function monstFireMissileProper(
  * TODO(M5b): PETRIFY needs petrify_pc/petrify_monst; FIELD needs
  * `place_spell_pattern`, which is M5c.
  */
-export function monsterBasicAbil(
+export async function monsterBasicAbil(
   session: GameSession,
   monst: Creature,
   key: MonstAbil,
   abil: Ability,
   target: Living,
-): void {
+): Promise<void> {
   if (!target.isAlive) return;
   const univ = session.univ;
   const rng = univ.rng;
@@ -304,8 +304,8 @@ export function monsterBasicAbil(
       let damType = abil.gen.extra as DamageType;
       // Nothing but assassination deals true SPECIAL damage.
       if (damType >= DamageType.SPECIAL) damType = DamageType.UNBLOCKABLE;
-      if (pcTarget) damagePc(univ, pcTarget, dmg, damType, monst.mon.race);
-      else if (mTarget) damageMonst(univ, mTarget, 7, dmg, damType, { session });
+      if (pcTarget) await damagePc(univ, pcTarget, dmg, damType, monst.mon.race);
+      else if (mTarget) await damageMonst(univ, mTarget, 7, dmg, damType, { session });
       break;
     }
 
@@ -330,8 +330,8 @@ export function monsterBasicAbil(
     case MonstAbil.KILL: {
       // Ten dice per point of strength, so this is the one that just kills you.
       const dmg = rng.getRan(10 * strength, 1, 10);
-      if (pcTarget) damagePc(univ, pcTarget, dmg, DamageType.UNBLOCKABLE, monst.mon.race);
-      else if (mTarget) damageMonst(univ, mTarget, 7, dmg, DamageType.UNBLOCKABLE, { session });
+      if (pcTarget) await damagePc(univ, pcTarget, dmg, DamageType.UNBLOCKABLE, monst.mon.race);
+      else if (mTarget) await damageMonst(univ, mTarget, 7, dmg, DamageType.UNBLOCKABLE, { session });
       break;
     }
 
@@ -358,7 +358,7 @@ export function monsterBasicAbil(
     case MonstAbil.FIELD:
       // The *strength* field doubles as the pattern id here, and `extra` as
       // the field type — the union's `fld` arm.
-      placeSpellPattern(session, strength as SpellPat, target.getLoc(), {
+      await placeSpellPattern(session, strength as SpellPat, target.getLoc(), {
         field: abil.gen.extra as FieldType,
         rot: target.direction + 6,
         whoHit: 7, // out of the 0-5 PC range: nobody is credited

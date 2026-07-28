@@ -64,7 +64,7 @@ function equipSword(s: GameSession, who = WHO, slot = 1): Item {
 }
 
 describe('the use-flag helpers', () => {
-  it('says a healing potion is usable anywhere and is magic', () => {
+  it('says a healing potion is usable anywhere and is magic', async () => {
     const item = { ...defaultItem(), ability: ItemAbil.AFFECT_HEALTH };
     expect(canUse(item)).toBe(true);
     expect(useInTown(item)).toBe(true);
@@ -73,13 +73,13 @@ describe('the use-flag helpers', () => {
     expect(useMagic(item)).toBe(true);
   });
 
-  it('refuses a passive ability outright', () => {
+  it('refuses a passive ability outright', async () => {
     const item = { ...defaultItem(), ability: ItemAbil.DAMAGING_WEAPON };
     expect(canUse(item)).toBe(false);
     expect(useMagic(item)).toBe(false);
   });
 
-  it('takes a CAST_SPELL item\'s when-bits from the spell it casts', () => {
+  it('takes a CAST_SPELL item\'s when-bits from the spell it casts', async () => {
     // True Sight is town-only; Light works everywhere.
     const sight = { ...defaultItem(), ability: ItemAbil.CAST_SPELL, abilData: Spell.TRUE_SIGHT };
     expect(useInTown(sight)).toBe(true);
@@ -90,7 +90,7 @@ describe('the use-flag helpers', () => {
     expect(useInCombat(light)).toBe(true);
   });
 
-  it('makes Flight the one outdoors-only party status', () => {
+  it('makes Flight the one outdoors-only party status', async () => {
     const fly = {
       ...defaultItem(), ability: ItemAbil.AFFECT_PARTY_STATUS, abilData: PartyStatus.FLIGHT,
     };
@@ -104,7 +104,7 @@ describe('the use-flag helpers', () => {
     expect(useOutdoors(stealth)).toBe(false);
   });
 
-  it('widens AFFECT_STATUS outdoors for the four statuses that need it', () => {
+  it('widens AFFECT_STATUS outdoors for the four statuses that need it', async () => {
     const mk = (s: Status) => ({ ...defaultItem(), ability: ItemAbil.AFFECT_STATUS, abilData: s });
     for (const s of [Status.POISON, Status.DISEASE, Status.HASTE_SLOW, Status.BLESS_CURSE])
       expect(useOutdoors(mk(s))).toBe(true);
@@ -256,7 +256,7 @@ describe('the effects', () => {
     expect(s.univ.party.partyStatus[PartyStatus.DETECT_LIFE]).toBe(0);
   });
 
-  it('drains experience without going below zero', () => {
+  it('drains experience without going below zero', async () => {
     const s = inTown();
     const pc = s.univ.party.pcs[WHO]!;
     pc.experience = 30;
@@ -281,19 +281,19 @@ describe('the effects', () => {
 });
 
 describe('bookText', () => {
-  it('splits a description on its two ||| markers', () => {
+  it('splits a description on its two ||| markers', async () => {
     expect(bookText({ ...defaultItem(), desc: 'cover|||one|||two' }))
       .toEqual(['one', 'two']);
   });
 
-  it('gives one paragraph when there is only one marker', () => {
+  it('gives one paragraph when there is only one marker', async () => {
     expect(bookText({ ...defaultItem(), desc: 'cover|||just this' }))
       .toEqual(['just this', '']);
   });
 });
 
 describe('poison_weapon', () => {
-  it('poisons the equipped weapon and records which one', () => {
+  it('poisons the equipped weapon and records which one', async () => {
     const s = inTown();
     const pc = s.univ.party.pcs[WHO]!;
     const sword = equipSword(s);
@@ -302,7 +302,7 @@ describe('poison_weapon', () => {
     expect(pc.status[Status.POISONED_WEAPON]).toBe(4);
   });
 
-  it('reports no weapon when nothing poisonable is equipped', () => {
+  it('reports no weapon when nothing poisonable is equipped', async () => {
     const s = inTown();
     const pc = s.univ.party.pcs[WHO]!;
     equipSword(s);
@@ -311,7 +311,7 @@ describe('poison_weapon', () => {
     expect(s.univ.transcript.at(-1)).toContain('No weapon equipped');
   });
 
-  it('skips an unequipped poisonable weapon to reach an equipped one', () => {
+  it('skips an unequipped poisonable weapon to reach an equipped one', async () => {
     const s = inTown();
     const pc = s.univ.party.pcs[WHO]!;
     pc.items[0] = { ...defaultItem(), variety: ItemType.ONE_HANDED, name: 'spare dagger' };
@@ -320,7 +320,7 @@ describe('poison_weapon', () => {
     expect(pc.weapPoisoned?.name).toBe('drawn sword');
   });
 
-  it('never botches a safe application, so no charge is wasted', () => {
+  it('never botches a safe application, so no charge is wasted', async () => {
     const s = inTown();
     equipSword(s);
     poisonWeapon(s.univ, WHO, 4, true);

@@ -35,7 +35,7 @@ function newGame(): { univ: Universe; session: GameSession } {
 }
 
 describe('training', () => {
-  it('charges both skill points and gold', () => {
+  it('charges both skill points and gold', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.skillPts = 20;
@@ -53,7 +53,7 @@ describe('training', () => {
     expect(pc.skillPts).toBe(20 - cost.points);
   });
 
-  it('refuses without the skill points or the gold', () => {
+  it('refuses without the skill points or the gold', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.skillPts = 0;
@@ -63,7 +63,7 @@ describe('training', () => {
     expect(new TrainingState(pc, 10000).canChange(Skill.STRENGTH, true)).toBe(true);
   });
 
-  it('stops at the skill cap', () => {
+  it('stops at the skill cap', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.skillPts = 1000;
@@ -73,7 +73,7 @@ describe('training', () => {
     expect(state.canChange(Skill.MAGE_LORE, true)).toBe(true);
   });
 
-  it("won't refund a level the PC came in with, but will refund this session's", () => {
+  it("won't refund a level the PC came in with, but will refund this session's", async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.skillPts = 100;
@@ -88,7 +88,7 @@ describe('training', () => {
     expect(state.gold).toBe(10000);
   });
 
-  it('buys health two at a time, already filled', () => {
+  it('buys health two at a time, already filled', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.skillPts = 10;
@@ -101,7 +101,7 @@ describe('training', () => {
     expect(pc.curHealth).toBe(pc.maxHealth);
   });
 
-  it('curses an Anama member who takes up mage magic', () => {
+  it('curses an Anama member who takes up mage magic', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.traits[Trait.ANAMA] = true;
@@ -122,7 +122,7 @@ describe('training', () => {
     expect(pc.traits[Trait.ANAMA]).toBe(false);
   });
 
-  it('only offers PCs with skill points to spend', () => {
+  it('only offers PCs with skill points to spend', async () => {
     const { univ, session } = newGame();
     univ.party.pcs.forEach((pc) => { pc.skillPts = 0; });
     univ.party.pcs[2]!.skillPts = 5;
@@ -134,7 +134,7 @@ describe('training', () => {
 });
 
 describe('the Rest command', () => {
-  it('rests, costs food, and plays its sound', () => {
+  it('rests, costs food, and plays its sound', async () => {
     const { univ, session } = newGame();
     const sounds: number[] = [];
     session.sound = { play: (n: number) => sounds.push(n) } as never;
@@ -152,7 +152,7 @@ describe('the Rest command', () => {
     expect(univ.transcript.at(-1)).toBe('  Rest successful.');
   });
 
-  it('refuses when poisoned, hungry, or in a boat', () => {
+  it('refuses when poisoned, hungry, or in a boat', async () => {
     const cases: [string, (u: Universe) => void, string][] = [
       ['poison', (u) => { u.party.pcs[0]!.status[Status.POISON] = 3; }, 'Someone poisoned'],
       ['food', (u) => { u.party.food = 5; }, 'Not enough food'],
@@ -168,7 +168,7 @@ describe('the Rest command', () => {
 });
 
 describe('resting', () => {
-  it('heals and restores, capped at the maximum', () => {
+  it('heals and restores, capped at the maximum', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[3]!;
     pc.curHealth = 1;
@@ -186,7 +186,7 @@ describe('resting', () => {
     expect(pc.curHealth).toBe(1);
   });
 
-  it('advances the clock, clears statuses, and heals the party', () => {
+  it('advances the clock, clears statuses, and heals the party', async () => {
     const { univ } = newGame();
     univ.party.pcs.forEach((pc) => {
       pc.curHealth = 1;
@@ -201,7 +201,7 @@ describe('resting', () => {
     }
   });
 
-  it('restocks the random shops on a long rest', () => {
+  it('restocks the random shops on a long rest', async () => {
     const { univ } = newGame();
     const which = scen.shops.findIndex((s) => s.type === 2);
     const before = [...(univ.party.magicStoreItems.get(which)?.values() ?? [])]
@@ -217,7 +217,7 @@ describe('resting', () => {
     expect(after.length).toBe(before.length);
   });
 
-  it('an INN node charges, rests, and moves the party to its bed', () => {
+  it('an INN node charges, rests, and moves the party to its bed', async () => {
     for (let t = 0; t < scen.townTalk.length; t++) {
       const index = scen.townTalk[t]!.talkNodes.findIndex(
         (n) => n.type === TalkNodeType.INN && n.personality >= 0);

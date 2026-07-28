@@ -278,7 +278,7 @@ export function endTownCombat(session: GameSession): Direction {
  * damage_target (boe.combat.cpp) — the dispatch that lets an attack hit either
  * kind of combatant. `target` is a PC slot (0-5) or a monster index + 100.
  */
-export function damageTarget(
+export async function damageTarget(
   univ: Universe,
   target: Living,
   dam: number,
@@ -288,7 +288,7 @@ export function damageTarget(
   doPrint = false,
   session?: GameSession,
   soundType = -1,
-): number {
+): Promise<number> {
   if (target instanceof Player) {
     return damagePc(univ, target, dam, type, race, { doPrint, soundType });
   }
@@ -327,12 +327,12 @@ function moveToZero(value: number): number {
  * an unarmed punch, or a swing with each equipped weapon. Costs 4 AP whatever
  * happens, and a martyr's shield sends some of the damage back.
  */
-export function pcAttack(
+export async function pcAttack(
   univ: Universe,
   whoAtt: number,
   target: Living | null,
   session?: GameSession,
-): void {
+): Promise<void> {
   const attacker = univ.party.pcs[whoAtt];
   if (!attacker || !attacker.isAlive) return;
   if (!target) return;
@@ -388,7 +388,7 @@ export function pcAttack(
       if (attacker.race === Race.UNDEAD || attacker.race === Race.SKELETAL) type = DamageType.UNDEAD;
       else if (attacker.race === Race.DEMON) type = DamageType.DEMON;
       // The punch passes sound type 4 (a thump) in the C++.
-      damageTarget(univ, target, r2, type, whoAtt, attacker.race, true, session, 4);
+      await damageTarget(univ, target, r2, type, whoAtt, attacker.race, true, session, 4);
     } else {
       univ.addStringToBuf(`${attacker.name} misses.`);
       livingSound(2);
@@ -396,11 +396,11 @@ export function pcAttack(
   }
 
   if (weap1) {
-    pcAttackWeapon(univ, whoAtt, target, hitAdj, damAdj, weap1,
+    await pcAttackWeapon(univ, whoAtt, target, hitAdj, damAdj, weap1,
       1 + (weap2 ? 1 : 0), attacker.weapPoisoned === weap1, session);
   }
   if (weap2 && target.isAlive) {
-    pcAttackWeapon(univ, whoAtt, target, hitAdj, damAdj, weap2,
+    await pcAttackWeapon(univ, whoAtt, target, hitAdj, damAdj, weap2,
       0, attacker.weapPoisoned === weap2, session);
   }
   attacker.status[Status.POISONED_WEAPON] = moveToZero(attacker.status[Status.POISONED_WEAPON] ?? 0);
@@ -410,7 +410,7 @@ export function pcAttack(
   if (dealt > 0 && target.isShielded(univ.rng)) {
     const shared = target.getSharedDmg(dealt, univ.rng);
     univ.addStringToBuf('  Shares damage!');
-    damagePc(univ, attacker, shared, DamageType.MAGIC, Race.UNKNOWN);
+    await damagePc(univ, attacker, shared, DamageType.MAGIC, Race.UNKNOWN);
   }
 }
 
@@ -433,7 +433,7 @@ function pcTargetDefence(target: Living): number {
  * the to-hit and the damage.
  *
  */
-export function pcAttackWeapon(
+export async function pcAttackWeapon(
   univ: Universe,
   whoAtt: number,
   target: Living,
@@ -443,7 +443,7 @@ export function pcAttackWeapon(
   primary: number,
   doPoison: boolean,
   session?: GameSession,
-): void {
+): Promise<void> {
   const attacker = univ.party.pcs[whoAtt]!;
 
   // An unset weapon type falls back to edged; the two magic values scale the
@@ -497,7 +497,7 @@ export function pcAttackWeapon(
     univ.addStringToBuf('  The weapon produces an explosion!');
     livingSound(5);
     if (session) {
-      placeSpellPattern(session, SpellPat.RADIUS_2, target.getLoc(), {
+      await placeSpellPattern(session, SpellPat.RADIUS_2, target.getLoc(), {
         damage: { type: weap.abilData as DamageType, dice: weap.abilStrength * 2 },
         whoHit: whoAtt,
       });
@@ -546,17 +546,17 @@ export function pcAttackWeapon(
   // Note this is a sound *type* (an index into boom_space's table), not a sound
   // file — `damageTarget` passes it on to `boomSpace`, which looks it up.
   const dmgSnd = weaponSoundType(weap);
-  const weaponDone = damageTarget(
+  const weaponDone = await damageTarget(
     univ, target, r2, DamageType.WEAPON, whoAtt, attacker.race, false, session, dmgSnd);
   let specialDone = 0;
   if (specDam) {
     // Special damage always booms with sound type 5.
-    specialDone = damageTarget(
+    specialDone = await damageTarget(
       univ, target, specDam, DamageType.SPECIAL, whoAtt, attacker.race, false, session, 5);
   }
   let bonusDone = 0;
   if (bonusDam) {
-    bonusDone = damageTarget(
+    bonusDone = await damageTarget(
       univ, target, bonusDam, spec.damType, whoAtt, attacker.race, false, session, 0);
   }
   target.damagedMsg(weaponDone, specialDone + bonusDone);

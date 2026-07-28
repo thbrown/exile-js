@@ -37,12 +37,12 @@ function inTown(): GameSession {
 }
 
 describe('status icons', () => {
-  it('shows nothing for a status that is not in effect', () => {
+  it('shows nothing for a status that is not in effect', async () => {
     expect(statusIconFor(Status.POISON, 0)).toBe(-1);
     expect(statusIconFor(Status.WEBS, 0)).toBe(-1);
   });
 
-  it('poison switches to its worse icon from level 4 up', () => {
+  it('poison switches to its worse icon from level 4 up', async () => {
     // status_info: {true, 0, -1, {1, 4}} — icon 0 up to 3, icon 1 from 4.
     expect(statusIconFor(Status.POISON, 1)).toBe(0);
     expect(statusIconFor(Status.POISON, 3)).toBe(0);
@@ -50,26 +50,26 @@ describe('status icons', () => {
     expect(statusIconFor(Status.POISON, 8)).toBe(1);
   });
 
-  it('a signed status shows a different icon each way', () => {
+  it('a signed status shows a different icon each way', async () => {
     expect(statusIconFor(Status.BLESS_CURSE, 3)).toBe(2);
     expect(statusIconFor(Status.BLESS_CURSE, -3)).toBe(3);
     expect(statusIconFor(Status.HASTE_SLOW, 2)).toBe(6);
     expect(statusIconFor(Status.HASTE_SLOW, -2)).toBe(8);
   });
 
-  it('a one-sided status has nothing to show when negative', () => {
+  it('a one-sided status has nothing to show when negative', async () => {
     expect(statusIconFor(Status.WEBS, -3)).toBe(-1);
     expect(statusIconFor(Status.DISEASE, -1)).toBe(-1);
   });
 
-  it('lays icons out three to a row in staticons.png', () => {
+  it('lays icons out three to a row in staticons.png', async () => {
     expect(statIconRect(0)).toEqual({ left: 0, top: 0 });
     expect(statIconRect(2)).toEqual({ left: 24, top: 0 });
     expect(statIconRect(3)).toEqual({ left: 0, top: 12 });
     expect(statIconRect(22)).toEqual({ left: 12, top: 84 });
   });
 
-  it('names every status it can draw an icon for', () => {
+  it('names every status it can draw an icon for', async () => {
     for (let s = Status.POISONED_WEAPON; s <= Status.CHARM; s++) {
       expect(STATUS_NAMES[s], `status ${Status[s]}`).toBeDefined();
     }
@@ -81,14 +81,14 @@ describe('status icons', () => {
 });
 
 describe('clicking a PC row', () => {
-  it('switching makes that PC active', () => {
+  it('switching makes that PC active', async () => {
     const s = inTown();
     s.switchPc(3);
     expect(s.univ.curPc).toBe(3);
     expect(s.univ.transcript.at(-1)).toContain('Now active');
   });
 
-  it('refuses a PC who is not alive', () => {
+  it('refuses a PC who is not alive', async () => {
     const s = inTown();
     s.univ.party.pcs[3]!.mainStatus = MainStatus.DEAD;
     s.switchPc(3);
@@ -96,7 +96,7 @@ describe('clicking a PC row', () => {
     expect(s.univ.transcript.at(-1)).toContain('must be here & active');
   });
 
-  it('in combat it needs action points, not a pulse', () => {
+  it('in combat it needs action points, not a pulse', async () => {
     const s = inTown();
     s.startCombat(s.univ.party.direction);
     expect(s.mode).toBe(GameMode.COMBAT);
@@ -109,7 +109,7 @@ describe('clicking a PC row', () => {
     expect(s.univ.curPc).toBe(2);
   });
 
-  it('the HP and SP read-outs say what they are', () => {
+  it('the HP and SP read-outs say what they are', async () => {
     const s = inTown();
     const pc = s.univ.party.pcs[0]!;
     pc.curHealth = 7;
@@ -120,7 +120,7 @@ describe('clicking a PC row', () => {
     expect(s.univ.transcript.at(-1)).toContain('spell points out of');
   });
 
-  it('trade places takes two clicks and swaps the pair', () => {
+  it('trade places takes two clicks and swaps the pair', async () => {
     const s = inTown();
     const names = s.univ.party.pcs.map((p) => p.name);
     s.tradePlaces(0);
@@ -133,7 +133,7 @@ describe('clicking a PC row', () => {
     expect(s.univ.party.pcs[2]!.name).toBe(names[0]);
   });
 
-  it('refuses to trade a PC with themselves, and forgets the first pick', () => {
+  it('refuses to trade a PC with themselves, and forgets the first pick', async () => {
     const s = inTown();
     const names = s.univ.party.pcs.map((p) => p.name);
     s.tradePlaces(1);
@@ -145,7 +145,7 @@ describe('clicking a PC row', () => {
     expect(s.univ.transcript.at(-1)).toContain('Switch with who?');
   });
 
-  it('a trade follows the active PC to their new slot', () => {
+  it('a trade follows the active PC to their new slot', async () => {
     const s = inTown();
     s.univ.curPc = 0;
     s.tradePlaces(0);
@@ -166,7 +166,7 @@ describe('clicking a PC row', () => {
     expect(s.univ.party.pcs.map((p) => p.name)).toEqual(names);
   });
 
-  it('will not trade places in combat', () => {
+  it('will not trade places in combat', async () => {
     const s = inTown();
     s.startCombat(s.univ.party.direction);
     const names = s.univ.party.pcs.map((p) => p.name);

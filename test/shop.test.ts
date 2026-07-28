@@ -44,7 +44,7 @@ function shopping(shop: Shop): { univ: Universe; state: ShopState } {
 }
 
 describe('which entries are on offer', () => {
-  it('hides healing services the PC does not need', () => {
+  it('hides healing services the PC does not need', async () => {
     const { univ, state } = shopping(presetShop(ShopPreset.HEALING));
     // A healthy, unafflicted PC needs nothing.
     expect(state.visible).toEqual([]);
@@ -63,7 +63,7 @@ describe('which entries are on offer', () => {
     expect(types).not.toContain(ShopItemType.RESURRECT);
   });
 
-  it('shows a random shop whatever stock was rolled for it', () => {
+  it('shows a random shop whatever stock was rolled for it', async () => {
     const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
     const which = scen.shops.findIndex((s) => s.type === ShopType.RANDOM);
     const state = new ShopState(univ, which, scen.shops[which]!.clone());
@@ -78,7 +78,7 @@ describe('which entries are on offer', () => {
     }
   });
 
-  it('rolls the same stock for a given seed', () => {
+  it('rolls the same stock for a given seed', async () => {
     const rolls = () => {
       const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
       univ.rng.seedGame(4242);
@@ -90,7 +90,7 @@ describe('which entries are on offer', () => {
     expect(rolls()).toEqual(rolls());
   });
 
-  it('pages eight rows at a time', () => {
+  it('pages eight rows at a time', async () => {
     const big = scen.shops.find((s) => s.numItems() > 20)!;
     const { state } = shopping(big.clone());
     expect(state.visible.length).toBeGreaterThan(8);
@@ -125,7 +125,7 @@ describe('buying', () => {
     return shop;
   }
 
-  it('takes gold and hands over the item', () => {
+  it('takes gold and hands over the item', async () => {
     const { univ, state } = shopping(oneItemShop());
     const entry = state.shop.getItem(0);
     const cost = state.cost(entry);
@@ -139,7 +139,7 @@ describe('buying', () => {
     expect(state.visible).toEqual([]);
   });
 
-  it('refuses when the party is short of gold', () => {
+  it('refuses when the party is short of gold', async () => {
     const { univ, state } = shopping(oneItemShop());
     univ.party.gold = 0;
     expect(handleSale(univ, state, 0)).toBe('refused');
@@ -147,7 +147,7 @@ describe('buying', () => {
     expect(state.visible).toEqual([0]);
   });
 
-  it('never runs out of infinite stock', () => {
+  it('never runs out of infinite stock', async () => {
     const shop = new Shop();
     shop.addItem(pricedItem(), scen.scenItems[pricedItem()]!, 0); // 0 means infinite
     shop.refreshItems(scen.scenItems);
@@ -157,7 +157,7 @@ describe('buying', () => {
     expect(state.visible).toEqual([0]);
   });
 
-  it('teaches a spell once, and only to a PC who lacks it', () => {
+  it('teaches a spell once, and only to a PC who lacks it', async () => {
     const shop = new Shop();
     shop.prompt = ShopPrompt.MAGE;
     shop.addSpecial(ShopItemType.MAGE_SPELL, 30);
@@ -173,7 +173,7 @@ describe('buying', () => {
     expect(univ.party.gold).toBe(gold);
   });
 
-  it('trains a skill up to its cap', () => {
+  it('trains a skill up to its cap', async () => {
     const shop = new Shop();
     shop.addSpecial(ShopItemType.SKILL, Skill.LOCKPICKING);
     const { univ, state } = shopping(shop);
@@ -187,7 +187,7 @@ describe('buying', () => {
     expect(univ.transcript.at(-1)).toBe("You're already an expert in this skill.");
   });
 
-  it('heals, cures and resurrects', () => {
+  it('heals, cures and resurrects', async () => {
     const { univ, state } = shopping(presetShop(ShopPreset.HEALING));
     univ.party.gold = 30000;
     const pc = univ.currentPc;
@@ -211,7 +211,7 @@ describe('buying', () => {
     expect(state.visible).toEqual([]);
   });
 
-  it('learns an alchemy recipe once', () => {
+  it('learns an alchemy recipe once', async () => {
     const shop = new Shop();
     shop.prompt = ShopPrompt.ALCHEMY;
     shop.addSpecial(ShopItemType.ALCHEMY, 3);
@@ -225,7 +225,7 @@ describe('buying', () => {
 });
 
 describe('shop mode', () => {
-  it('remembers stock the party has already bought out', () => {
+  it('remembers stock the party has already bought out', async () => {
     // Valleydy sells everything from infinite stock, so this needs a shop with
     // a one-off entry: two items, only one of which can run out.
     const limited = new Shop();
@@ -250,7 +250,7 @@ describe('shop mode', () => {
     }
   });
 
-  it('refuses to open a shop with nothing on offer', () => {
+  it('refuses to open a shop with nothing on offer', async () => {
     const { session } = newGame();
     const empty = scen.shops.findIndex((s) => s.numItems() === 0);
     expect(session.startShopMode(empty, 2, 'Unused')).toBe(false);
@@ -258,13 +258,13 @@ describe('shop mode', () => {
     expect(session.shop).toBeNull();
   });
 
-  it('reports a shop that does not exist', () => {
+  it('reports a shop that does not exist', async () => {
     const { univ, session } = newGame();
     expect(session.startShopMode(999, 0, 'Nowhere')).toBe(false);
     expect(univ.transcript.at(-1)).toContain('nonexistent shop');
   });
 
-  it('picks another PC when a healer has nothing for the active one', () => {
+  it('picks another PC when a healer has nothing for the active one', async () => {
     const { univ, session } = newGame();
     // Give the healing shop something to do — for PC 3 only.
     const healerIndex = scen.shops.findIndex((s) => s.prompt === ShopPrompt.HEALING);
@@ -275,7 +275,7 @@ describe('shop mode', () => {
     expect(univ.curPc).toBe(3);
   });
 
-  it('returns to town mode when the shop closes', () => {
+  it('returns to town mode when the shop closes', async () => {
     const { session } = newGame();
     const which = scen.shops.findIndex((s) => s.numItems() > 0);
     expect(session.startShopMode(which, 2, 'Test')).toBe(true);

@@ -49,7 +49,7 @@ describe('which items a service applies to', () => {
   const state = (mode: ItemShopMode, cost = 50) =>
     ({ mode, cost, rechargeLimit: 0, rechargeAmount: 0 });
 
-  it('sells at half value, and only what is unequipped and identified', () => {
+  it('sells at half value, and only what is unequipped and identified', async () => {
     const { pc } = withItem(SWORD);
     expect(specPrice(state(ItemShopMode.SELL_ANY), pc, 0)).toBe(50);
 
@@ -65,7 +65,7 @@ describe('which items a service applies to', () => {
     expect(specPrice(state(ItemShopMode.SELL_ANY), pc, 0)).toBeNull();
   });
 
-  it('separates the weapon and armour dealers', () => {
+  it('separates the weapon and armour dealers', async () => {
     const { pc } = withItem(SWORD);
     expect(specPrice(state(ItemShopMode.SELL_WEAPONS), pc, 0)).toBe(50);
     expect(specPrice(state(ItemShopMode.SELL_ARMOR), pc, 0)).toBeNull();
@@ -75,19 +75,19 @@ describe('which items a service applies to', () => {
     expect(specPrice(state(ItemShopMode.SELL_ARMOR), pc, 0)).toBe(40);
   });
 
-  it('prices a stack of charges per charge', () => {
+  it('prices a stack of charges per charge', async () => {
     const { pc } = withItem({ ...SWORD, variety: ItemType.POTION, value: 10, charges: 5 });
     expect(specPrice(state(ItemShopMode.SELL_ANY), pc, 0)).toBe(25);
   });
 
-  it('identifies only what is unidentified, at the shop price', () => {
+  it('identifies only what is unidentified, at the shop price', async () => {
     const { pc } = withItem({ ...SWORD, ident: false });
     expect(specPrice(state(ItemShopMode.IDENTIFY, 37), pc, 0)).toBe(37);
     pc.items[0]!.ident = true;
     expect(specPrice(state(ItemShopMode.IDENTIFY, 37), pc, 0)).toBeNull();
   });
 
-  it('recharges only rechargeable, usable items below the limit', () => {
+  it('recharges only rechargeable, usable items below the limit', async () => {
     const { pc } = withItem({
       variety: ItemType.WAND, value: 100, ident: true, rechargeable: true,
       ability: ItemAbil.CALL_SPECIAL, charges: 2, maxCharges: 10,
@@ -104,7 +104,7 @@ describe('which items a service applies to', () => {
     expect(specPrice(wand, pc, 0)).toBeNull();
   });
 
-  it('enchants only plain, identified melee weapons', () => {
+  it('enchants only plain, identified melee weapons', async () => {
     const { pc } = withItem(SWORD);
     const ench = { mode: ItemShopMode.ENCHANT, cost: 200, rechargeLimit: 0, rechargeAmount: 0 };
     expect(specPrice(ench, pc, 0)).toBe(200);
@@ -115,14 +115,14 @@ describe('which items a service applies to', () => {
     expect(specPrice(ench, pc, 0)).toBeNull();
   });
 
-  it('offers nothing on an empty slot', () => {
+  it('offers nothing on an empty slot', async () => {
     const { pc } = withItem({});
     expect(specPrice(state(ItemShopMode.SELL_ANY), pc, 0)).toBeNull();
   });
 });
 
 describe('using a service', () => {
-  it('selling pays out and empties the slot', () => {
+  it('selling pays out and empties the slot', async () => {
     const { univ, pc } = withItem(SWORD);
     pc.items[1] = { ...defaultItem(), ...ARMOUR };
     univ.party.gold = 10;
@@ -137,7 +137,7 @@ describe('using a service', () => {
     expect(pc.items[1]!.variety).toBe(ItemType.NO_ITEM);
   });
 
-  it('identifying charges the fee and needs the gold', () => {
+  it('identifying charges the fee and needs the gold', async () => {
     const { univ, pc } = withItem({ ...SWORD, ident: false });
     const state = {
       mode: ItemShopMode.IDENTIFY, cost: 40, rechargeLimit: 0, rechargeAmount: 0,
@@ -153,7 +153,7 @@ describe('using a service', () => {
     expect(univ.party.gold).toBe(60);
   });
 
-  it('recharging adds charges', () => {
+  it('recharging adds charges', async () => {
     const { univ, pc } = withItem({
       variety: ItemType.WAND, value: 100, ident: true, rechargeable: true,
       ability: ItemAbil.CALL_SPECIAL, charges: 2, maxCharges: 10,
@@ -167,7 +167,7 @@ describe('using a service', () => {
     expect(univ.party.gold).toBe(470);
   });
 
-  it('refuses an item the service does not apply to', () => {
+  it('refuses an item the service does not apply to', async () => {
     const { univ } = withItem({ ...SWORD, unsellable: true });
     const state = {
       mode: ItemShopMode.SELL_ANY, cost: 0, rechargeLimit: 0, rechargeAmount: 0,
@@ -187,7 +187,7 @@ describe('the talk nodes that open a service', () => {
     return null;
   }
 
-  it('puts the inventory panel into the mode the node names', () => {
+  it('puts the inventory panel into the mode the node names', async () => {
     const cases: [TalkNodeType, ItemShopMode][] = [
       [TalkNodeType.SELL_WEAPONS, ItemShopMode.SELL_WEAPONS],
       [TalkNodeType.SELL_ARMOR, ItemShopMode.SELL_ARMOR],

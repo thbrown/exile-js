@@ -15,19 +15,19 @@ function gridObscurity(rows: string[]): (x: number, y: number) => number {
 describe('canSee', () => {
   const open = (): number => 0;
 
-  it('sees along a clear row, column, and diagonal', () => {
+  it('sees along a clear row, column, and diagonal', async () => {
     expect(canSee(loc(0, 0), loc(5, 0), open)).toBe(0);
     expect(canSee(loc(0, 0), loc(0, 5), open)).toBe(0);
     expect(canSee(loc(0, 0), loc(5, 5), open)).toBe(0);
   });
 
-  it('ignores the endpoints themselves', () => {
+  it('ignores the endpoints themselves', async () => {
     // Only the tiles strictly between the two points are summed.
     const obs = gridObscurity(['#...#']);
     expect(canSee(loc(0, 0), loc(4, 0), obs)).toBe(0);
   });
 
-  it('blocks sight through a wall in any direction', () => {
+  it('blocks sight through a wall in any direction', async () => {
     const obs = gridObscurity(['.....', '..#..', '.....']);
     // Straight down through the wall.
     expect(canSee(loc(2, 0), loc(2, 2), obs)).toBeGreaterThanOrEqual(SIGHT_BLOCKED);
@@ -37,19 +37,19 @@ describe('canSee', () => {
     expect(canSee(loc(0, 0), loc(4, 0), obs)).toBe(0);
   });
 
-  it('accumulates partial obscurity until sight is blocked', () => {
+  it('accumulates partial obscurity until sight is blocked', async () => {
     const obs = gridObscurity(['.////.']);
     // Four half-blockers between the endpoints sum to 4 — still visible.
     expect(canSee(loc(0, 0), loc(5, 0), obs)).toBe(4);
     expect(canSee(loc(0, 0), loc(5, 0), obs)).toBeLessThan(SIGHT_BLOCKED);
   });
 
-  it('is symmetric for straight lines', () => {
+  it('is symmetric for straight lines', async () => {
     const obs = gridObscurity(['./#/.']);
     expect(canSee(loc(0, 0), loc(4, 0), obs)).toBe(canSee(loc(4, 0), loc(0, 0), obs));
   });
 
-  it('steps a shallow diagonal through the tiles the C++ picks', () => {
+  it('steps a shallow diagonal through the tiles the C++ picks', async () => {
     // dx = 4, dy = 2: the line passes through (1,0), (2,1), (3,1).
     const visited: string[] = [];
     canSee(loc(0, 0), loc(4, 2), (x, y) => {

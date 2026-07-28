@@ -54,7 +54,7 @@ function aLiveMonster(s: GameSession): Creature {
 }
 
 describe('MARTYRS_SHIELD as an ability', () => {
-  it('shields at a chance of 1000 in a thousand and scales what bounces back', () => {
+  it('shields at a chance of 1000 in a thousand and scales what bounces back', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.MARTYRS_SHIELD]!;
@@ -65,7 +65,7 @@ describe('MARTYRS_SHIELD as an ability', () => {
     expect(m.getSharedDmg(20, s.univ.rng)).toBe(10);
   });
 
-  it('is off when the ability is inactive and no status is up', () => {
+  it('is off when the ability is inactive and no status is up', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     expect(m.isShielded(s.univ.rng)).toBe(false);
@@ -74,7 +74,7 @@ describe('MARTYRS_SHIELD as an ability', () => {
 });
 
 describe('ABSORB_SPELLS', () => {
-  it('swallows the effect whole and heals by extra2', () => {
+  it('swallows the effect whole and heals by extra2', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     m.maxHealth = 100;
@@ -87,7 +87,7 @@ describe('ABSORB_SPELLS', () => {
     expect(m.health).toBe(27);
   });
 
-  it('otherwise only scales by the magic resistance', () => {
+  it('otherwise only scales by the magic resistance', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     m.mon.resist[DamageType.MAGIC] = 50;
@@ -96,7 +96,7 @@ describe('ABSORB_SPELLS', () => {
 });
 
 describe('place_monster and find_clear_spot', () => {
-  it('places a new creature in a free slot, alerted and hostile', () => {
+  it('places a new creature in a free slot, alerted and hostile', async () => {
     const s = inTown();
     const town = s.univ.town!;
     const where = findClearSpot(s, s.univ.party.townLoc, 0);
@@ -109,7 +109,7 @@ describe('place_monster and find_clear_spot', () => {
     expect(placed.isFriendly).toBe(false);
   });
 
-  it('refuses a square something is already standing on', () => {
+  it('refuses a square something is already standing on', async () => {
     const s = inTown();
     const town = s.univ.town!;
     const occupied = aLiveMonster(s).curLoc;
@@ -118,7 +118,7 @@ describe('place_monster and find_clear_spot', () => {
 });
 
 describe('SPLITS', () => {
-  it('spawns a copy carrying the original\'s remaining health', () => {
+  it('spawns a copy carrying the original\'s remaining health', async () => {
     const s = inTown();
     const town = s.univ.town!;
     const m = aLiveMonster(s);
@@ -130,7 +130,7 @@ describe('SPLITS', () => {
     abil.active = true;
     abil.special.extra1 = 1000; // always, since the roll is `< 1000` on 1..1000
     const before = town.monsters.filter((c) => c.isAlive).length;
-    damageMonst(s.univ, m, 0, 10, DamageType.WEAPON, { session: s, boom: false });
+    await damageMonst(s.univ, m, 0, 10, DamageType.WEAPON, { session: s, boom: false });
     const after = town.monsters.filter((c) => c.isAlive).length;
     expect(after).toBe(before + 1);
     // Every live copy of it is as hurt as the original.
@@ -138,7 +138,7 @@ describe('SPLITS', () => {
     expect(copies.some((c) => c.health === m.health)).toBe(true);
   });
 
-  it('does not split a monster the blow killed', () => {
+  it('does not split a monster the blow killed', async () => {
     const s = inTown();
     const town = s.univ.town!;
     const m = aLiveMonster(s);
@@ -149,14 +149,14 @@ describe('SPLITS', () => {
     abil.active = true;
     abil.special.extra1 = 1000;
     const before = town.monsters.filter((c) => c.isAlive).length;
-    damageMonst(s.univ, m, 0, 500, DamageType.WEAPON, { session: s, boom: false });
+    await damageMonst(s.univ, m, 0, 500, DamageType.WEAPON, { session: s, boom: false });
     expect(m.isAlive).toBe(false);
     expect(town.monsters.filter((c) => c.isAlive).length).toBeLessThan(before);
   });
 });
 
 describe('a creature owns its abilities', () => {
-  it('editing one creature leaves the scenario definition alone', () => {
+  it('editing one creature leaves the scenario definition alone', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     m.mon.abil[MonstAbil.SPLITS]!.active = true;
@@ -165,7 +165,7 @@ describe('a creature owns its abilities', () => {
 });
 
 describe('ranged monster abilities', () => {
-  it('picks a missile when the target is out of reach and skips it when adjacent', () => {
+  it('picks a missile when the target is out of reach and skips it when adjacent', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.MISSILE]!;
@@ -185,7 +185,7 @@ describe('ranged monster abilities', () => {
     expect(pickMonsterAbility(s, m, { x: 30, y: 10 }, false)).toBeNull();
   });
 
-  it('a spine-shooter fires even point-blank', () => {
+  it('a spine-shooter fires even point-blank', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.MISSILE]!;
@@ -215,7 +215,7 @@ describe('ranged monster abilities', () => {
     expect(pc.curHealth).toBeLessThan(400);
   });
 
-  it('a breath weapon deals its damage type', () => {
+  it('a breath weapon deals its damage type', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.DAMAGE]!;
@@ -228,24 +228,24 @@ describe('ranged monster abilities', () => {
     const pc = s.univ.party.pcs[0]!;
     pc.maxHealth = 400;
     pc.curHealth = 400;
-    monsterBasicAbil(s, m, MonstAbil.DAMAGE, abil, pc);
+    await monsterBasicAbil(s, m, MonstAbil.DAMAGE, abil, pc);
     expect(pc.curHealth).toBeLessThan(400);
   });
 
-  it('a steal-gold ability empties the purse', () => {
+  it('a steal-gold ability empties the purse', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.STEAL_GOLD]!;
     abil.active = true;
     abil.gen.strength = 50;
     s.univ.party.gold = 1000;
-    monsterBasicAbil(s, m, MonstAbil.STEAL_GOLD, abil, s.univ.party.pcs[0]!);
+    await monsterBasicAbil(s, m, MonstAbil.STEAL_GOLD, abil, s.univ.party.pcs[0]!);
     expect(s.univ.party.gold).toBeLessThan(1000);
   });
 });
 
 describe('summoning', () => {
-  it('places the creature the ability names and marks it as a summon', () => {
+  it('places the creature the ability names and marks it as a summon', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.SUMMON]!;
@@ -265,7 +265,7 @@ describe('summoning', () => {
     expect(summoned!.number).toBe(3);
   });
 
-  it('does nothing when the odds roll fails', () => {
+  it('does nothing when the odds roll fails', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     const abil = m.mon.abil[MonstAbil.SUMMON]!;
@@ -280,7 +280,7 @@ describe('summoning', () => {
     expect(s.univ.town!.monsters.filter((c) => c.isAlive).length).toBe(before);
   });
 
-  it('get_summon_monster finds a monster of the class asked for', () => {
+  it('get_summon_monster finds a monster of the class asked for', async () => {
     const s = inTown();
     const cls = s.univ.scenario.scenMonsters.find((mon) => mon.summonType > 0)?.summonType;
     if (cls === undefined) return; // no summonable monster in this scenario
@@ -299,7 +299,7 @@ describe('summoning', () => {
 });
 
 describe('touch abilities on a landed blow', () => {
-  it('a burning touch damages the PC that was hit', () => {
+  it('a burning touch damages the PC that was hit', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     // One heavy attack, from something willing to throw it.
@@ -318,11 +318,11 @@ describe('touch abilities on a landed blow', () => {
     pc.items.fill(defaultItem());
     pc.equip.fill(false);
     // The swing can still miss, so give it several rounds.
-    for (let i = 0; i < 20; i++) monsterAttack(s, m, pc);
+    for (let i = 0; i < 20; i++) await monsterAttack(s, m, pc);
     expect(s.univ.transcript.join('\n')).toContain('Burning touch!');
   });
 
-  it('odds above zero suppress the touch when the roll comes in under them', () => {
+  it('odds above zero suppress the touch when the roll comes in under them', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     m.attitude = Attitude.HOSTILE_A;
@@ -339,7 +339,7 @@ describe('touch abilities on a landed blow', () => {
     pc.curHealth = 40000;
     pc.items.fill(defaultItem());
     pc.equip.fill(false);
-    for (let i = 0; i < 20; i++) monsterAttack(s, m, pc);
+    for (let i = 0; i < 20; i++) await monsterAttack(s, m, pc);
     expect(s.univ.transcript.join('\n')).not.toContain('Burning touch!');
   });
 });

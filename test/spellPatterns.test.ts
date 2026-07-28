@@ -61,11 +61,11 @@ function cells(pat: number[][]): Set<string> {
 }
 
 describe('the builtin pattern tables', () => {
-  it('PAT_SINGLE covers the centre and nothing else', () => {
+  it('PAT_SINGLE covers the centre and nothing else', async () => {
     expect(cells(getBuiltinPattern(SpellPat.SINGLE))).toEqual(new Set(['0,0']));
   });
 
-  it('PAT_SQ is the 3x3 around the centre', () => {
+  it('PAT_SQ is the 3x3 around the centre', async () => {
     const got = cells(getBuiltinPattern(SpellPat.SQUARE));
     expect(got.size).toBe(9);
     for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) {
@@ -73,28 +73,28 @@ describe('the builtin pattern tables', () => {
     }
   });
 
-  it('PAT_SMSQ hangs off the centre to the south-east, not around it', () => {
+  it('PAT_SMSQ hangs off the centre to the south-east, not around it', async () => {
     expect(cells(getBuiltinPattern(SpellPat.SMALL_SQUARE)))
       .toEqual(new Set(['0,0', '1,0', '0,1', '1,1']));
   });
 
-  it('PAT_OPENSQ is the 3x3 with its middle missing', () => {
+  it('PAT_OPENSQ is the 3x3 with its middle missing', async () => {
     const got = cells(getBuiltinPattern(SpellPat.OPEN_SQUARE));
     expect(got.size).toBe(8);
     expect(got.has('0,0')).toBe(false);
   });
 
-  it('PAT_PLUS is the four neighbours and the centre', () => {
+  it('PAT_PLUS is the four neighbours and the centre', async () => {
     expect(cells(getBuiltinPattern(SpellPat.PLUS)))
       .toEqual(new Set(['0,0', '0,-1', '0,1', '-1,0', '1,0']));
   });
 
-  it('the two circles are 21 and 37 squares', () => {
+  it('the two circles are 21 and 37 squares', async () => {
     expect(cells(getBuiltinPattern(SpellPat.RADIUS_2)).size).toBe(21);
     expect(cells(getBuiltinPattern(SpellPat.RADIUS_3)).size).toBe(37);
   });
 
-  it('PAT_WALL has eight rotations, and rotation wraps rather than clamps', () => {
+  it('PAT_WALL has eight rotations, and rotation wraps rather than clamps', async () => {
     const r0 = getBuiltinPattern(SpellPat.WALL, 0);
     expect(getBuiltinPattern(SpellPat.WALL, 8)).toEqual(r0);
     expect(getBuiltinPattern(SpellPat.WALL, 16)).toEqual(r0);
@@ -106,7 +106,7 @@ describe('the builtin pattern tables', () => {
     for (let y = 0; y < 9; y++) expect(r2[4]![y]).toBe(X);
   });
 
-  it('PAT_PROT carries field types rather than X, in four rings', () => {
+  it('PAT_PROT carries field types rather than X, in four rings', async () => {
     const p = getBuiltinPattern(SpellPat.PROT);
     expect(p[4]![4]).toBe(FieldType.FIELD_ANTIMAGIC); // 3, the core
     expect(p[4]![2]).toBe(FieldType.WALL_BLADES); // 6
@@ -115,11 +115,11 @@ describe('the builtin pattern tables', () => {
     expect(p[0]![0]).toBe(0); // the corners are open
   });
 
-  it('an unknown pattern id is an empty grid, not a crash', () => {
+  it('an unknown pattern id is an empty grid, not a crash', async () => {
     expect(getBuiltinPattern(SpellPat.CUSTOM)).toEqual(emptyPattern());
   });
 
-  it('handing out a builtin does not let a caller scribble on it', () => {
+  it('handing out a builtin does not let a caller scribble on it', async () => {
     const mine = copyPattern(getBuiltinPattern(SpellPat.SINGLE));
     modifyPattern(mine, FieldType.WALL_FIRE);
     expect(getBuiltinPattern(SpellPat.SINGLE)[4]![4]).toBe(X);
@@ -127,7 +127,7 @@ describe('the builtin pattern tables', () => {
 });
 
 describe('modify_pattern and the damage encoding', () => {
-  it('stamps the code over every cell of the shape and leaves the gaps', () => {
+  it('stamps the code over every cell of the shape and leaves the gaps', async () => {
     const p = copyPattern(getBuiltinPattern(SpellPat.PLUS));
     modifyPattern(p, FieldType.WALL_FIRE);
     expect(p[4]![4]).toBe(FieldType.WALL_FIRE);
@@ -135,23 +135,23 @@ describe('modify_pattern and the damage encoding', () => {
     expect(p[0]![0]).toBe(0);
   });
 
-  it('encodes damage as 50 + type * 40 + dice, with the dice clamped to 1..30', () => {
+  it('encodes damage as 50 + type * 40 + dice, with the dice clamped to 1..30', async () => {
     expect(damageCode(DamageType.FIRE, 4)).toBe(50 + DamageType.FIRE * 40 + 4);
     expect(damageCode(DamageType.FIRE, 0)).toBe(50 + DamageType.FIRE * 40 + 1);
     expect(damageCode(DamageType.FIRE, 99)).toBe(50 + DamageType.FIRE * 40 + 30);
   });
 
-  it('refuses MARKED, which is not a real damage type', () => {
+  it('refuses MARKED, which is not a real damage type', async () => {
     expect(damageCode(DamageType.MARKED, 4)).toBeNull();
   });
 });
 
 describe('place_spell_pattern', () => {
-  it('raises a field over the whole shape', () => {
+  it('raises a field over the whole shape', async () => {
     const s = inTown();
     const town = s.univ.town!;
     const at = { ...s.univ.party.townLoc, x: s.univ.party.townLoc.x + 3 };
-    placeSpellPattern(s, SpellPat.SQUARE, at, { field: FieldType.WALL_FIRE });
+    await placeSpellPattern(s, SpellPat.SQUARE, at, { field: FieldType.WALL_FIRE });
     let raised = 0;
     for (let dx = -1; dx <= 1; dx++)
       for (let dy = -1; dy <= 1; dy++)
@@ -162,20 +162,20 @@ describe('place_spell_pattern', () => {
     expect(raised).toBeLessThanOrEqual(9);
   });
 
-  it('hurts a monster standing in a damaging pattern', () => {
+  it('hurts a monster standing in a damaging pattern', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     m.maxHealth = 500;
     m.health = 500;
     m.mon.resist.fill(100);
-    placeSpellPattern(s, SpellPat.RADIUS_2, m.curLoc, {
+    await placeSpellPattern(s, SpellPat.RADIUS_2, m.curLoc, {
       damage: { type: DamageType.FIRE, dice: 10 },
       whoHit: 0,
     });
     expect(m.health).toBeLessThan(500);
   });
 
-  it('spares a monster from the very field it radiates', () => {
+  it('spares a monster from the very field it radiates', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     m.maxHealth = 500;
@@ -186,11 +186,11 @@ describe('place_spell_pattern', () => {
     const radiate = m.mon.abil[MonstAbil.RADIATE]!;
     radiate.active = true;
     radiate.radiate.type = FieldType.WALL_FIRE;
-    placeSpellPattern(s, SpellPat.SQUARE, m.curLoc, { field: FieldType.WALL_FIRE });
+    await placeSpellPattern(s, SpellPat.SQUARE, m.curLoc, { field: FieldType.WALL_FIRE });
     expect(m.health).toBe(500);
   });
 
-  it('a wall of blades still bites a monster that radiates something else', () => {
+  it('a wall of blades still bites a monster that radiates something else', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     m.maxHealth = 500;
@@ -200,31 +200,31 @@ describe('place_spell_pattern', () => {
     const radiate = m.mon.abil[MonstAbil.RADIATE]!;
     radiate.active = true;
     radiate.radiate.type = FieldType.CLOUD_STINK;
-    placeSpellPattern(s, SpellPat.SQUARE, m.curLoc, { field: FieldType.WALL_BLADES });
+    await placeSpellPattern(s, SpellPat.SQUARE, m.curLoc, { field: FieldType.WALL_BLADES });
     expect(m.health).toBeLessThan(500);
   });
 
-  it('webs a monster it catches rather than damaging it', () => {
+  it('webs a monster it catches rather than damaging it', async () => {
     const s = inTown();
     const m = aLiveMonster(s);
     m.maxHealth = 500;
     m.health = 500;
-    placeSpellPattern(s, SpellPat.SINGLE, m.curLoc, { field: FieldType.FIELD_WEB });
+    await placeSpellPattern(s, SpellPat.SINGLE, m.curLoc, { field: FieldType.FIELD_WEB });
     expect(m.health).toBe(500);
     expect(m.status[Status.WEBS]).toBeGreaterThan(0);
   });
 
-  it('a MARKED damage type does nothing at all', () => {
+  it('a MARKED damage type does nothing at all', async () => {
     const s = inTown();
     const town = s.univ.town!;
     const at = s.univ.party.townLoc;
-    placeSpellPattern(s, SpellPat.SQUARE, at, {
+    await placeSpellPattern(s, SpellPat.SQUARE, at, {
       damage: { type: DamageType.MARKED, dice: 5 },
     });
     expect(town.fields[at.x]![at.y]!.size).toBe(0);
   });
 
-  it('outdoors it is a no-op, since there is no town map to write to', () => {
+  it('outdoors it is a no-op, since there is no town map to write to', async () => {
     const s = inTown();
     const at = { ...s.univ.party.townLoc };
     s.univ.town = null;
@@ -235,7 +235,7 @@ describe('place_spell_pattern', () => {
 });
 
 describe('the field helpers', () => {
-  it('web_space catches the party standing on the square', () => {
+  it('web_space catches the party standing on the square', async () => {
     const s = inTown();
     const at = s.univ.party.townLoc;
     webSpace(s, at);
@@ -243,7 +243,7 @@ describe('the field helpers', () => {
     expect(s.univ.party.pcs[0]!.status[Status.WEBS]).toBeGreaterThan(0);
   });
 
-  it('scloud_space curses whoever breathes it', () => {
+  it('scloud_space curses whoever breathes it', async () => {
     const s = inTown();
     const at = s.univ.party.townLoc;
     scloudSpace(s, at);
@@ -251,14 +251,14 @@ describe('the field helpers', () => {
     expect(s.univ.party.pcs[0]!.status[Status.BLESS_CURSE]).toBeLessThan(0);
   });
 
-  it('sleep_cloud_space puts the party under', () => {
+  it('sleep_cloud_space puts the party under', async () => {
     const s = inTown();
     const at = s.univ.party.townLoc;
     sleepCloudSpace(s, at);
     expect(s.univ.town!.hasField(at.x, at.y, FieldType.CLOUD_SLEEP)).toBe(true);
   });
 
-  it('break_force_cage frees whoever was caged and clears the barrier', () => {
+  it('break_force_cage frees whoever was caged and clears the barrier', async () => {
     const s = inTown();
     const at = s.univ.party.townLoc;
     s.univ.town!.setField(at.x, at.y, FieldType.BARRIER_CAGE, true);
@@ -268,7 +268,7 @@ describe('the field helpers', () => {
     expect(s.univ.town!.hasField(at.x, at.y, FieldType.BARRIER_CAGE)).toBe(false);
   });
 
-  it('dispel_fields always takes the fire wall, force wall and stink cloud', () => {
+  it('dispel_fields always takes the fire wall, force wall and stink cloud', async () => {
     const s = inTown();
     const at = s.univ.party.townLoc;
     const town = s.univ.town!;
@@ -281,7 +281,7 @@ describe('the field helpers', () => {
     expect(town.hasField(at.x, at.y, FieldType.CLOUD_STINK)).toBe(false);
   });
 
-  it('a scripted dispel (mode 1) sweeps everything, saving roll or not', () => {
+  it('a scripted dispel (mode 1) sweeps everything, saving roll or not', async () => {
     // mode >= 1 sets the adjustment to -10, which no roll can recover from, so
     // every condition passes. This is the strong dispel.
     const s = inTown();
@@ -296,7 +296,7 @@ describe('the field helpers', () => {
     for (const f of saved) expect(town.hasField(at.x, at.y, f)).toBe(false);
   });
 
-  it('mode 2 sweeps the barriers, crates and webs outright first', () => {
+  it('mode 2 sweeps the barriers, crates and webs outright first', async () => {
     const s = inTown();
     const at = s.univ.party.townLoc;
     const town = s.univ.town!;
@@ -309,7 +309,7 @@ describe('the field helpers', () => {
     for (const f of swept) expect(town.hasField(at.x, at.y, f)).toBe(false);
   });
 
-  it('rolls exactly six saves, in the C++\'s order, whatever it clears', () => {
+  it('rolls exactly six saves, in the C++\'s order, whatever it clears', async () => {
     // The call order is part of the spec, so this pins the shape of each roll:
     // 1d6 web, 1d6 ice, 1d6 sleep, 1d8 quickfire, 1d7 blades, 1d12 cage.
     const s = inTown();

@@ -56,7 +56,7 @@ function inTown(): GameSession {
 }
 
 describe('the per-turn upkeep', () => {
-  it('poison actually damages the PC carrying it', () => {
+  it('poison actually damages the PC carrying it', async () => {
     // The bug this pins: a swamp set status[POISON], printed that it had, and
     // nothing ever spent it, so poison was decorative.
     const s = inTown();
@@ -64,50 +64,50 @@ describe('the per-turn upkeep', () => {
     pc.maxHealth = 300;
     pc.curHealth = 300;
     pc.status[Status.POISON] = 5;
-    doPoison(s);
+    await doPoison(s);
     expect(pc.curHealth).toBeLessThan(300);
     expect(s.univ.transcript).toContain('Poison:');
   });
 
-  it('poison usually fades a notch as it bites', () => {
+  it('poison usually fades a notch as it bites', async () => {
     const s = inTown();
     const pc = s.univ.party.pcs[0]!;
     pc.maxHealth = 900;
     pc.curHealth = 900;
     pc.status[Status.POISON] = 8;
-    for (let i = 0; i < 12 && (pc.status[Status.POISON] ?? 0) > 0; i++) doPoison(s);
+    for (let i = 0; i < 12 && (pc.status[Status.POISON] ?? 0) > 0; i++) await doPoison(s);
     expect(pc.status[Status.POISON]).toBe(0);
   });
 
-  it('leaves an unpoisoned party alone, and says nothing', () => {
+  it('leaves an unpoisoned party alone, and says nothing', async () => {
     const s = inTown();
     const before = s.univ.transcript.length;
-    doPoison(s);
+    await doPoison(s);
     expect(s.univ.transcript.length).toBe(before);
   });
 
-  it('skips the dead, who are past being poisoned', () => {
+  it('skips the dead, who are past being poisoned', async () => {
     const s = inTown();
     const pc = s.univ.party.pcs[0]!;
     pc.status[Status.POISON] = 5;
     pc.mainStatus = MainStatus.DEAD;
     const before = s.univ.transcript.length;
-    doPoison(s);
+    await doPoison(s);
     expect(s.univ.transcript.length).toBe(before);
   });
 
-  it('acid burns and always fades by one', () => {
+  it('acid burns and always fades by one', async () => {
     const s = inTown();
     const pc = s.univ.party.pcs[0]!;
     pc.maxHealth = 300;
     pc.curHealth = 300;
     pc.status[Status.ACID] = 4;
-    handleAcid(s);
+    await handleAcid(s);
     expect(pc.curHealth).toBeLessThan(300);
     expect(pc.status[Status.ACID]).toBe(3);
   });
 
-  it('disease rolls one misery per sufferer', () => {
+  it('disease rolls one misery per sufferer', async () => {
     const s = inTown();
     const pc = s.univ.party.pcs[0]!;
     pc.status[Status.DISEASE] = 6;
@@ -158,7 +158,7 @@ describe('the animation timeline', () => {
     return { missiles, booms, focus };
   }
 
-  it('queues missiles one after another rather than all at once', () => {
+  it('queues missiles one after another rather than all at once', async () => {
     // The bug this pins: three monsters firing in one turn all started their
     // flight in the same frame, so the volley was over before it was visible.
     const { missiles } = capture(() => {
@@ -176,7 +176,7 @@ describe('the animation timeline', () => {
     expect(missiles[2]!.started - missiles[1]!.started).toBeGreaterThan(MISSILE_MS - EPSILON);
   });
 
-  it('holds a hit back until its missile has arrived', () => {
+  it('holds a hit back until its missile has arrived', async () => {
     const { missiles, booms } = capture(() => {
       runAMissile({ x: 1, y: 1 }, { x: 5, y: 5 }, 3, 0, 14);
       boomSpace({ x: 5, y: 5 }, 3, 7, 0);
@@ -191,7 +191,7 @@ describe('the animation timeline', () => {
    * the other — not one frame with both damage numbers on it, which is what
    * this port used to draw.
    */
-  it('plays two blows in one turn one after the other', () => {
+  it('plays two blows in one turn one after the other', async () => {
     const { booms } = capture(() => {
       boomSpace({ x: 1, y: 1 }, 3, 4, 0);
       boomSpace({ x: 2, y: 2 }, 3, 5, 0);
@@ -201,7 +201,7 @@ describe('the animation timeline', () => {
     expect(booms[0]!.expires).toBeLessThanOrEqual(booms[1]!.starts + EPSILON);
   });
 
-  it('a volley books one slot for everything it collected', () => {
+  it('a volley books one slot for everything it collected', async () => {
     // do_explosion_anim draws every explosion in the same frames and sleeps
     // once, so a fireball's hits land together however many there are.
     const { booms } = capture(() => {
@@ -214,7 +214,7 @@ describe('the animation timeline', () => {
     expect(booms[1]!.starts).toBe(booms[0]!.starts);
   });
 
-  it('a camera move takes its own slot in the queue', () => {
+  it('a camera move takes its own slot in the queue', async () => {
     const { focus, missiles } = capture(() => {
       focusOn({ x: 9, y: 9 });
       runAMissile({ x: 9, y: 9 }, { x: 5, y: 5 }, 3, 0, 14);
@@ -232,7 +232,7 @@ describe('the animation timeline', () => {
    * at `t == num_steps / 2`. Neither move books any time — the flight is
    * already paying for it.
    */
-  it('the camera follows a projectile without lengthening its flight', () => {
+  it('the camera follows a projectile without lengthening its flight', async () => {
     const from = { x: 4, y: 4 };
     const dest = { x: 16, y: 4 };
     const { focus, missiles } = capture(() => {
@@ -259,7 +259,7 @@ describe('the animation timeline', () => {
    * and so does the player's input — so what is pinned instead is that the
    * queue stays strictly in order however deep it gets.
    */
-  it('keeps strict order however deep the backlog gets', () => {
+  it('keeps strict order however deep the backlog gets', async () => {
     animClear();
     let last = -Infinity;
     for (let i = 0; i < 40; i++) {
@@ -273,7 +273,7 @@ describe('the animation timeline', () => {
     animClear();
   });
 
-  it('drains back to real time once nothing is queued', () => {
+  it('drains back to real time once nothing is queued', async () => {
     animClear();
     expect(animPending()).toBe(0);
   });

@@ -10,6 +10,8 @@ import { TerSpec } from '../src/data/terrain';
 import {
   awardXp, damageMonst, damagePc, hitChance, hitParty, killMonst, killPc,
 } from '../src/game/damage';
+import { animClear, setAnimWaiter } from '../src/game/anim';
+import { setBoomSink } from '../src/game/booms';
 import { FORCED_ENTRY, GameSession } from '../src/game/session';
 import { loadScenario } from '../src/fileio/loadScenario';
 import { FsSource } from '../src/fileio/source';
@@ -64,49 +66,49 @@ function bareFighter(univ: Universe): Player {
 }
 
 describe('damagePc', () => {
-  it('takes unblockable damage straight off the health', () => {
+  it('takes unblockable damage straight off the health', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
-    expect(damagePc(univ, pc, 10, DamageType.UNBLOCKABLE)).toBe(10);
+    expect(await damagePc(univ, pc, 10, DamageType.UNBLOCKABLE)).toBe(10);
     expect(pc.curHealth).toBe(90);
     expect(univ.party.totalDamTaken).toBe(10);
     expect(univ.transcript.at(-1)).toBe(`  ${pc.name} takes 10.`);
   });
 
-  it('the dead take nothing', () => {
+  it('the dead take nothing', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.mainStatus = MainStatus.DEAD;
-    expect(damagePc(univ, pc, 50, DamageType.UNBLOCKABLE)).toBe(0);
+    expect(await damagePc(univ, pc, 50, DamageType.UNBLOCKABLE)).toBe(0);
   });
 
-  it('reports "No damage" when the reductions eat it all', () => {
+  it('reports "No damage" when the reductions eat it all', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.traits[Trait.TOUGHNESS] = true;
-    expect(damagePc(univ, pc, 1, DamageType.WEAPON)).toBe(0);
+    expect(await damagePc(univ, pc, 1, DamageType.WEAPON)).toBe(0);
     expect(pc.curHealth).toBe(100);
     expect(univ.transcript.at(-1)).toBe('  No damage.');
   });
 
-  it('invulnerability stops everything except assassination damage', () => {
+  it('invulnerability stops everything except assassination damage', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.status[Status.INVULNERABLE] = 3;
-    expect(damagePc(univ, pc, 40, DamageType.FIRE)).toBe(0);
-    expect(damagePc(univ, pc, 40, DamageType.SPECIAL)).toBe(40);
+    expect(await damagePc(univ, pc, 40, DamageType.FIRE)).toBe(0);
+    expect(await damagePc(univ, pc, 40, DamageType.SPECIAL)).toBe(40);
   });
 
-  it('magic resistance halves fire, and a curse on it doubles', () => {
+  it('magic resistance halves fire, and a curse on it doubles', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.status[Status.MAGIC_RESISTANCE] = 4;
-    expect(damagePc(univ, pc, 20, DamageType.FIRE)).toBe(10);
+    expect(await damagePc(univ, pc, 20, DamageType.FIRE)).toBe(10);
     pc.status[Status.MAGIC_RESISTANCE] = -4;
-    expect(damagePc(univ, pc, 20, DamageType.COLD)).toBe(40);
+    expect(await damagePc(univ, pc, 20, DamageType.COLD)).toBe(40);
   });
 
-  it('a ring of full protection quarters it at strength 7', () => {
+  it('a ring of full protection quarters it at strength 7', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.items[0] = {
@@ -114,22 +116,22 @@ describe('damagePc', () => {
       ability: ItemAbil.FULL_PROTECTION, abilStrength: 7,
     };
     pc.equip[0] = true;
-    expect(damagePc(univ, pc, 40, DamageType.MAGIC)).toBe(10);
+    expect(await damagePc(univ, pc, 40, DamageType.MAGIC)).toBe(10);
     pc.items[0]!.abilStrength = 3;
-    expect(damagePc(univ, pc, 40, DamageType.MAGIC)).toBe(20);
+    expect(await damagePc(univ, pc, 40, DamageType.MAGIC)).toBe(20);
     // It does nothing against a sword.
-    expect(damagePc(univ, pc, 40, DamageType.WEAPON)).toBe(40);
+    expect(await damagePc(univ, pc, 40, DamageType.WEAPON)).toBe(40);
   });
 
-  it('parry only helps against weapons', () => {
+  it('parry only helps against weapons', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.parry = 40; // a quarter of it comes off
-    expect(damagePc(univ, pc, 20, DamageType.WEAPON)).toBe(10);
-    expect(damagePc(univ, pc, 20, DamageType.FIRE)).toBe(20);
+    expect(await damagePc(univ, pc, 20, DamageType.WEAPON)).toBe(10);
+    expect(await damagePc(univ, pc, 20, DamageType.FIRE)).toBe(20);
   });
 
-  it('protection from a species halves it, and humanoids count twice over', () => {
+  it('protection from a species halves it, and humanoids count twice over', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.items[0] = {
@@ -138,14 +140,14 @@ describe('damagePc', () => {
     };
     pc.equip[0] = true;
     // A generic humanoid: one halving, from the exact match.
-    expect(damagePc(univ, pc, 40, DamageType.UNBLOCKABLE, Race.HUMANOID)).toBe(20);
+    expect(await damagePc(univ, pc, 40, DamageType.UNBLOCKABLE, Race.HUMANOID)).toBe(20);
     // A nephil is a humanoid *and* its own species, so it halves once here.
-    expect(damagePc(univ, pc, 40, DamageType.UNBLOCKABLE, Race.NEPHIL)).toBe(20);
+    expect(await damagePc(univ, pc, 40, DamageType.UNBLOCKABLE, Race.NEPHIL)).toBe(20);
     // Nothing at all against a beast.
-    expect(damagePc(univ, pc, 40, DamageType.UNBLOCKABLE, Race.BEAST)).toBe(40);
+    expect(await damagePc(univ, pc, 40, DamageType.UNBLOCKABLE, Race.BEAST)).toBe(40);
   });
 
-  it('protection from undead also covers skeletons', () => {
+  it('protection from undead also covers skeletons', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.items[0] = {
@@ -153,40 +155,40 @@ describe('damagePc', () => {
       ability: ItemAbil.PROTECT_FROM_SPECIES, abilData: Race.UNDEAD, abilStrength: 4,
     };
     pc.equip[0] = true;
-    expect(damagePc(univ, pc, 40, DamageType.UNBLOCKABLE, Race.SKELETAL)).toBe(20);
+    expect(await damagePc(univ, pc, 40, DamageType.UNBLOCKABLE, Race.SKELETAL)).toBe(20);
   });
 
-  it('a hit stirs a sleeping PC toward waking', () => {
+  it('a hit stirs a sleeping PC toward waking', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.status[Status.ASLEEP] = 3;
-    damagePc(univ, pc, 5, DamageType.UNBLOCKABLE);
+    await damagePc(univ, pc, 5, DamageType.UNBLOCKABLE);
     expect(pc.status[Status.ASLEEP]).toBe(2);
   });
 
-  it('empties the health bar first and only kills on the next blow', () => {
+  it('empties the health bar first and only kills on the next blow', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.skills[Skill.LUCK] = 0;
     pc.curHealth = 4;
-    damagePc(univ, pc, 20, DamageType.UNBLOCKABLE);
+    await damagePc(univ, pc, 20, DamageType.UNBLOCKABLE);
     expect(pc.curHealth).toBe(0);
     expect(pc.mainStatus).toBe(MainStatus.ALIVE);
-    damagePc(univ, pc, 5, DamageType.UNBLOCKABLE);
+    await damagePc(univ, pc, 5, DamageType.UNBLOCKABLE);
     expect(pc.mainStatus).toBe(MainStatus.DEAD);
   });
 
-  it('a big enough blow at zero health turns the PC to dust', () => {
+  it('a big enough blow at zero health turns the PC to dust', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.skills[Skill.LUCK] = 0;
     pc.curHealth = 0;
-    damagePc(univ, pc, 30, DamageType.UNBLOCKABLE);
+    await damagePc(univ, pc, 30, DamageType.UNBLOCKABLE);
     expect(pc.mainStatus).toBe(MainStatus.DUST);
     expect(univ.transcript).toContain(`  ${pc.name} is obliterated!`);
   });
 
-  it('hitParty hits everyone still standing', () => {
+  it('hitParty hits everyone still standing', async () => {
     const { univ } = newGame();
     univ.party.pcs.forEach((pc) => {
       pc.maxHealth = 100;
@@ -198,7 +200,7 @@ describe('damagePc', () => {
     });
     univ.party.pcs[2]!.mainStatus = MainStatus.DEAD;
     const before = univ.party.pcs[2]!.curHealth;
-    hitParty(univ, 10, DamageType.UNBLOCKABLE);
+    await hitParty(univ, 10, DamageType.UNBLOCKABLE);
     expect(univ.party.pcs[0]!.curHealth).toBe(90);
     expect(univ.party.pcs[1]!.curHealth).toBe(90);
     expect(univ.party.pcs[2]!.curHealth).toBe(before);
@@ -206,7 +208,7 @@ describe('damagePc', () => {
 });
 
 describe('killPc', () => {
-  it('luck can save you outright', () => {
+  it('luck can save you outright', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.skills[Skill.LUCK] = 20; // hit_chance 99, so it nearly always saves
@@ -220,7 +222,7 @@ describe('killPc', () => {
     expect(univ.transcript).toContain('  But you luck out!');
   });
 
-  it('spends a life-saving item instead of the life', () => {
+  it('spends a life-saving item instead of the life', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.skills[Skill.LUCK] = 0;
@@ -237,7 +239,7 @@ describe('killPc', () => {
     expect(univ.transcript).toContain('  Life saved!');
   });
 
-  it('petrification is not something an amulet understands', () => {
+  it('petrification is not something an amulet understands', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.skills[Skill.LUCK] = 0;
@@ -250,7 +252,7 @@ describe('killPc', () => {
     expect(pc.mainStatus).toBe(MainStatus.STONE);
   });
 
-  it('drops the whole pack on the floor and leaves a stain', () => {
+  it('drops the whole pack on the floor and leaves a stain', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.skills[Skill.LUCK] = 0;
@@ -269,7 +271,7 @@ describe('killPc', () => {
     expect(univ.party.pcs[univ.curPc]!.isAlive).toBe(true);
   });
 
-  it('a slith leaves slime, and dust leaves ash', () => {
+  it('a slith leaves slime, and dust leaves ash', async () => {
     const { univ } = newGame();
     const pc = bareFighter(univ);
     pc.skills[Skill.LUCK] = 0;
@@ -286,43 +288,43 @@ describe('killPc', () => {
 });
 
 describe('damageMonst', () => {
-  it('scales by the monster resistance for that damage type', () => {
+  it('scales by the monster resistance for that damage type', async () => {
     const { univ } = newGame();
     const monst = monster(1, 40);
     monst.mon.armor = 0;
     monst.mon.resist[DamageType.FIRE] = 50;
     monst.health = 500;
     // Level 40 always makes the elemental saving throw, so 20 -> 10 -> 5.
-    expect(damageMonst(univ, monst, 0, 20, DamageType.FIRE)).toBe(5);
+    expect(await damageMonst(univ, monst, 0, 20, DamageType.FIRE)).toBe(5);
   });
 
-  it('invulnerable monsters take a tenth, and it stacks with the status', () => {
+  it('invulnerable monsters take a tenth, and it stacks with the status', async () => {
     const { univ } = newGame();
     const monst = monster(1, 1);
     monst.mon.armor = 0;
     monst.mon.invuln = true;
     monst.health = 5000;
-    expect(damageMonst(univ, monst, 0, 1000, DamageType.UNBLOCKABLE)).toBe(100);
+    expect(await damageMonst(univ, monst, 0, 1000, DamageType.UNBLOCKABLE)).toBe(100);
     monst.status[Status.INVULNERABLE] = 3;
-    expect(damageMonst(univ, monst, 0, 1000, DamageType.UNBLOCKABLE)).toBe(10);
+    expect(await damageMonst(univ, monst, 0, 1000, DamageType.UNBLOCKABLE)).toBe(10);
     // Assassination damage goes through regardless.
-    expect(damageMonst(univ, monst, 0, 100, DamageType.SPECIAL)).toBe(100);
+    expect(await damageMonst(univ, monst, 0, 100, DamageType.SPECIAL)).toBe(100);
   });
 
-  it('a hit alerts the monster and costs it morale', () => {
+  it('a hit alerts the monster and costs it morale', async () => {
     const { univ } = newGame();
     const monst = monster(1, 10);
     monst.mon.armor = 0;
     monst.health = 500;
     monst.active = CreatureStatus.IDLE;
     const morale = monst.morale;
-    damageMonst(univ, monst, 0, 12, DamageType.UNBLOCKABLE);
+    await damageMonst(univ, monst, 0, 12, DamageType.UNBLOCKABLE);
     expect(monst.active).toBe(CreatureStatus.ALERTED);
     // >0, >5 and >10 each cost one.
     expect(monst.morale).toBe(morale - 3);
   });
 
-  it('dying runs kill_monst: the SDF, the mess, the count and the xp', () => {
+  it('dying runs kill_monst: the SDF, the mess, the count and the xp', async () => {
     const { univ } = newGame();
     const monst = monster(1, 5);
     monst.mon.armor = 0;
@@ -334,7 +336,7 @@ describe('damageMonst', () => {
     const killedBefore = town.monstersKilled;
     const xpBefore = univ.party.pcs[0]!.experience;
 
-    damageMonst(univ, monst, 0, 50, DamageType.UNBLOCKABLE);
+    await damageMonst(univ, monst, 0, 50, DamageType.UNBLOCKABLE);
     expect(monst.active).toBe(CreatureStatus.DEAD);
     expect(univ.party.getSdf(3, 4)).toBe(1);
     expect(monst.spec1).toBe(0); // so a summoned one can't come back
@@ -345,18 +347,18 @@ describe('damageMonst', () => {
     expect(univ.transcript).toContain(`  ${monst.getName()} dies.`);
   });
 
-  it('hurting a friendly is noticed', () => {
+  it('hurting a friendly is noticed', async () => {
     const { univ } = newGame();
     const monst = monster(1, 10);
     monst.mon.armor = 0;
     monst.health = 500;
     monst.attitude = Attitude.DOCILE;
-    damageMonst(univ, monst, 0, 20, DamageType.UNBLOCKABLE);
+    await damageMonst(univ, monst, 0, 20, DamageType.UNBLOCKABLE);
     expect(univ.transcript).toContain('Damaged an innocent.');
     expect(monst.attitude).toBe(Attitude.HOSTILE_A);
   });
 
-  it('gives nothing for a monster the party summoned itself', () => {
+  it('gives nothing for a monster the party summoned itself', async () => {
     const { univ } = newGame();
     const monst = monster(1, 5);
     monst.summonTime = 10;
@@ -369,7 +371,7 @@ describe('damageMonst', () => {
 });
 
 describe('awardXp', () => {
-  it('scales the award by level and levels the PC up', () => {
+  it('scales the award by level and levels the PC up', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.level = 1;
@@ -385,7 +387,7 @@ describe('awardXp', () => {
     expect(univ.transcript.some((l) => l.includes('is level'))).toBe(true);
   });
 
-  it('caps at 15000 experience and level 50', () => {
+  it('caps at 15000 experience and level 50', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.experience = 14990;
@@ -396,7 +398,7 @@ describe('awardXp', () => {
     expect(pc.level).toBe(50);
   });
 
-  it('gives the dead nothing, and refuses a negative award', () => {
+  it('gives the dead nothing, and refuses a negative award', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.mainStatus = MainStatus.DEAD;
@@ -410,7 +412,7 @@ describe('awardXp', () => {
 });
 
 describe('hit_chance', () => {
-  it('reads the table and flattens out at 99', () => {
+  it('reads the table and flattens out at 99', async () => {
     expect(hitChance(0)).toBe(20);
     expect(hitChance(5)).toBe(55);
     expect(hitChance(20)).toBe(99);
@@ -445,5 +447,126 @@ describe('damaging terrain', () => {
     await session.moveTo({ x: found.x, y: found.y });
     const hurt = univ.party.pcs.filter((pc) => pc.curHealth < 200).length;
     expect(hurt).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The blast comes first, then what it did. `boom_space` sleeps for the whole
+ * explosion and `damage_pc`/`damage_monst` only take the health off *after* it
+ * returns (boe.party.cpp:2660-2686) — which is why these functions are async
+ * here. With no animation waiter installed the wait is a microtask rather than
+ * real time, and that is enough to pin the order.
+ */
+describe('damage lands after its blast', () => {
+  /** An anim waiter that logs, so the order of blast and state is visible. */
+  function trace(): { log: string[]; done: () => void } {
+    const log: string[] = [];
+    setBoomSink((b) => { log.push(`boom:${b.damage}`); });
+    setAnimWaiter(async () => { log.push('settled'); });
+    return {
+      log,
+      done: () => { setBoomSink(null); setAnimWaiter(null); animClear(); },
+    };
+  }
+
+  it('a PC keeps their health until the explosion is over', async () => {
+    const { univ } = newGame();
+    const pc = univ.party.pcs[0]!;
+    pc.maxHealth = 100;
+    pc.curHealth = 100;
+    const { log, done } = trace();
+    try {
+      const hit = damagePc(univ, pc, 10, DamageType.UNBLOCKABLE);
+      // The synchronous half is over: the blast is booked and on screen…
+      expect(log.some((l) => l.startsWith('boom'))).toBe(true);
+      // …and the health has not moved yet.
+      expect(pc.curHealth).toBe(100);
+      await hit;
+      expect(pc.curHealth).toBe(90);
+      expect(log).toEqual(['boom:10', 'settled']);
+    } finally {
+      done();
+    }
+  });
+
+  it('a monster dies after its blast, not during it', async () => {
+    const { univ, session } = newGame();
+    const monst = univ.town!.monsters.find((m) => m.isAlive)!;
+    monst.mon.armor = 0;
+    monst.mon.resist.fill(100);
+    monst.maxHealth = 10;
+    monst.health = 10;
+    const { log, done } = trace();
+    try {
+      const hit = damageMonst(univ, monst, 0, 50, DamageType.UNBLOCKABLE, { session });
+      expect(monst.isAlive).toBe(true);
+      await hit;
+      expect(monst.isAlive).toBe(false);
+      expect(log[0]).toMatch(/^boom:/);
+      expect(log).toContain('settled');
+    } finally {
+      done();
+    }
+  });
+});
+
+/**
+ * The turn does not change hands until the swing has finished playing. In the
+ * C++ that is automatic — `pc_attack` blocks all the way through `boom_space`,
+ * and `combat_next_step` only runs afterwards. Here it is `attackAt` awaiting
+ * `pcAttack` before it calls `afterCombatAction`.
+ */
+describe('the turn waits for the blow', () => {
+  it('the active PC and the "Active:" line come after the blast', async () => {
+    const { univ, session } = newGame();
+    const monst = univ.town!.monsters.find((m) => m.isAlive)!;
+    monst.maxHealth = monst.health = 5000;
+    monst.mon.armor = 0;
+    monst.mon.resist.fill(100);
+    session.startCombat(univ.party.direction);
+    const startedAs = univ.curPc;
+    const pc = univ.party.pcs[startedAs]!;
+    pc.skills[Skill.DEXTERITY] = 20;
+    pc.skills[Skill.EDGED_WEAPONS] = 20;
+    pc.items[0] = {
+      ...pc.items[0]!, variety: ItemType.ONE_HANDED, name: 'sword', fullName: 'sword',
+      itemLevel: 10, weapType: Skill.EDGED_WEAPONS, ability: ItemAbil.NONE,
+    };
+    pc.equip[0] = true;
+    monst.curLoc = { x: pc.combatPos.x + 1, y: pc.combatPos.y };
+
+    let booms = 0;
+    const settled: string[] = [];
+    setBoomSink(() => { booms++; });
+    setAnimWaiter(async () => { settled.push('settled'); });
+    try {
+      // Swing until one connects — a miss draws no blast and so waits for
+      // nothing, which is the case this is *not* about.
+      let checked = false;
+      for (let i = 0; i < 40 && !checked; i++) {
+        pc.ap = 4;
+        univ.curPc = startedAs;
+        const lines = univ.transcript.length;
+        const before = booms;
+        const swing = session.attackAt(monst.curLoc);
+        if (booms > before) {
+          // Mid-swing: the blast is on screen, and the turn has *not* moved
+          // on. Before the blast booked its own time, both the hand-over and
+          // its announcement had already happened by this point.
+          expect(univ.curPc).toBe(startedAs);
+          expect(univ.transcript.slice(lines).some((l) => l.startsWith('Active:'))).toBe(false);
+          checked = true;
+        }
+        await swing;
+        await session.settled();
+      }
+      expect(checked).toBe(true);
+      // And the swing really did wait on the timeline for its blast.
+      expect(settled.length).toBeGreaterThan(0);
+    } finally {
+      setBoomSink(null);
+      setAnimWaiter(null);
+      animClear();
+    }
   });
 });

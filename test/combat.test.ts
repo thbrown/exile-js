@@ -65,7 +65,7 @@ function hostileBeside(univ: Universe, session: GameSession, index = 1): Creatur
 }
 
 describe('action points', () => {
-  it('gives four a round, three to the sluggish', () => {
+  it('gives four a round, three to the sluggish', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.items.forEach((_, i) => { pc.equip[i] = false; });
@@ -77,7 +77,7 @@ describe('action points', () => {
     expect(pc.ap).toBe(3);
   });
 
-  it('haste doubles them, and a strong haste triples', () => {
+  it('haste doubles them, and a strong haste triples', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.items.forEach((_, i) => { pc.equip[i] = false; });
@@ -90,7 +90,7 @@ describe('action points', () => {
     expect(pc.ap).toBe(12);
   });
 
-  it('being slowed costs every other round outright', () => {
+  it('being slowed costs every other round outright', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.status[Status.HASTE_SLOW] = -4;
@@ -102,7 +102,7 @@ describe('action points', () => {
     expect(pc.ap).toBeGreaterThan(0);
   });
 
-  it('webs eat the round and get torn at', () => {
+  it('webs eat the round and get torn at', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.items.forEach((_, i) => { pc.equip[i] = false; });
@@ -114,7 +114,7 @@ describe('action points', () => {
     expect(univ.transcript.some((l) => l.includes('must clean webs'))).toBe(true);
   });
 
-  it('sleep and paralysis leave nothing, and the dead get nothing', () => {
+  it('sleep and paralysis leave nothing, and the dead get nothing', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.status[Status.PARALYZED] = 20;
@@ -124,7 +124,7 @@ describe('action points', () => {
     expect(univ.party.pcs[1]!.ap).toBe(0);
   });
 
-  it('a speed item adds and a heavy item takes away', () => {
+  it('a speed item adds and a heavy item takes away', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.items.forEach((_, i) => { pc.equip[i] = false; });
@@ -141,7 +141,7 @@ describe('action points', () => {
     expect(pc.ap).toBe(2);
   });
 
-  it('takeAp never goes below zero', () => {
+  it('takeAp never goes below zero', async () => {
     const { univ } = newGame();
     univ.curPc = 0;
     univ.party.pcs[0]!.ap = 3;
@@ -149,7 +149,7 @@ describe('action points', () => {
     expect(univ.party.pcs[0]!.ap).toBe(0);
   });
 
-  it('awkward gear costs action points', () => {
+  it('awkward gear costs action points', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.items.forEach((_, i) => { pc.equip[i] = false; });
@@ -164,7 +164,7 @@ describe('action points', () => {
 });
 
 describe('turn order', () => {
-  it('walks to the next PC with moves and reports the end of the round', () => {
+  it('walks to the next PC with moves and reports the end of the round', async () => {
     const { univ } = newGame();
     univ.party.pcs.forEach((pc) => { pc.ap = 0; });
     univ.party.pcs[3]!.ap = 4;
@@ -177,7 +177,7 @@ describe('turn order', () => {
     expect(univ.curPc).toBe(0);
   });
 
-  it('wraps back around to an earlier PC', () => {
+  it('wraps back around to an earlier PC', async () => {
     const { univ } = newGame();
     univ.party.pcs.forEach((pc) => { pc.ap = 0; });
     univ.party.pcs[1]!.ap = 4;
@@ -186,7 +186,7 @@ describe('turn order', () => {
     expect(univ.curPc).toBe(1);
   });
 
-  it('burns everyone else’s moves while one PC is mid-action', () => {
+  it('burns everyone else’s moves while one PC is mid-action', async () => {
     const { univ } = newGame();
     univ.party.pcs.forEach((pc) => { pc.ap = 4; });
     univ.curPc = 0;
@@ -222,7 +222,7 @@ describe('starting and ending combat', () => {
     expect(univ.transcript.at(-1)).toContain('creature is in the way');
   });
 
-  it('placeParty spreads the party out on open ground', () => {
+  it('placeParty spreads the party out on open ground', async () => {
     const { univ, session } = newGame();
     placeParty(session, Direction.N);
     const spots = univ.party.pcs.filter((pc) => pc.isAlive).map((pc) => `${pc.combatPos.x},${pc.combatPos.y}`);
@@ -232,7 +232,7 @@ describe('starting and ending combat', () => {
     expect(new Set(spots).size).toBeGreaterThan(1);
   });
 
-  it('a caged party all lands on the one square', () => {
+  it('a caged party all lands on the one square', async () => {
     const { univ, session } = newGame();
     univ.party.pcs[0]!.status[Status.FORCECAGE] = 20;
     placeParty(session, Direction.N);
@@ -283,7 +283,7 @@ describe('the melee attack', () => {
     return pc;
   }
 
-  it('a swing that lands takes health off the monster', () => {
+  it('a swing that lands takes health off the monster', async () => {
     const { univ, session } = newGame();
     const pc = armedFighter(univ);
     const monst = hostileBeside(univ, session);
@@ -292,23 +292,23 @@ describe('the melee attack', () => {
     // Twenty swings: with skill 20 against armour 0 some must connect.
     for (let i = 0; i < 20; i++) {
       pc.ap = 4;
-      pcAttack(univ, 0, monst, session);
+      await pcAttack(univ, 0, monst, session);
     }
     expect(monst.health).toBeLessThan(before);
     expect(univ.transcript.some((l) => l.includes('swings.'))).toBe(true);
   });
 
-  it('costs four action points whether it connects or not', () => {
+  it('costs four action points whether it connects or not', async () => {
     const { univ, session } = newGame();
     const pc = armedFighter(univ);
     const monst = hostileBeside(univ, session);
     univ.curPc = 0;
     pc.ap = 4;
-    pcAttack(univ, 0, monst, session);
+    await pcAttack(univ, 0, monst, session);
     expect(pc.ap).toBe(0);
   });
 
-it('a slayer weapon adds its bonus only against the race it names', () => {
+it('a slayer weapon adds its bonus only against the race it names', async () => {
     const { univ, session } = newGame();
     const pc = armedFighter(univ);
     pc.items[0]!.ability = ItemAbil.SLAYER_WEAPON;
@@ -320,21 +320,21 @@ it('a slayer weapon adds its bonus only against the race it names', () => {
     wrongRace.mon.race = Race.HUMAN;
     wrongRace.maxHealth = 4000;
     wrongRace.health = 4000;
-    for (let i = 0; i < 15; i++) { pc.ap = 4; pcAttack(univ, 0, wrongRace, session); }
+    for (let i = 0; i < 15; i++) { pc.ap = 4; await pcAttack(univ, 0, wrongRace, session); }
     const plainDamage = 4000 - wrongRace.health;
 
     const rightRace = hostileBeside(univ, session);
     rightRace.mon.race = Race.BEAST;
     rightRace.maxHealth = 4000;
     rightRace.health = 4000;
-    for (let i = 0; i < 15; i++) { pc.ap = 4; pcAttack(univ, 0, rightRace, session); }
+    for (let i = 0; i < 15; i++) { pc.ap = 4; await pcAttack(univ, 0, rightRace, session); }
     const slainDamage = 4000 - rightRace.health;
 
     // Four points times five for a beast, on top of every blow that landed.
     expect(slainDamage).toBeGreaterThan(plainDamage);
   });
 
-  it('a poisoned blade ticks down twice per swing, not by the augmented amount', () => {
+  it('a poisoned blade ticks down twice per swing, not by the augmented amount', async () => {
     const { univ, session } = newGame();
     const pc = armedFighter(univ);
     const monst = hostileBeside(univ, session);
@@ -344,7 +344,7 @@ it('a slayer weapon adds its bonus only against the race it names', () => {
     // Something that lands: twenty swings, and the first hit spends the poison.
     for (let i = 0; i < 20 && (pc.status[Status.POISONED_WEAPON] ?? 0) === 5; i++) {
       pc.ap = 4;
-      pcAttack(univ, 0, monst, session);
+      await pcAttack(univ, 0, monst, session);
     }
     // pc_attack_weapon decrements it when the poison lands and pc_attack
     // decrements it again on the way out, so a landed blow costs two — but
@@ -352,58 +352,58 @@ it('a slayer weapon adds its bonus only against the race it names', () => {
     expect(pc.status[Status.POISONED_WEAPON]).toBe(3);
   });
 
-  it('an unarmed PC punches', () => {
+  it('an unarmed PC punches', async () => {
     const { univ, session } = newGame();
     const pc = armedFighter(univ);
     pc.items.forEach((_, i) => { pc.equip[i] = false; });
     const monst = hostileBeside(univ, session);
     univ.curPc = 0;
-    pcAttack(univ, 0, monst, session);
+    await pcAttack(univ, 0, monst, session);
     expect(univ.transcript.some((l) => l.includes('punches.'))).toBe(true);
   });
 
-  it('a pacifist refuses', () => {
+  it('a pacifist refuses', async () => {
     const { univ, session } = newGame();
     const pc = armedFighter(univ);
     pc.traits[Trait.PACIFIST] = true;
     const monst = hostileBeside(univ, session);
     const before = monst.health;
-    pcAttack(univ, 0, monst, session);
+    await pcAttack(univ, 0, monst, session);
     expect(monst.health).toBe(before);
     expect(univ.transcript.at(-1)).toBe("Attack: You're a pacifist!");
   });
 
-  it('a sleeping or paralysed PC cannot attack at all', () => {
+  it('a sleeping or paralysed PC cannot attack at all', async () => {
     const { univ, session } = newGame();
     const pc = armedFighter(univ);
     pc.status[Status.ASLEEP] = 4;
     const monst = hostileBeside(univ, session);
     const before = univ.transcript.length;
-    pcAttack(univ, 0, monst, session);
+    await pcAttack(univ, 0, monst, session);
     expect(univ.transcript.length).toBe(before);
   });
 
-  it('attacking gives away invisibility', () => {
+  it('attacking gives away invisibility', async () => {
     const { univ, session } = newGame();
     const pc = armedFighter(univ);
     pc.status[Status.INVISIBLE] = 4;
     const monst = hostileBeside(univ, session);
     univ.curPc = 0;
-    pcAttack(univ, 0, monst, session);
+    await pcAttack(univ, 0, monst, session);
     expect(pc.status[Status.INVISIBLE]).toBe(0);
     expect(univ.transcript).toContain('You become visible!');
   });
 
-  it('remembers who it hit, for the repeat', () => {
+  it('remembers who it hit, for the repeat', async () => {
     const { univ, session } = newGame();
     armedFighter(univ);
     const monst = hostileBeside(univ, session);
     univ.curPc = 0;
-    pcAttack(univ, 0, monst, session);
+    await pcAttack(univ, 0, monst, session);
     expect(univ.party.pcs[0]!.lastAttacked).toBe(monst);
   });
 
-  it('a martyr sends some of the damage back', () => {
+  it('a martyr sends some of the damage back', async () => {
     const { univ, session } = newGame();
     const pc = armedFighter(univ);
     pc.maxHealth = 100;
@@ -413,13 +413,13 @@ it('a slayer weapon adds its bonus only against the race it names', () => {
     univ.curPc = 0;
     for (let i = 0; i < 20 && pc.curHealth === 100; i++) {
       pc.ap = 4;
-      pcAttack(univ, 0, monst, session);
+      await pcAttack(univ, 0, monst, session);
     }
     expect(pc.curHealth).toBeLessThan(100);
     expect(univ.transcript).toContain('  Shares damage!');
   });
 
-  it('killing the monster in melee ends it', () => {
+  it('killing the monster in melee ends it', async () => {
     const { univ, session } = newGame();
     const pc = armedFighter(univ);
     const monst = hostileBeside(univ, session);
@@ -427,13 +427,13 @@ it('a slayer weapon adds its bonus only against the race it names', () => {
     univ.curPc = 0;
     for (let i = 0; i < 30 && monst.isAlive; i++) {
       pc.ap = 4;
-      pcAttack(univ, 0, monst, session);
+      await pcAttack(univ, 0, monst, session);
     }
     expect(monst.active).toBe(CreatureStatus.DEAD);
     expect(univ.party.totalMKilled).toBe(1);
   });
 
-  it('a poisoned blade poisons what it hits, once', () => {
+  it('a poisoned blade poisons what it hits, once', async () => {
     const { univ, session } = newGame();
     const pc = armedFighter(univ);
     pc.status[Status.POISONED_WEAPON] = 4;
@@ -444,7 +444,7 @@ it('a slayer weapon adds its bonus only against the race it names', () => {
     for (let i = 0; i < 20 && (monst.status[Status.POISON] ?? 0) === 0; i++) {
       pc.ap = 4;
       pc.status[Status.POISONED_WEAPON] = 4;
-      pcAttack(univ, 0, monst, session);
+      await pcAttack(univ, 0, monst, session);
     }
     expect(monst.status[Status.POISON]).toBeGreaterThan(0);
   });
@@ -456,8 +456,8 @@ it('a slayer weapon adds its bonus only against the race it names', () => {
     await session.moveTo(monst.curLoc); // starts combat
     univ.curPc = 0;
     univ.party.pcs[0]!.ap = 4;
-    expect(session.attackAt(monst.curLoc)).toBe(true);
-    expect(session.attackAt(loc(1, 1))).toBe(false);
+    expect(await session.attackAt(monst.curLoc)).toBe(true);
+    expect(await session.attackAt(loc(1, 1))).toBe(false);
   });
 });
 
@@ -481,7 +481,7 @@ describe('placement, parry and holding a turn', () => {
     }
   });
 
-  it('never places a PC through a wall', () => {
+  it('never places a PC through a wall', async () => {
     const { univ, session } = newGame();
     // place_party's spots have to be reachable in a straight, unobstructed
     // line from the party (can_see_light with combat_obscurity), which is what
@@ -495,7 +495,7 @@ describe('placement, parry and holding a turn', () => {
     }
   });
 
-  it('combat_obscurity blocks on anything that blocks movement', () => {
+  it('combat_obscurity blocks on anything that blocks movement', async () => {
     const { univ, session } = newGame();
     const from = univ.party.townLoc;
     // Find a wall square somewhere in the town and check the two obscurity
@@ -510,7 +510,7 @@ describe('placement, parry and holding a turn', () => {
     expect(session.combatObscurity(wall.x, wall.y)).toBe(5);
   });
 
-  it('isBlocked counts creatures, the party and barriers, not just terrain', () => {
+  it('isBlocked counts creatures, the party and barriers, not just terrain', async () => {
     const { univ, session } = newGame();
     const monst = hostileBeside(univ, session);
     expect(session.isBlocked(monst.curLoc)).toBe(true);
@@ -552,7 +552,7 @@ describe('placement, parry and holding a turn', () => {
     expect(univ.transcript).toContain('Stand ready.');
   });
 
-  it('pausing outside combat is a plain pause', () => {
+  it('pausing outside combat is a plain pause', async () => {
     const { univ, session } = newGame();
     univ.party.pcs[0]!.status[Status.WEBS] = 4;
     session.pause();
@@ -575,7 +575,7 @@ describe('placement, parry and holding a turn', () => {
 });
 
 describe('weapon selection', () => {
-  it('finds one two-handed weapon, or a pair of one-handed', () => {
+  it('finds one two-handed weapon, or a pair of one-handed', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.items.forEach((_, i) => { pc.equip[i] = false; });
@@ -594,7 +594,7 @@ describe('weapon selection', () => {
     expect(b!.name).toBe('right');
   });
 
-  it('a slith with a pole arm is more accurate, in the roll', () => {
+  it('a slith with a pole arm is more accurate, in the roll', async () => {
     // The bonus is a -10 on the to-hit roll, so over many swings a slith with a
     // spear should connect more often than a human with the same skill.
     const { univ, session } = newGame();
@@ -609,7 +609,7 @@ describe('weapon selection', () => {
       };
       pc.equip[0] = true;
     };
-    const hits = (race: Race): number => {
+    const hits = async (race: Race): Promise<number> => {
       const pc = univ.party.pcs[0]!;
       pc.race = race;
       spear(pc);
@@ -618,13 +618,13 @@ describe('weapon selection', () => {
       const before = monst.health;
       for (let i = 0; i < 200; i++) {
         pc.ap = 4;
-        pcAttack(univ, 0, monst, session);
+        await pcAttack(univ, 0, monst, session);
       }
       univ.town!.monsters.pop();
       return before - monst.health;
     };
-    const human = hits(Race.HUMAN);
-    const slith = hits(Race.SLITH);
+    const human = await hits(Race.HUMAN);
+    const slith = await hits(Race.SLITH);
     expect(slith).toBeGreaterThan(human);
   });
 });

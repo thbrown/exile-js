@@ -998,6 +998,7 @@ Notes for M2 implementer:
 - (2026-07-27) `combat_next_step` is a **loop** — `while(pick_next_pc()) { combat_run_monst(); set_pc_moves(); ... }`. Running the monsters once is a deadlock waiting to happen: a round can legitimately hand out zero AP to everyone (`set_pc_moves` gives a slowed PC nothing on odd `party.age`), and with no moves there is no input either.
 - (2026-07-27) `do_monster_turn` reads `num_monst` **before** its loop, so a monster summoned during the turn doesn't act until the next one. Iterating the live array instead is a divergence you can't see until the turn is paced.
 - (2026-07-27) `monsters_going` is a **drawing** flag (`GameSession.monstersGoing`), not the same thing as `busy`: it is true for exactly the span of `do_monster_turn`. Four bits of drawing read it, the load-bearing one being `can_draw`'s explored-map bypass — without it a monster acting on unexplored ground is a sprite moving over pure black.
+- (2026-07-27) **The damage functions are `async`** (`damagePc`, `damageMonst`, and everything that calls them). The awaits are where the C++ blocks — `boom_space` sleeps for the blast, and `damage_pc` only takes the health off afterwards. A new call site that forgets to `await` will not fail to compile; it will apply its damage in the wrong order. `grep -n "damagePc(\|damageMonst("` and check every hit has an `await` in front of it.
 - (2026-07-27) **Adding an `await` on the monster-turn path changes the RNG stream.** One extra microtask per turn was enough to make `verify-screen` diverge from the first swing on. Its logged outputs are a fingerprint of the whole run: if they move, something in the ordering moved.
 
 ## Handoff: what combat still needs (M5b and M5c)
@@ -1764,3 +1765,62 @@ playthrough will hit it:
     the blast (the death, the "is dead" line, the next monster's move, the
     party-death dialog, the player's next key) is correctly ordered; what
     still leads is that one number.
+
+- **The damage pipeline is async: state lands after the blast, and the turn
+  waits for the blow (2026-07-27).** The follow-up to the entry above, and the
+  end of the "knowingly not faithful" note it left: a PC's health used to drop
+  the instant a blow resolved, where the C++ takes it off only after
+  `boom_space` has finished sleeping. Play-testing also caught the same shape
+  one level up — **the active PC switched the moment you swung**, before the
+  blast had played.
+  - **`damagePc`/`damageMonst` are `async`.** They print the line, draw the
+    blast, `await animSettle()` — this port's version of `boom_space`'s sleep —
+    and only then subtract the health, decide the death and call
+    `kill_pc`/`kill_monst`. That is `damage_pc`'s own order
+    (boe.party.cpp:2660-2686); the port had all of it except the sleep.
+  - **The cascade is wide and it is the point.** ~40 functions became async:
+    `damageTarget`, `pcAttack`/`pcAttackWeapon`, `fireMissile`,
+    `monsterAttack`, `monsterBasicAbil`, `monstCastMage`/`monstCastPriest`,
+    `doShockwave`, the `combatImmed*` casts, `doCombatCast`/`resolveOne`/
+    `placeTarget`/`castCollected`, `castTownSpell`, `placeSpellPattern`/
+    `placeGrid`, `hitSpace`/`hitPcsInSpace`/`processFields`/
+    `monstInflictFields`, `doPoison`/`handleAcid`/`increaseAgeEffects`,
+    `handleMarkedDamage`, and on the session `attackAt`, `fireMissileAt`,
+    `pause`, `checkFields`, `afterPartyTurn`. Each one is a place the C++
+    blocks; the awaits are where its `pause()`/`sleep` calls are.
+  - **The PC switch was the visible half.** `attackAt` and `combatMove` now
+    `await pcAttack(...)` before `afterCombatAction()`, so the hand-over, the
+    `Active:` line and the camera move all land after the blast. *Measured in
+    the browser*: blast on screen until t+901ms, turn handed over at t+934ms.
+    It used to be immediate.
+  - **The special queue moved onto the turn chain.** `void
+    specials.drainQueue()` was fire-and-forget; a special can damage, and
+    damage now waits for its blast, so a loose special would have had its
+    explosions interleaving with the monsters' — two chains taking turns on
+    one timeline in an order nothing decides. `queueTurn` is serial, so it
+    still runs before the monsters. (Dialogs a special raises are unaffected:
+    dialog input is routed ahead of the `busy` gate.)
+  - **`flyMissiles` awaits the flight**, which is `do_missile_anim` blocking —
+    it is what puts the deferred `hitSpace` calls after the projectiles.
+  - *How this was kept honest*: `verify-screen`'s logged outputs are a
+    fingerprint of the whole run (see the gotcha above), and they came back
+    **identical** through the refactor — same damage rolls, same loot, same
+    positions — which is the evidence that no `get_ran` call moved. The one
+    deliberate exception is the special-queue change, which reorders when
+    queued specials run relative to the monsters and shifts the fingerprint
+    with it.
+  - *Gotchas for anyone driving the game*: an action no longer returns when
+    its animation starts, it returns when the animation is **over**. Three
+    `verify-screen` steps had to change shape: the attack loops must `await`
+    (twenty-five swings fired at once otherwise), the missile step samples
+    `screen.missiles` *before* awaiting the shot (the sky is empty afterwards),
+    and the fireball step records what flew through a new `window.__watchAnim`
+    tap and asks `visibleTranscript(launchTime)` whether the damage text was
+    *scheduled* before the projectiles landed — a sample-independent version
+    of the check it used to make by looking at the screen at the right moment.
+    The gate also runs at `?pace=1` now: with blasts blocking, the shipped 3x
+    play-testing pace would take minutes.
+  - Tests: `test/damage.test.ts` pins the two orderings directly — a PC's
+    health is untouched while the blast is on screen and lands when it clears,
+    a monster dies after its own blast, and the active PC does not change
+    until the swing has finished playing.

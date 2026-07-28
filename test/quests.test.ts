@@ -159,21 +159,21 @@ describe('the XML readers', () => {
     }
   });
 
-  it('valleydy has its ten special items, two of them useable', () => {
+  it('valleydy has its ten special items, two of them useable', async () => {
     expect(scen.specialItems.length).toBeGreaterThan(0);
     expect(scen.specialItems.filter(specItemUseable).length).toBe(2);
   });
 });
 
 describe('the scenario start', () => {
-  it('hands the party every start-with special item', () => {
+  it('hands the party every start-with special item', async () => {
     const s = inTown();
     for (let i = 0; i < scen.specialItems.length; i++) {
       expect(s.univ.party.specItems.has(i)).toBe(specItemStartWith(scen.specialItems[i]!));
     }
   });
 
-  it('starts every auto-start quest on day 1', () => {
+  it('starts every auto-start quest on day 1', async () => {
     const s = inTown();
     for (let i = 0; i < scen.quests.length; i++) {
       const job = s.univ.party.activeQuests.get(i);
@@ -189,7 +189,7 @@ describe('the scenario start', () => {
 });
 
 describe('cParty::start_timer', () => {
-  it('records the countdown, the node and which list it indexes', () => {
+  it('records the countdown, the node and which list it indexes', async () => {
     const s = inTown();
     s.univ.party.startTimer(20, 7, SpecCtxType.SCEN);
     expect(s.univ.party.partyEventTimers).toEqual([
@@ -199,7 +199,7 @@ describe('cParty::start_timer', () => {
 });
 
 describe('special_increase_age', () => {
-  it('ticks a party timer down by the length that passed', () => {
+  it('ticks a party timer down by the length that passed', async () => {
     const s = inTown();
     s.univ.party.startTimer(5, 7, SpecCtxType.SCEN);
     s.univ.party.age += 1;
@@ -207,7 +207,7 @@ describe('special_increase_age', () => {
     expect(s.univ.party.partyEventTimers[0]!.time).toBe(4);
   });
 
-  it('blanks the slot rather than removing it when the timer fires', () => {
+  it('blanks the slot rather than removing it when the timer fires', async () => {
     const s = inTown();
     s.univ.party.startTimer(1, 7, SpecCtxType.SCEN);
     s.univ.party.startTimer(50, 8, SpecCtxType.SCEN);
@@ -253,7 +253,7 @@ describe('special_increase_age', () => {
     expect(host.messages).toEqual(['now']);
   });
 
-  it('fails a quest whose deadline has passed, and angers the board', () => {
+  it('fails a quest whose deadline has passed, and angers the board', async () => {
     const s = inTown();
     const party = s.univ.party;
     // A quest with a tight relative deadline, taken on day 1 from board 2.
@@ -270,7 +270,7 @@ describe('special_increase_age', () => {
     expect(s.univ.transcript.some((l) => l.includes('deadline'))).toBe(true);
   });
 
-  it('leaves a quest alone until the deadline day itself has gone by', () => {
+  it('leaves a quest alone until the deadline day itself has gone by', async () => {
     const s = inTown();
     const party = s.univ.party;
     scen.quests.push(aQuest(5));
@@ -282,7 +282,7 @@ describe('special_increase_age', () => {
     expect(party.activeQuests.get(which)!.status).toBe(QuestStatus.STARTED);
   });
 
-  it('lets an angry job board cool off every thirtieth tick', () => {
+  it('lets an angry job board cool off every thirtieth tick', async () => {
     const s = inTown();
     const party = s.univ.party;
     party.jobBank(0).anger = 4;
@@ -296,7 +296,7 @@ describe('special_increase_age', () => {
 });
 
 describe('generate_job_bank', () => {
-  it('offers at most four quests and marks the bank inited', () => {
+  it('offers at most four quests and marks the bank inited', async () => {
     const s = inTown();
     // Six quests on board 0, so the four-slot cap is the binding limit.
     for (let i = 0; i < 6; i++) scen.quests.push(aQuest(30, 0));
@@ -307,7 +307,7 @@ describe('generate_job_bank', () => {
     for (const i of bank.jobs) if (i >= 0) expect(scen.quests[i]!.bank1).toBe(0);
   });
 
-  it('never offers a quest the party has already taken', () => {
+  it('never offers a quest the party has already taken', async () => {
     const s = inTown();
     for (let i = 0; i < 6; i++) scen.quests.push(aQuest(30, 0));
     for (let i = 0; i < scen.quests.length; i++) {
@@ -317,7 +317,7 @@ describe('generate_job_bank', () => {
     expect(bank.jobs.every((j) => j === -1)).toBe(true);
   });
 
-  it('grows the bank list to reach a board it has never seen', () => {
+  it('grows the bank list to reach a board it has never seen', async () => {
     const s = inTown();
     expect(s.univ.party.jobBanks.length).toBe(0);
     s.univ.party.jobBank(3);

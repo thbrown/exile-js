@@ -57,7 +57,7 @@ function monster(index: number): Creature {
 }
 
 describe('the iLiving seam', () => {
-  it('is shared by both a PC and a monster', () => {
+  it('is shared by both a PC and a monster', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     const monst = monster(1);
@@ -72,7 +72,7 @@ describe('the iLiving seam', () => {
     }
   });
 
-  it('clamps a status to its bounds, and refuses to wrap sleep through zero', () => {
+  it('clamps a status to its bounds, and refuses to wrap sleep through zero', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.applyStatus(Status.BLESS_CURSE, 100);
@@ -85,7 +85,7 @@ describe('the iLiving seam', () => {
     expect(pc.status[Status.ASLEEP]).toBe(0);
   });
 
-  it('the dead take no statuses at all', () => {
+  it('the dead take no statuses at all', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.mainStatus = MainStatus.DEAD;
@@ -93,7 +93,7 @@ describe('the iLiving seam', () => {
     expect(pc.status[Status.POISON]).toBe(0);
   });
 
-  it('clearBadStatus keeps the blessings and drops the afflictions', () => {
+  it('clearBadStatus keeps the blessings and drops the afflictions', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.status[Status.BLESS_CURSE] = 4; // a blessing on a positive status
@@ -110,7 +110,7 @@ describe('the iLiving seam', () => {
     expect(statusInfo(Status.BLESS_CURSE).isNegative).toBe(false);
   });
 
-  it('clearBriefStatus keeps poison, disease, dumbness and bad acid', () => {
+  it('clearBriefStatus keeps poison, disease, dumbness and bad acid', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.status[Status.POISON] = 3;
@@ -129,7 +129,7 @@ describe('the iLiving seam', () => {
     expect(pc.status[Status.ACID]).toBe(4); // a bad one doesn't
   });
 
-  it('spellNote formats through the print_result hook', () => {
+  it('spellNote formats through the print_result hook', async () => {
     const lines: string[] = [];
     const monst = monster(1);
     setPrintResult((line) => lines.push(line));
@@ -150,7 +150,7 @@ describe('the iLiving seam', () => {
 });
 
 describe('a PC taking effects', () => {
-  it('poison is worse for the frail and blunted by protection', () => {
+  it('poison is worse for the frail and blunted by protection', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.traits[Trait.FRAIL] = false;
@@ -177,7 +177,7 @@ describe('a PC taking effects', () => {
     expect(pc.status[Status.POISON]).toBe(0);
   });
 
-  it('curse and bless are the same call with opposite signs', () => {
+  it('curse and bless are the same call with opposite signs', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.curse(3);
@@ -187,7 +187,7 @@ describe('a PC taking effects', () => {
     expect(univ.transcript.at(-1)).toBe(`  ${pc.name} blessed.`);
   });
 
-  it('acid ignores the usual bounds but a ring stops it dead', () => {
+  it('acid ignores the usual bounds but a ring stops it dead', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     // Straight assignment in the C++, so it can exceed the 0..8 range.
@@ -208,7 +208,7 @@ describe('a PC taking effects', () => {
     expect(univ.transcript.at(-1)).toBe(`  ${other.name} resists acid.`);
   });
 
-  it('the unliving never sleep, and free action makes paralysis hopeless', () => {
+  it('the unliving never sleep, and free action makes paralysis hopeless', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.race = Race.SKELETAL;
@@ -228,7 +228,7 @@ describe('a PC taking effects', () => {
     expect(other.status[Status.PARALYZED]).toBe(0);
   });
 
-  it('being highly alert is total immunity to sleep', () => {
+  it('being highly alert is total immunity to sleep', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.traits[Trait.HIGHLY_ALERT] = true;
@@ -237,7 +237,7 @@ describe('a PC taking effects', () => {
     expect(pc.status[Status.ASLEEP]).toBe(0);
   });
 
-  it('sleep costs the turn but a forcecage does not', () => {
+  it('sleep costs the turn but a forcecage does not', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.traits[Trait.HIGHLY_ALERT] = false;
@@ -254,7 +254,7 @@ describe('a PC taking effects', () => {
     expect(pc.ap).toBe(4);
   });
 
-  it('drainSp is mostly shrugged off by a caster', () => {
+  it('drainSp is mostly shrugged off by a caster', async () => {
     const { univ } = newGame();
     const mage = univ.party.pcs[3]!; // Adrianna has mage spells
     mage.skills[Skill.MAGE_SPELLS] = 3;
@@ -271,7 +271,7 @@ describe('a PC taking effects', () => {
     expect(fighter.curSp).toBe(11); // all of it
   });
 
-  it('avatar tops the PC up and clears the bad statuses', () => {
+  it('avatar tops the PC up and clears the bad statuses', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.curHealth = 1;
@@ -287,7 +287,7 @@ describe('a PC taking effects', () => {
     expect(pc.status[Status.MARTYRS_SHIELD]).toBe(8);
   });
 
-  it('void_sanctuary tells you when it drops your invisibility', () => {
+  it('void_sanctuary tells you when it drops your invisibility', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     pc.status[Status.INVISIBLE] = 4;
@@ -296,7 +296,7 @@ describe('a PC taking effects', () => {
     expect(univ.transcript).toContain('You become visible!');
   });
 
-  it('getLoc falls back to the party square until the PC is placed', () => {
+  it('getLoc falls back to the party square until the PC is placed', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     expect(pc.getLoc()).toEqual(univ.party.townLoc);
@@ -304,7 +304,7 @@ describe('a PC taking effects', () => {
     expect(pc.getLoc()).toEqual({ x: 7, y: 9 });
   });
 
-  it('only a charm turns a PC hostile', () => {
+  it('only a charm turns a PC hostile', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     const monst = monster(1); // hostile
@@ -316,7 +316,7 @@ describe('a PC taking effects', () => {
     expect(pc.isFriendlyTo(univ.party.pcs[1]!)).toBe(false);
   });
 
-  it('a martyr shares damage back only with the shield up', () => {
+  it('a martyr shares damage back only with the shield up', async () => {
     const { univ } = newGame();
     const pc = univ.party.pcs[0]!;
     expect(pc.isShielded()).toBe(false);
@@ -328,7 +328,7 @@ describe('a PC taking effects', () => {
 });
 
 describe('a monster taking effects', () => {
-  it('scales effects by its magic resistance', () => {
+  it('scales effects by its magic resistance', async () => {
     const monst = monster(1);
     monst.mon.resist[DamageType.MAGIC] = 50;
     monst.curse(4);
@@ -339,7 +339,7 @@ describe('a monster taking effects', () => {
     expect(monst.status[Status.POISON]).toBe(0);
   });
 
-  it('fear works on morale, not on a status', () => {
+  it('fear works on morale, not on a status', async () => {
     const monst = monster(1);
     const before = monst.morale;
     monst.scare(5);
@@ -348,7 +348,7 @@ describe('a monster taking effects', () => {
     expect(monst.morale).toBe(before - 2);
   });
 
-  it('charm sets the attitude rather than a duration', () => {
+  it('charm sets the attitude rather than a duration', async () => {
     const monst = monster(1);
     monst.mon.level = 1; // charm_odds[0] = 90, so a low roll lands
     const rng = new GameRng();
@@ -358,7 +358,7 @@ describe('a monster taking effects', () => {
     expect(monst.attitude).toBe(Attitude.FRIENDLY);
   });
 
-  it('nothing high-level can be charmed, because charm_odds runs out', () => {
+  it('nothing high-level can be charmed, because charm_odds runs out', async () => {
     const monst = monster(1);
     monst.mon.level = 40; // CHARM_ODDS[20] = 0, so no roll can beat it
     expect(CHARM_ODDS[20]).toBe(0);
@@ -367,7 +367,7 @@ describe('a monster taking effects', () => {
     expect(monst.attitude).toBe(Attitude.HOSTILE_A);
   });
 
-  it('sleep still lands on a high-level monster a quarter of the time', () => {
+  it('sleep still lands on a high-level monster a quarter of the time', async () => {
     // ASLEEP subtracts 25 from the roll *before* the charm_odds comparison, so
     // any roll of 1-25 comes out at or below zero and beats even a 0 threshold.
     // Paralysis gets the same treatment with 15. This is why sleep is worth
@@ -384,7 +384,7 @@ describe('a monster taking effects', () => {
     expect(slept).toBeLessThan(80);
   });
 
-  it('immunity to magic is immunity to sleep as well', () => {
+  it('immunity to magic is immunity to sleep as well', async () => {
     const monst = monster(1);
     monst.mon.level = 2;
     monst.mon.resist[DamageType.MAGIC] = 0;
@@ -393,7 +393,7 @@ describe('a monster taking effects', () => {
     expect(monst.status[Status.PARALYZED]).toBe(0);
   });
 
-  it('a negative amount takes the no-roll branch, quirk and all', () => {
+  it('a negative amount takes the no-roll branch, quirk and all', async () => {
     // creature.cpp's early return is `status[which] -= amount`, so a negative
     // amount *raises* the status rather than curing it. It reads like a sign
     // slip in the original — the branch even reports "alert" further down — but
@@ -404,7 +404,7 @@ describe('a monster taking effects', () => {
     expect(monst.status[Status.PARALYZED]).toBe(16);
   });
 
-  it('two hostiles are only allies within the same faction', () => {
+  it('two hostiles are only allies within the same faction', async () => {
     const a = monster(1);
     const b = monster(1);
     a.attitude = Attitude.HOSTILE_A;
@@ -418,7 +418,7 @@ describe('a monster taking effects', () => {
     expect(a.isFriendlyTo(b)).toBe(true);
   });
 
-  it('owns its stats rather than sharing the scenario definition', () => {
+  it('owns its stats rather than sharing the scenario definition', async () => {
     const a = monster(1);
     const b = monster(1);
     a.mon.level = 99;
@@ -427,7 +427,7 @@ describe('a monster taking effects', () => {
     expect(scen.scenMonsters[1]!.resist[DamageType.MAGIC]).not.toBe(5);
   });
 
-  it('a spellcaster gets mp and everything gets morale', () => {
+  it('a spellcaster gets mp and everything gets morale', async () => {
     const caster = scen.scenMonsters.findIndex((m) => m.mu > 0 || m.cl > 0);
     expect(caster).toBeGreaterThanOrEqual(0);
     const monst = monster(caster);
@@ -436,7 +436,7 @@ describe('a monster taking effects', () => {
     expect(monst.mMorale).toBeGreaterThan(0);
   });
 
-  it('easy mode halves health and the difficulty adjustment multiplies it', () => {
+  it('easy mode halves health and the difficulty adjustment multiplies it', async () => {
     const template = scen.scenMonsters.find((m) => m.health > 10)!;
     const index = scen.scenMonsters.indexOf(template);
     const normal = monster(index);
@@ -451,7 +451,7 @@ describe('a monster taking effects', () => {
     expect(easy.maxHealth).toBe(Math.trunc(template.health / 2) * 2);
   });
 
-  it('the party level drives difficultyAdjust only when the scenario allows it', () => {
+  it('the party level drives difficultyAdjust only when the scenario allows it', async () => {
     const { univ } = newGame();
     expect(univ.difficultyAdjust()).toBe(1);
     for (const pc of univ.party.pcs) pc.level = 20; // 120 total
@@ -461,7 +461,7 @@ describe('a monster taking effects', () => {
 });
 
 describe('Player is still a plain enough object', () => {
-  it('constructs standalone with the base stats at one', () => {
+  it('constructs standalone with the base stats at one', async () => {
     const pc = new Player();
     expect(pc.skills[Skill.STRENGTH]).toBe(1);
     expect(pc.getLoc()).toEqual({ x: -1, y: -1 });

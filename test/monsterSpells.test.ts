@@ -47,27 +47,27 @@ function withCaster(mu = 3, cl = 0): { s: GameSession; m: Creature } {
 }
 
 describe('the targeting helpers', () => {
-  it('monst_near measures from the monster, and can demand it be alerted', () => {
+  it('monst_near measures from the monster, and can demand it be alerted', async () => {
     const { s, m } = withCaster();
     expect(monstNear(m, m.curLoc, 0)).toBe(true);
     expect(monstNear(m, { x: m.curLoc.x + 9, y: m.curLoc.y }, 3)).toBe(false);
   });
 
-  it('pc_near uses combat positions in a fight', () => {
+  it('pc_near uses combat positions in a fight', async () => {
     const { s } = withCaster();
     const pc = s.univ.party.pcs[0]!;
     expect(pcNear(s, pc, pc.combatPos, 0)).toBe(true);
     expect(pcNear(s, pc, { x: pc.combatPos.x + 9, y: pc.combatPos.y }, 2)).toBe(false);
   });
 
-  it('a dead PC is never near anything', () => {
+  it('a dead PC is never near anything', async () => {
     const { s } = withCaster();
     const pc = s.univ.party.pcs[0]!;
     pc.mainStatus = MainStatus.DEAD;
     expect(pcNear(s, pc, pc.combatPos, 5)).toBe(false);
   });
 
-  it('count_levels scores PCs up and hostile monsters down', () => {
+  it('count_levels scores PCs up and hostile monsters down', async () => {
     const { s } = withCaster();
     const pc = s.univ.party.pcs[0]!;
     // A PC in combat is worth a flat 10 wherever they stand.
@@ -75,7 +75,7 @@ describe('the targeting helpers', () => {
     expect(here).toBeGreaterThanOrEqual(10);
   });
 
-  it('find_fireball_loc gives up when nothing is worth hitting', () => {
+  it('find_fireball_loc gives up when nothing is worth hitting', async () => {
     const { s, m } = withCaster();
     // Everyone has to be out of the way, not just the party: `count_levels`
     // scores party-friendly *monsters* too, and the start town is full of
@@ -88,7 +88,7 @@ describe('the targeting helpers', () => {
     expect(at.x).toBe(-1);
   });
 
-  it('find_fireball_loc finds the party when they are bunched up', () => {
+  it('find_fireball_loc finds the party when they are bunched up', async () => {
     const { s, m } = withCaster();
     const spot = { x: m.curLoc.x + 4, y: m.curLoc.y };
     for (const pc of s.univ.party.pcs) pc.combatPos = { ...spot };
@@ -99,41 +99,41 @@ describe('the targeting helpers', () => {
 });
 
 describe('monst_cast_mage', () => {
-  it('a caster in an antimagic field can do nothing', () => {
+  it('a caster in an antimagic field can do nothing', async () => {
     const { s, m } = withCaster();
     s.univ.town!.setField(m.curLoc.x, m.curLoc.y, FieldType.FIELD_ANTIMAGIC, true);
-    expect(monstCastMage(s, m, 0)).toBe(false);
+    expect(await monstCastMage(s, m, 0)).toBe(false);
   });
 
-  it('refuses a dead target', () => {
+  it('refuses a dead target', async () => {
     const { s, m } = withCaster();
     s.univ.party.pcs[0]!.mainStatus = MainStatus.DEAD;
-    expect(monstCastMage(s, m, 0)).toBe(false);
+    expect(await monstCastMage(s, m, 0)).toBe(false);
   });
 
-  it('casts, announces it, and pays for it', () => {
+  it('casts, announces it, and pays for it', async () => {
     const { s, m } = withCaster(3);
     const before = m.mp;
-    expect(monstCastMage(s, m, 0)).toBe(true);
+    expect(await monstCastMage(s, m, 0)).toBe(true);
     expect(m.mp).toBeLessThan(before);
     expect(s.univ.transcript.some((l) => l.endsWith('casts:'))).toBe(true);
   });
 
-  it('a caster with no points gains one instead of casting', () => {
+  it('a caster with no points gains one instead of casting', async () => {
     const { s, m } = withCaster(7);
     m.mp = 0;
-    expect(monstCastMage(s, m, 0)).toBe(false);
+    expect(await monstCastMage(s, m, 0)).toBe(false);
     expect(m.mp).toBe(1);
   });
 
-  it('every level of the table produces a spell it can actually cast', () => {
+  it('every level of the table produces a spell it can actually cast', async () => {
     for (let level = 1; level <= 7; level++) {
       const { s, m } = withCaster(level);
       for (let i = 0; i < 20; i++) {
         m.mp = 500;
         m.health = m.maxHealth;
         const before = s.univ.transcript.length;
-        monstCastMage(s, m, 0);
+        await monstCastMage(s, m, 0);
         const said = s.univ.transcript.slice(before).join(' | ');
         expect(said, `mage level ${level}`).not.toContain('not implemented');
       }
@@ -142,28 +142,28 @@ describe('monst_cast_mage', () => {
 });
 
 describe('monst_cast_priest', () => {
-  it('casts and pays for it', () => {
+  it('casts and pays for it', async () => {
     const { s, m } = withCaster(0, 3);
     const before = m.mp;
-    expect(monstCastPriest(s, m, 0)).toBe(true);
+    expect(await monstCastPriest(s, m, 0)).toBe(true);
     expect(m.mp).toBeLessThan(before);
   });
 
-  it('every level of the table produces a spell it can actually cast', () => {
+  it('every level of the table produces a spell it can actually cast', async () => {
     for (let level = 1; level <= 7; level++) {
       const { s, m } = withCaster(0, level);
       for (let i = 0; i < 20; i++) {
         m.mp = 500;
         m.health = m.maxHealth;
         const before = s.univ.transcript.length;
-        monstCastPriest(s, m, 0);
+        await monstCastPriest(s, m, 0);
         const said = s.univ.transcript.slice(before).join(' | ');
         expect(said, `priest level ${level}`).not.toContain('not implemented');
       }
     }
   });
 
-  it('a badly hurt caster reaches for the panic column', () => {
+  it('a badly hurt caster reaches for the panic column', async () => {
     // Level 1 priest, below a quarter health: emergency[0][3] is Minor Heal,
     // and the roll takes it nine times in ten.
     const { s, m } = withCaster(0, 1);
@@ -174,13 +174,13 @@ describe('monst_cast_priest', () => {
       m.health = 10;
       m.mp = 500;
       const before = s.univ.transcript.length;
-      monstCastPriest(s, m, 0);
+      await monstCastPriest(s, m, 0);
       if (s.univ.transcript.slice(before).some((l) => l.includes('Minor Heal'))) healed = true;
     }
     expect(healed).toBe(true);
   });
 
-  it('a caster at full health swaps its big heals for something useful', () => {
+  it('a caster at full health swaps its big heals for something useful', async () => {
     // HEAL_ALL becomes Summon Host when there is nothing to heal.
     const { s, m } = withCaster(0, 6);
     m.health = m.maxHealth;
@@ -188,7 +188,7 @@ describe('monst_cast_priest', () => {
     for (let i = 0; i < 40; i++) {
       m.mp = 500;
       const before = s.univ.transcript.length;
-      monstCastPriest(s, m, 0);
+      await monstCastPriest(s, m, 0);
       if (s.univ.transcript.slice(before).some((l) => l.includes('Heal All'))) sawHealAll = true;
     }
     expect(sawHealAll).toBe(false);

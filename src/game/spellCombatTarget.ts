@@ -33,6 +33,7 @@ import { targetThere } from './missiles';
 import { GameMode } from './modes';
 import { getSummonMonster, summonMonster } from './monsterPlace';
 import { Attitude } from '../data/monster';
+import { animSettle } from './anim';
 import { runAMissile } from './missileAnim';
 import { runBoomAnim, startBoomAnim } from './booms';
 import { hitSpace } from './processFields';
@@ -171,7 +172,7 @@ export function startFancySpellTargeting(
  * `place_target` (:784) — a click while collecting. Clicking a square already
  * on the list takes it off again; filling the last slot casts at once.
  */
-export function placeTarget(session: GameSession, target: Location): void {
+export async function placeTarget(session: GameSession, target: Location): Promise<void> {
   const armed = session.spellTargeting;
   if (!armed) return;
   const { univ } = session;
@@ -216,18 +217,18 @@ export function placeTarget(session: GameSession, target: Location): void {
     armed.targetsLeft--;
   }
 
-  if (armed.targetsLeft === 0) castCollected(session);
+  if (armed.targetsLeft === 0) await castCollected(session);
 }
 
 /** Space — fire with however many squares have been picked so far. */
-export function castCollected(session: GameSession): void {
+export async function castCollected(session: GameSession): Promise<void> {
   const armed = session.spellTargeting;
   if (!armed) return;
   if (armed.targets.length === 0) {
     cancelSpellTargeting(session);
     return;
   }
-  doCombatCast(session, armed.targets[0]!);
+  await doCombatCast(session, armed.targets[0]!);
 }
 
 /**
@@ -266,16 +267,20 @@ function addMissile(
  * the same origin. `numSteps` is both the frame count and the arc divisor; the
  * C++ passes 35 for a volley and 60 for a single shot.
  */
-function flyMissiles(
+async function flyMissiles(
   queue: QueuedMissile[], from: Location, sound: number, numSteps: number,
-): void {
+): Promise<void> {
   for (const m of queue) {
     runAMissile(from, m.dest, m.type, m.pathType, sound, m.xAdj, m.yAdj, numSteps);
   }
   queue.length = 0;
+  // `do_missile_anim` blocks for the flight, which is what puts the hits that
+  // follow it — the deferred `hitSpace` calls, the explosions — after the
+  // projectiles have arrived rather than over the top of them.
+  await animSettle();
 }
 
-export function doCombatCast(session: GameSession, target: Location): void {
+export async function doCombatCast(session: GameSession, target: Location): Promise<void> {
   const armed = session.spellTargeting;
   if (!armed) return;
   const targets = armed.targets.length > 0 ? [...armed.targets] : [target];
@@ -369,20 +374,20 @@ export function doCombatCast(session: GameSession, target: Location): void {
       apTaken = true;
     }
 
-    resolveOne(session, spell, at, i, {
+    await resolveOne(session, spell, at, i, {
       pattern: armed.pattern, level, bonus, who, rng, min, deferred, missiles, shared,
     });
   }
 
   // The trailing do_missile_anim (boe.combat.cpp:1412): whatever is still
   // queued flies now, faster when there's a volley of them than for one shot.
-  flyMissiles(missiles, caster.combatPos, shared.sound, targets.length > 1 ? 35 : 60);
+  await flyMissiles(missiles, caster.combatPos, shared.sound, targets.length > 1 ? 35 : 60);
 
   // The held-back damage lands now, all of it at once. Still inside the volley,
   // so its explosions join the rest — as in the C++, where these `hit_space`
   // calls sit between do_missile_anim and do_explosion_anim (:1412 and :1435).
   for (const d of deferred) {
-    hitSpace(session, d.at, d.dam, d.type, 1, 0, who);
+    await hitSpace(session, d.at, d.dam, d.type, 1, 0, who);
   }
   } finally {
     // do_explosion_anim, then handle_marked_damage (boe.combat.cpp:1435/1439):
@@ -391,7 +396,7 @@ export function doCombatCast(session: GameSession, target: Location): void {
     // every later boom in the session would be swallowed, and the damage with
     // it.
     runBoomAnim();
-    handleMarkedDamage(univ, session);
+    await handleMarkedDamage(univ, session);
   }
 
   // Only advance the turn if the cast actually took AP — every target
@@ -404,7 +409,7 @@ export function doCombatCast(session: GameSession, target: Location): void {
 }
 
 /** Everything `do_combat_cast` does to one square. */
-function resolveOne(
+async function resolveOne(
   session: GameSession,
   spell: Spell,
   target: Location,
@@ -416,7 +421,7 @@ function resolveOne(
     missiles: QueuedMissile[];
     shared: { sound: number };
   },
-): void {
+): Promise<void> {
   const { univ } = session;
   const town = univ.town;
   if (!town) return;
@@ -428,51 +433,51 @@ function resolveOne(
     addMissile(missiles, target, type, 1, xAdj, yAdj);
   };
   /** The arms that don't wait for the shared volley: fly what's queued now. */
-  const flyNow = (sound: number): void => {
-    flyMissiles(missiles, caster.combatPos, sound, 100);
+  const flyNow = async (sound: number): Promise<void> => {
+    await flyMissiles(missiles, caster.combatPos, sound, 100);
   };
 
-  const field = (which: FieldType): void => {
-    placeSpellPattern(session, pat, target, { field: which, whoHit: who });
+  const field = async (which: FieldType): Promise<void> => {
+    await placeSpellPattern(session, pat, target, { field: which, whoHit: who });
   };
-  const blast = (type: DamageType, dice: number, shape = pat): void => {
-    placeSpellPattern(session, shape, target, { damage: { type, dice }, whoHit: who });
+  const blast = async (type: DamageType, dice: number, shape = pat): Promise<void> => {
+    await placeSpellPattern(session, shape, target, { damage: { type, dice }, whoHit: who });
   };
 
   switch (spell) {
     // --- fields ------------------------------------------------------------
     case Spell.GOO: case Spell.WEB: case Spell.GOO_BOMB:
-      field(FieldType.FIELD_WEB);
+      await field(FieldType.FIELD_WEB);
       return;
     case Spell.CLOUD_FLAME: case Spell.CONFLAGRATION:
-      field(FieldType.WALL_FIRE);
+      await field(FieldType.WALL_FIRE);
       return;
     case Spell.CLOUD_STINK: case Spell.FOUL_VAPOR:
-      field(FieldType.CLOUD_STINK);
+      await field(FieldType.CLOUD_STINK);
       return;
     case Spell.WALL_FORCE: case Spell.SHOCKSTORM: case Spell.FORCEFIELD:
-      field(FieldType.WALL_FORCE);
+      await field(FieldType.WALL_FORCE);
       return;
     case Spell.WALL_ICE: case Spell.WALL_ICE_BALL:
-      field(FieldType.WALL_ICE);
+      await field(FieldType.WALL_ICE);
       return;
     case Spell.ANTIMAGIC:
-      field(FieldType.FIELD_ANTIMAGIC);
+      await field(FieldType.FIELD_ANTIMAGIC);
       return;
     case Spell.CLOUD_SLEEP: case Spell.CLOUD_SLEEP_LARGE:
-      field(FieldType.CLOUD_SLEEP);
+      await field(FieldType.CLOUD_SLEEP);
       return;
     case Spell.WALL_BLADES:
-      field(FieldType.WALL_BLADES);
+      await field(FieldType.WALL_BLADES);
       return;
     case Spell.DISPEL_FIELD: case Spell.DISPEL_SPHERE: case Spell.DISPEL_SQUARE:
-      field(FieldType.FIELD_DISPEL);
+      await field(FieldType.FIELD_DISPEL);
       return;
     case Spell.QUICKFIRE:
       town.setField(target.x, target.y, FieldType.FIELD_QUICKFIRE, true);
       return;
     case Spell.SPRAY_FIELDS:
-      field(SPRAY_FIELDS[rng.getRan(1, 0, 14)] ?? FieldType.FIELD_WEB);
+      await field(SPRAY_FIELDS[rng.getRan(1, 0, 14)] ?? FieldType.FIELD_WEB);
       return;
 
     case Spell.BARRIER_FIRE:
@@ -482,7 +487,7 @@ function resolveOne(
       // *fire* damage — the force one included, which reads like a slip but is
       // what the C++ does.
       const dice = spell === Spell.BARRIER_FIRE ? 3 : 7;
-      hitSpace(session, target, rng.getRan(dice, 2, 7), DamageType.FIRE, 1, 1, who);
+      await hitSpace(session, target, rng.getRan(dice, 2, 7), DamageType.FIRE, 1, 1, who);
       const which = spell === Spell.BARRIER_FIRE
         ? FieldType.BARRIER_FIRE : FieldType.BARRIER_FORCE;
       town.setField(target.x, target.y, which, true);
@@ -495,7 +500,7 @@ function resolveOne(
     case Spell.DIVINE_THUD:
       missile(9);
       shared.sound = 11;
-      blast(DamageType.MAGIC, min(18, Math.trunc((level * 7) / 10) + 2 * bonus),
+      await blast(DamageType.MAGIC, min(18, Math.trunc((level * 7) / 10) + 2 * bonus),
         SpellPat.RADIUS_2);
       return;
     case Spell.SPARK:
@@ -503,8 +508,8 @@ function resolveOne(
       const dam = spell === Spell.SPARK
         ? rng.getRan(2, 1, 4) : rng.getRan(min(20, level + bonus), 1, 4);
       missile(6);
-      flyNow(11);
-      hitSpace(session, target, dam,
+      await flyNow(11);
+      await hitSpace(session, target, dam,
         spell === Spell.SPARK ? DamageType.MAGIC : DamageType.COLD, 1, 0, who);
       return;
     }
@@ -524,15 +529,15 @@ function resolveOne(
         ? rng.getRan(2 + Math.trunc(bonus / 2), 1, 4)
         : rng.getRan(min(7, 2 + bonus + Math.trunc(level / 2)), 1, 4);
       missile(14);
-      flyNow(24);
-      hitSpace(session, target, dam, DamageType.UNBLOCKABLE, 1, 0, who);
+      await flyNow(24);
+      await hitSpace(session, target, dam, DamageType.UNBLOCKABLE, 1, 0, who);
       return;
     }
     case Spell.FLAME: {
       const dam = rng.getRan(min(10, 1 + Math.trunc(level / 3) + bonus), 1, 6);
       missile(2);
-      flyNow(11);
-      hitSpace(session, target, dam, DamageType.FIRE, 1, 0, who);
+      await flyNow(11);
+      await hitSpace(session, target, dam, DamageType.FIRE, 1, 0, who);
       return;
     }
     case Spell.FIREBALL:
@@ -545,7 +550,7 @@ function resolveOne(
       if (spell === Spell.FLAMESTRIKE) dam = Math.trunc((dam * 14) / 10);
       else if (dam > 10) dam = Math.trunc((dam * 8) / 10);
       if (dam <= 0) dam = 1;
-      blast(DamageType.FIRE, dam, SpellPat.SQUARE);
+      await blast(DamageType.FIRE, dam, SpellPat.SQUARE);
       return;
     }
     case Spell.FIRESTORM:
@@ -555,14 +560,14 @@ function resolveOne(
       shared.sound = 11;
       let dam = min(12, 1 + Math.trunc((level * 2) / 3) + bonus) + 2;
       if (dam > 20) dam = Math.trunc((dam * 8) / 10);
-      blast(spell === Spell.FIRESTORM ? DamageType.FIRE : DamageType.COLD,
+      await blast(spell === Spell.FIRESTORM ? DamageType.FIRE : DamageType.COLD,
         dam, SpellPat.RADIUS_2);
       return;
     }
     case Spell.KILL:
       missile(9);
-      flyNow(11);
-      hitSpace(session, target, 40 + rng.getRan(3, 0, 10) + caster.level * 2,
+      await flyNow(11);
+      await hitSpace(session, target, 40 + rng.getRan(3, 0, 10) + caster.level * 2,
         DamageType.MAGIC, 1, 0, who);
       return;
     case Spell.ARROWS_DEATH:
@@ -584,7 +589,7 @@ function resolveOne(
       // Every summon (and Flash Step) throws the same sparkle first, at half
       // the usual length and with its own sound.
       missile(8);
-      flyMissiles(missiles, caster.combatPos, 61, 50);
+      await flyMissiles(missiles, caster.combatPos, 61, 50);
       const adj = caster.statAdj(Skill.INTELLIGENCE);
       let which = 0;
       let dice = 3;
@@ -620,7 +625,7 @@ function resolveOne(
 
     case Spell.FLASH_STEP:
       missile(8);
-      flyMissiles(missiles, caster.combatPos, 61, 50);
+      await flyMissiles(missiles, caster.combatPos, 61, 50);
       if (session.isBlocked(target)) univ.addStringToBuf('  Teleport failed.');
       else {
         univ.addStringToBuf('  Flash step!');
@@ -662,7 +667,7 @@ function resolveOne(
     case Spell.PARALYZE_BEAM: victim.sleep(Status.PARALYZED, 500, 0, rng); break;
     case Spell.UNHOLY_RAVAGING: {
       const r2 = rng.getRan(1, 0, 2);
-      if (monst) damageMonst(univ, monst, 7, rng.getRan(4, 1, 8), DamageType.MAGIC, { session });
+      if (monst) await damageMonst(univ, monst, 7, rng.getRan(4, 1, 8), DamageType.MAGIC, { session });
       victim.slow(4 + r2);
       victim.poison(5 + r2, rng);
       break;
@@ -744,8 +749,8 @@ function resolveOne(
       }
       let dam = rng.getRan(spell === Spell.TURN_UNDEAD ? 2 : 6, 1, 14);
       if (caster.traits[Trait.ANAMA]) dam += 15;
-      if (monst) damageMonst(univ, monst, who, dam, DamageType.UNBLOCKABLE, { session });
-      else damagePc(univ, victim as Player, dam, DamageType.UNBLOCKABLE);
+      if (monst) await damageMonst(univ, monst, who, dam, DamageType.UNBLOCKABLE, { session });
+      else await damagePc(univ, victim as Player, dam, DamageType.UNBLOCKABLE);
       break;
     }
 
@@ -769,8 +774,8 @@ function resolveOne(
       // bonus is an either/or with it, not a stack.
       if (dumb < 0) dam += Math.trunc((-25 * dumb) / 3);
       else if (caster.traits[Trait.ANAMA]) dam += 25;
-      if (monst) damageMonst(univ, monst, who, dam, DamageType.UNBLOCKABLE, { session });
-      else damagePc(univ, victim as Player, dam, DamageType.UNBLOCKABLE);
+      if (monst) await damageMonst(univ, monst, who, dam, DamageType.UNBLOCKABLE, { session });
+      else await damagePc(univ, victim as Player, dam, DamageType.UNBLOCKABLE);
       break;
     }
 

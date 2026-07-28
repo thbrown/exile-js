@@ -78,7 +78,7 @@ function targetThere(univ: Universe, where: Location): Living | null {
  * of it". `whoHit` is who gets blamed for any monster that dies (see the note
  * at the top of this file).
  */
-export function hitSpace(
+export async function hitSpace(
   session: GameSession,
   target: Location,
   dam: number,
@@ -86,7 +86,7 @@ export function hitSpace(
   report: number,
   hitAll: number,
   whoHit: number,
-): void {
+): Promise<void> {
   const { univ } = session;
   const town = univ.town;
   if (!town) return;
@@ -117,7 +117,7 @@ export function hitSpace(
   for (const monst of town.monsters) {
     if (!hitMonsters || stopHitting) break;
     if (!monst.isAlive || !monst.onSpace(target)) continue;
-    damageMonst(univ, monst, whoHit, dam, damType, { session });
+    await damageMonst(univ, monst, whoHit, dam, damType, { session });
     stopHitting = hitAll !== 1;
   }
 
@@ -126,7 +126,7 @@ export function hitSpace(
       if (stopHitting) break;
       if (pc.mainStatus !== MainStatus.ALIVE) continue;
       if (pc.combatPos.x !== target.x || pc.combatPos.y !== target.y) continue;
-      damagePc(univ, pc, dam, damType, Race.UNKNOWN);
+      await damagePc(univ, pc, dam, damType, Race.UNKNOWN);
       stopHitting = hitAll !== 1;
     }
   } else {
@@ -134,7 +134,7 @@ export function hitSpace(
     if (at.x === target.x && at.y === target.y) {
       // `fast_bang` only shortens the explosion animation, which this port
       // doesn't block on anyway.
-      hitParty(univ, dam, damType);
+      await hitParty(univ, dam, damType);
       stopHitting = hitAll !== 1;
     }
   }
@@ -146,15 +146,15 @@ export function hitSpace(
  * `hit_pcs_in_space` (:4307) — the same, with the monsters left alone. That is
  * the whole of the difference: it adds 10 to `hit_all`.
  */
-export function hitPcsInSpace(
+export async function hitPcsInSpace(
   session: GameSession,
   target: Location,
   dam: number,
   damType: DamageType,
   report: number,
   hitAll: number,
-): void {
-  hitSpace(session, target, dam, damType, report, 10 + hitAll, WHO_HIT_PARTY);
+): Promise<void> {
+  await hitSpace(session, target, dam, damType, report, 10 + hitAll, WHO_HIT_PARTY);
 }
 
 /** move_to_zero — one step toward 0 from either side. */
@@ -277,7 +277,9 @@ export function processForceCage(
  * all walks through walls of blades untouched. Quickfire is the exception that
  * always burns.
  */
-export function monstInflictFields(session: GameSession, monst: Creature): void {
+export async function monstInflictFields(
+  session: GameSession, monst: Creature,
+): Promise<void> {
   const { univ } = session;
   const town = univ.town;
   if (!town || !monst.isAlive) return;
@@ -296,21 +298,21 @@ export function monstInflictFields(session: GameSession, monst: Creature): void 
       const has = (field: FieldType): boolean => town.hasField(at.x, at.y, field);
 
       if (has(FieldType.FIELD_QUICKFIRE)) {
-        damageMonst(univ, monst, WHO_HIT_MONSTER, univ.rng.getRan(2, 1, 8),
+        await damageMonst(univ, monst, WHO_HIT_MONSTER, univ.rng.getRan(2, 1, 8),
           DamageType.FIRE, { session });
         break outer;
       }
       if (has(FieldType.WALL_BLADES)) {
         const r1 = univ.rng.getRan(6, 1, 8);
         if (hurtBy(FieldType.WALL_BLADES)) {
-          damageMonst(univ, monst, WHO_HIT_MONSTER, r1, DamageType.WEAPON, { session });
+          await damageMonst(univ, monst, WHO_HIT_MONSTER, r1, DamageType.WEAPON, { session });
         }
         break outer;
       }
       if (has(FieldType.WALL_FORCE)) {
         const r1 = univ.rng.getRan(3, 1, 6);
         if (hurtBy(FieldType.WALL_FORCE)) {
-          damageMonst(univ, monst, WHO_HIT_MONSTER, r1, DamageType.MAGIC, { session });
+          await damageMonst(univ, monst, WHO_HIT_MONSTER, r1, DamageType.MAGIC, { session });
         }
         break outer;
       }
@@ -321,7 +323,7 @@ export function monstInflictFields(session: GameSession, monst: Creature): void 
       if (has(FieldType.WALL_ICE)) {
         const r1 = univ.rng.getRan(3, 1, 6);
         if (hurtBy(FieldType.WALL_ICE)) {
-          damageMonst(univ, monst, WHO_HIT_MONSTER, r1, DamageType.COLD, { session });
+          await damageMonst(univ, monst, WHO_HIT_MONSTER, r1, DamageType.COLD, { session });
         }
         break outer;
       }
@@ -341,7 +343,7 @@ export function monstInflictFields(session: GameSession, monst: Creature): void 
       if (has(FieldType.WALL_FIRE)) {
         const r1 = univ.rng.getRan(2, 1, 6);
         if (hurtBy(FieldType.WALL_FIRE)) {
-          damageMonst(univ, monst, WHO_HIT_MONSTER, r1, DamageType.FIRE, { session });
+          await damageMonst(univ, monst, WHO_HIT_MONSTER, r1, DamageType.FIRE, { session });
         }
         break outer;
       }
@@ -372,7 +374,7 @@ export function monstInflictFields(session: GameSession, monst: Creature): void 
       town.setField(at.x, at.y, FieldType.OBJECT_CRATE, false);
       town.setField(at.x, at.y, FieldType.OBJECT_BARREL, false);
       if (town.hasField(at.x, at.y, FieldType.BARRIER_FIRE)) {
-        damageMonst(univ, monst, WHO_HIT_MONSTER, univ.rng.getRan(2, 1, 10),
+        await damageMonst(univ, monst, WHO_HIT_MONSTER, univ.rng.getRan(2, 1, 10),
           DamageType.FIRE, { session });
       }
     }
@@ -434,7 +436,7 @@ function spreadQuickfire(session: GameSession): void {
  * `process_fields` (:5099) — the whole end-of-turn field pass. Outdoors there
  * are no fields, so it does nothing at all.
  */
-export function processFields(session: GameSession): void {
+export async function processFields(session: GameSession): Promise<void> {
   const { univ } = session;
   const town = univ.town;
   if (!town || session.isOutdoors) return;
@@ -442,7 +444,7 @@ export function processFields(session: GameSession): void {
   if (town.quickfirePresent) spreadQuickfire(session);
 
   for (const monst of town.monsters) {
-    if (monst.isAlive) monstInflictFields(session, monst);
+    if (monst.isAlive) await monstInflictFields(session, monst);
   }
 
   syncForceCages(session);
@@ -457,13 +459,13 @@ export function processFields(session: GameSession): void {
       // damage is rolled *before* the expiry roll in every case, so the call
       // order of get_ran is the one the C++ has.
       if (has(FieldType.WALL_FORCE)) {
-        hitPcsInSpace(session, at, univ.rng.getRan(3, 1, 6), DamageType.MAGIC, 1, 1);
+        await hitPcsInSpace(session, at, univ.rng.getRan(3, 1, 6), DamageType.MAGIC, 1, 1);
         if (univ.rng.getRan(1, 1, 6) === 2) {
           town.setField(i, j, FieldType.WALL_FORCE, false);
         }
       }
       if (has(FieldType.WALL_FIRE)) {
-        hitPcsInSpace(session, at, univ.rng.getRan(2, 1, 6) + 1, DamageType.FIRE, 1, 1);
+        await hitPcsInSpace(session, at, univ.rng.getRan(2, 1, 6) + 1, DamageType.FIRE, 1, 1);
         if (univ.rng.getRan(1, 1, 4) === 2) {
           town.setField(i, j, FieldType.WALL_FIRE, false);
         }
@@ -482,13 +484,13 @@ export function processFields(session: GameSession): void {
         else sleepCloudSpace(session, at);
       }
       if (has(FieldType.WALL_ICE)) {
-        hitPcsInSpace(session, at, univ.rng.getRan(3, 1, 6), DamageType.COLD, 1, 1);
+        await hitPcsInSpace(session, at, univ.rng.getRan(3, 1, 6), DamageType.COLD, 1, 1);
         if (univ.rng.getRan(1, 1, 6) === 1) {
           town.setField(i, j, FieldType.WALL_ICE, false);
         }
       }
       if (has(FieldType.WALL_BLADES)) {
-        hitPcsInSpace(session, at, univ.rng.getRan(6, 1, 8), DamageType.WEAPON, 1, 1);
+        await hitPcsInSpace(session, at, univ.rng.getRan(6, 1, 8), DamageType.WEAPON, 1, 1);
         if (univ.rng.getRan(1, 1, 5) === 1) {
           town.setField(i, j, FieldType.WALL_BLADES, false);
         }
@@ -515,7 +517,7 @@ export function processFields(session: GameSession): void {
     for (let i = 0; i < dim; i++) {
       for (let j = 0; j < dim; j++) {
         if (!town.hasField(i, j, FieldType.FIELD_QUICKFIRE)) continue;
-        hitPcsInSpace(session, { x: i, y: j }, univ.rng.getRan(2, 1, 8), DamageType.FIRE, 1, 1);
+        await hitPcsInSpace(session, { x: i, y: j }, univ.rng.getRan(2, 1, 8), DamageType.FIRE, 1, 1);
       }
     }
   }

@@ -46,7 +46,7 @@ function newSession(): GameSession {
 }
 
 describe('boats and horses', () => {
-  it('the stealth scenario places horses and boats from the .map files', () => {
+  it('the stealth scenario places horses and boats from the .map files', async () => {
     // town1.map has horse markers at (6,24)/(8,24)/(10,24) and boat markers
     // at (17,54)/(19,53); town9.map and town19.map add more boats.
     expect(scen.horses.length).toBeGreaterThanOrEqual(5);
@@ -55,7 +55,7 @@ describe('boats and horses', () => {
     expect(scen.boats.every((b) => b.exists)).toBe(true);
   });
 
-  it('a fresh party gets its own copy of every vehicle the scenario placed', () => {
+  it('a fresh party gets its own copy of every vehicle the scenario placed', async () => {
     const { univ } = newSession();
     expect(univ.party.horses.length).toBe(scen.horses.length);
     expect(univ.party.boats.length).toBe(scen.boats.length);

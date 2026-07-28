@@ -21,6 +21,7 @@ import { Creature, CreatureStatus } from '../universe/creature';
 import { getProtLevel, hasAbilEquip, takeItem } from '../universe/inventory';
 import { SpellNote, livingSound } from '../universe/living';
 import { MonstAbil } from '../data/monsterAbility';
+import { animSettle } from './anim';
 import { boomAnimActive, boomSpace } from './booms';
 import { findClearSpot, placeMonster } from './monsterPlace';
 import { placeGlands, placeTreasure } from './loot';
@@ -104,15 +105,23 @@ export interface DamageOptions {
 /**
  * damage_pc — run `howMuch` through everything that might reduce it and apply
  * what's left. `attackerRace` drives the protect-from-species items.
+ *
+ * **Async because `boom_space` blocks.** The C++ prints the line, draws the
+ * blast, *sleeps through it*, and only then takes the health off, decides the
+ * death and calls `kill_pc` (boe.party.cpp:2660-2686). Everything after the
+ * blast in this function is therefore behind an `animSettle`, which is this
+ * port's version of that sleep. Every caller has to await it or the health
+ * comes off while the explosion is still on screen — which is the bug this
+ * shape exists to prevent.
  */
-export function damagePc(
+export async function damagePc(
   univ: Universe,
   pc: Player,
   howMuch: number,
   damType: DamageType,
   attackerRace: Race = Race.UNKNOWN,
   options: DamageOptions = {},
-): number {
+): Promise<number> {
   if (pc.mainStatus !== MainStatus.ALIVE) return 0;
   const { doPrint = true, boom = true } = options;
 
@@ -215,6 +224,9 @@ export function damagePc(
   if (damType !== DamageType.MARKED && boom) {
     boomSpace(hitLocation(univ, pc), boomType(damType), howMuch,
       getSoundType(damType, options.soundType ?? -1));
+    // `boom_space`'s sleep. Nothing below here — the health, the death, the
+    // "is dead" line — happens until the blast has been seen.
+    await animSettle();
   }
   univ.party.totalDamTaken += howMuch;
 
@@ -311,14 +323,14 @@ export function killPc(univ: Universe, pc: Player, type: MainStatus): void {
  * 6 for "the party as a whole" and 7+ for another monster — it decides who gets
  * the experience and whether hurting a friendly counts as a crime.
  */
-export function damageMonst(
+export async function damageMonst(
   univ: Universe,
   victim: Creature,
   whoHit: number,
   howMuch: number,
   damType: DamageType,
   options: DamageOptions & { session?: GameSession } = {},
-): number {
+): Promise<number> {
   if (victim.active === CreatureStatus.DEAD) return 0;
   const { doPrint = true } = options;
 
@@ -376,6 +388,9 @@ export function damageMonst(
   if (damType !== DamageType.MARKED) {
     boomSpace(victim.curLoc, boomType(damType), howMuch,
       getSoundType(damType, options.soundType ?? -1));
+    // The blast blocks here in the C++, so the health only comes off — and
+    // the thing only dies — once it has played. See `damagePc`.
+    await animSettle();
   }
   victim.health -= howMuch;
 
@@ -590,15 +605,17 @@ export function awardPartyXp(univ: Universe, amount: number): void {
 }
 
 /** hit_party (boe.party.cpp:2489) — the same blow to every living PC. */
-export function hitParty(
+export async function hitParty(
   univ: Universe,
   howMuch: number,
   damType: DamageType,
   soundType = -1,
-): void {
+): Promise<void> {
+  // One PC at a time, each waiting for its own blast: the C++ loops over the
+  // party calling `damage_pc`, and every one of those blocks.
   for (const pc of univ.party.pcs) {
     if (!pc.isAlive) continue;
-    damagePc(univ, pc, howMuch, damType, Race.UNKNOWN, { soundType });
+    await damagePc(univ, pc, howMuch, damType, Race.UNKNOWN, { soundType });
   }
 }
 
@@ -608,19 +625,24 @@ export function hitParty(
  * type of its own so the second pass skips the reductions already taken (easy
  * mode, toughness, luck) and doesn't boom again — the explosion has been seen.
  */
-export function handleMarkedDamage(univ: Universe, session?: GameSession): void {
+export async function handleMarkedDamage(
+  univ: Universe, session?: GameSession,
+): Promise<void> {
+  // MARKED damage draws no blast of its own — the volley already played it —
+  // so these awaits cost nothing; they are here because the damage functions
+  // are async, not because anything waits.
   for (const pc of univ.party.pcs) {
     if (pc.markedDamage > 0) {
       const marked = pc.markedDamage;
       pc.markedDamage = 0;
-      damagePc(univ, pc, marked, DamageType.MARKED, Race.UNKNOWN);
+      await damagePc(univ, pc, marked, DamageType.MARKED, Race.UNKNOWN);
     }
   }
   for (const monst of univ.town?.monsters ?? []) {
     if (monst.markedDamage > 0) {
       const marked = monst.markedDamage;
       monst.markedDamage = 0;
-      damageMonst(univ, monst, univ.curPc, marked, DamageType.MARKED, { session });
+      await damageMonst(univ, monst, univ.curPc, marked, DamageType.MARKED, { session });
     }
   }
 }

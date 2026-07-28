@@ -34,7 +34,7 @@ function newSession(): GameSession {
  * the town — except a 32-square town, which is shown whole.
  */
 describe('map view window', () => {
-  it('slides with the party outdoors and clamps to the sector', () => {
+  it('slides with the party outdoors and clamps to the sector', async () => {
     const s = newSession();
     s.univ.party.locInSec = { x: 24, y: 30 };
     expect(mapViewRect(s, true)).toEqual({ left: 4, top: 8, right: 44, bottom: 48 });
@@ -44,7 +44,7 @@ describe('map view window', () => {
     expect(mapViewRect(s, true)).toEqual({ left: 0, top: 8, right: 40, bottom: 48 });
   });
 
-  it('clamps a 48-square town to 8 and a 64-square town to 24', () => {
+  it('clamps a 48-square town to 8 and a 64-square town to 24', async () => {
     const s = newSession();
     s.startNewGame();
     const town = s.univ.town!;
@@ -55,7 +55,7 @@ describe('map view window', () => {
     expect(view.right - view.left).toBe(40);
   });
 
-  it('centres on the party when it is away from the edges', () => {
+  it('centres on the party when it is away from the edges', async () => {
     const s = newSession();
     s.startNewGame();
     s.univ.party.townLoc = { x: 22, y: 25 };

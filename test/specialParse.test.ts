@@ -8,7 +8,7 @@ const opcodes = buildOpcodeTable(
 );
 
 describe('buildOpcodeTable', () => {
-  it('maps names to the numeric SpecType values (1-based lines)', () => {
+  it('maps names to the numeric SpecType values (1-based lines)', async () => {
     expect(opcodes.get('set-sdf')).toBe(SpecType.SET_SDF);
     expect(opcodes.get('block-move')).toBe(SpecType.CANT_ENTER);
     expect(opcodes.get('once-disp-msg')).toBe(SpecType.ONCE_DISPLAY_MSG);
@@ -17,7 +17,7 @@ describe('buildOpcodeTable', () => {
 });
 
 describe('parseSpecials', () => {
-  it('parses a full block with all fields', () => {
+  it('parses a full block with all fields', async () => {
     const src = [
       '@once-disp-msg = 0',
       '\tsdf 349, 0',
@@ -38,13 +38,13 @@ describe('parseSpecials', () => {
     expect(n.jumpto).toBe(-1);
   });
 
-  it('auto-increments node indices and honors explicit ones', () => {
+  it('auto-increments node indices and honors explicit ones', async () => {
     const src = '@disp-msg\n@disp-msg = 7\n@disp-msg\n';
     const nodes = parseSpecials(src, opcodes);
     expect([...nodes.keys()].sort((a, b) => a - b)).toEqual([0, 7, 8]);
   });
 
-  it('applies init_block defaults (pictype = PIC_DLOG, others -1)', () => {
+  it('applies init_block defaults (pictype = PIC_DLOG, others -1)', async () => {
     const nodes = parseSpecials('@disp-msg = 3\nmsg 5\n', opcodes);
     const n = nodes.get(3)!;
     expect(n.pictype).toBe(PIC_DLOG);
@@ -54,24 +54,24 @@ describe('parseSpecials', () => {
     expect(n.ex2c).toBe(-1);
   });
 
-  it('resolves def symbols', () => {
+  it('resolves def symbols', async () => {
     const src = 'def my-flag = 42\n@set-sdf\nsdf my-flag, 1\n';
     const n = parseSpecials(src, opcodes).get(0)!;
     expect(n.sd1).toBe(42);
     expect(n.sd2).toBe(1);
   });
 
-  it('rejects symbol redefinition', () => {
+  it('rejects symbol redefinition', async () => {
     expect(() => parseSpecials('def a = 1\ndef a = 2\n', opcodes)).toThrow(SpecParseError);
   });
 
-  it('rejects unknown opcodes and too many values', () => {
+  it('rejects unknown opcodes and too many values', async () => {
     expect(() => parseSpecials('@not-a-real-opcode\n', opcodes)).toThrow(SpecParseError);
     expect(() => parseSpecials('@disp-msg\ngoto 1, 2\n', opcodes)).toThrow(SpecParseError);
     expect(() => parseSpecials('@disp-msg\nsdf 1, 2, 3\n', opcodes)).toThrow(SpecParseError);
   });
 
-  it('parses every .spec file in the four bundled scenarios', () => {
+  it('parses every .spec file in the four bundled scenarios', async () => {
     const base = new URL('../public/scenarios/', import.meta.url);
     for (const scen of ['valleydy', 'stealth', 'zakhazi', 'busywork']) {
       for (const dir of ['', 'towns/', 'out/']) {
@@ -88,7 +88,7 @@ describe('parseSpecials', () => {
     }
   });
 
-  it('valleydy town1.spec matches known first nodes', () => {
+  it('valleydy town1.spec matches known first nodes', async () => {
     const text = readFileSync(
       new URL('../public/scenarios/valleydy/towns/town1.spec', import.meta.url),
       'utf8',

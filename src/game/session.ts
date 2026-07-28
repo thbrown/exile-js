@@ -293,7 +293,7 @@ export class GameSession {
       }
       this.checkTownEntrance();
     }
-    if (moved) this.afterPartyTurn();
+    if (moved) await this.afterPartyTurn();
     return moved;
   }
 
@@ -308,9 +308,9 @@ export class GameSession {
    *
    * TODO(M6): increase_age's hunger and autosave.
    */
-  private afterPartyTurn(): void {
+  private async afterPartyTurn(): Promise<void> {
     try {
-      this.afterPartyTurnInner();
+      await this.afterPartyTurnInner();
     } finally {
       // handle_monster_actions ends with this check (boe.actions.cpp:1932) —
       // upkeep (poison, disease, a field) or a monster's turn can be what
@@ -319,10 +319,10 @@ export class GameSession {
     }
   }
 
-  private afterPartyTurnInner(): void {
+  private async afterPartyTurnInner(): Promise<void> {
     // increase_age's upkeep — poison biting, wounds closing, blessings running
     // out. Without this a status effect is only ever a line in the transcript.
-    increaseAgeEffects(this);
+    await increaseAgeEffects(this);
     // increase_age's tail (boe.actions.cpp:3578): quest deadlines and the town,
     // scenario and party timers, between the status upkeep and the fields.
     // The length is **1** even outdoors, where the clock has just jumped by 5
@@ -332,14 +332,19 @@ export class GameSession {
     // The fields do their work here, before the monsters move — increase_age
     // runs ahead of do_monsters in town (boe.actions.cpp:1266). Outdoors there
     // are no fields, which is why the C++ gates this on is_town().
-    if (this.mode === GameMode.TOWN) processFields(this);
+    if (this.mode === GameMode.TOWN) await processFields(this);
     // increase_age (boe.actions.cpp:3586) cancels a half-finished trade-places
     // every turn, so a stray first click doesn't swap someone a minute later.
     this.currentSwitch = NO_ONE;
     // The queue check at the tail of handle_action (boe.actions.cpp:1910),
-    // which is what actually runs anything the timers queued. Fire-and-forget,
-    // like every other chain launched from a synchronous path.
-    void this.specials?.drainQueue();
+    // which is what actually runs anything the timers queued. It goes on the
+    // turn chain rather than being launched loose: a special can damage, and
+    // damage waits for its blast now, so a fire-and-forget special would have
+    // its explosions interleaving with the monsters' — two chains taking turns
+    // on one timeline, in an order nothing decides. The chain is serial, so
+    // this still runs before the monsters below it. Dialogs a special raises
+    // are unaffected: their input is routed ahead of the `busy` gate.
+    this.queueTurn(async () => { await this.specials?.drainQueue(); });
     if (this.mode === GameMode.TOWN) {
       doMonsters(this);
       // The monsters' turn waits on the animation timeline now, so the rest of
@@ -1568,39 +1573,39 @@ export class GameSession {
    * walls only announce themselves: the C++ only damages on a COMBAT_MOVE,
    * because in town the party is about to be hit by `process_fields` anyway.
    */
-  private checkFields(where: Location, inCombatMove: boolean): void {
+  private async checkFields(where: Location, inCombatMove: boolean): Promise<void> {
     const town = this.univ.town;
     if (!town) return;
     const pc = this.univ.currentPc;
     const rng = this.univ.rng;
     const say = (line: string): void => this.univ.addStringToBuf(line);
-    const hit = (dam: number, type: DamageType): void => {
-      if (inCombatMove) damagePc(this.univ, pc, dam, type, Race.UNKNOWN);
+    const hit = async (dam: number, type: DamageType): Promise<void> => {
+      if (inCombatMove) await damagePc(this.univ, pc, dam, type, Race.UNKNOWN);
     };
 
     if (town.hasField(where.x, where.y, FieldType.WALL_FIRE)) {
       say('  Fire wall!');
-      hit(rng.getRan(1, 1, 6) + 1, DamageType.FIRE);
+      await hit(rng.getRan(1, 1, 6) + 1, DamageType.FIRE);
     }
     if (town.hasField(where.x, where.y, FieldType.WALL_FORCE)) {
       say('  Force wall!');
-      hit(rng.getRan(2, 1, 6), DamageType.MAGIC);
+      await hit(rng.getRan(2, 1, 6), DamageType.MAGIC);
     }
     if (town.hasField(where.x, where.y, FieldType.WALL_ICE)) {
       say('  Ice wall!');
       const r1 = rng.getRan(2, 1, 6);
-      hit(r1, DamageType.COLD);
+      await hit(r1, DamageType.COLD);
       // The C++ booms on the *party's* square, not the one stepped into, and
       // only outside combat. Kept.
       if (!isCombat(this.mode)) boomSpace(this.univ.party.townLoc, 4, r1, 7);
     }
     if (town.hasField(where.x, where.y, FieldType.WALL_BLADES)) {
       say('  Blade wall!');
-      hit(rng.getRan(4, 1, 8), DamageType.WEAPON);
+      await hit(rng.getRan(4, 1, 8), DamageType.WEAPON);
     }
     if (town.hasField(where.x, where.y, FieldType.FIELD_QUICKFIRE)) {
       say('  Quickfire!');
-      hit(rng.getRan(2, 1, 8), DamageType.FIRE);
+      await hit(rng.getRan(2, 1, 8), DamageType.FIRE);
     }
     if (town.hasField(where.x, where.y, FieldType.CLOUD_STINK)) {
       say('  Stinking cloud!');
@@ -1613,8 +1618,8 @@ export class GameSession {
     if (town.hasField(where.x, where.y, FieldType.BARRIER_FIRE)) {
       say('  Magic barrier!');
       const r1 = rng.getRan(2, 1, 10);
-      if (inCombatMove) damagePc(this.univ, pc, r1, DamageType.MAGIC, Race.UNKNOWN);
-      else hitParty(this.univ, r1, DamageType.MAGIC);
+      if (inCombatMove) await damagePc(this.univ, pc, r1, DamageType.MAGIC, Race.UNKNOWN);
+      else await hitParty(this.univ, r1, DamageType.MAGIC);
     }
   }
 
@@ -1679,7 +1684,7 @@ export class GameSession {
    * TODO(M5): flying and boats make the party immune, and combat hurts only
    * the PC who stepped in it.
    */
-  private damagingTerrain(spec: Terrain): void {
+  private async damagingTerrain(spec: Terrain): Promise<void> {
     let damType: DamageType = spec.flag3 > 0 && spec.flag3 < DamageType.SPECIAL
       ? spec.flag3 as DamageType
       : DamageType.WEAPON;
@@ -1710,7 +1715,7 @@ export class GameSession {
       default: break;
     }
     if (amount < 0) return;
-    hitParty(this.univ, amount, damType);
+    await hitParty(this.univ, amount, damType);
   }
 
   /**
@@ -2233,7 +2238,7 @@ export class GameSession {
    * to-hit bonus caps out), or a plain pause otherwise. Either way it's a turn
    * spent, and webs get torn at.
    */
-  pause(): void {
+  async pause(): Promise<void> {
     if (this.mode === GameMode.COMBAT) {
       const pc = this.univ.currentPc;
       pc.parry = 100;
@@ -2253,7 +2258,7 @@ export class GameSession {
       pc.status[Status.WEBS] = Math.max(0, (pc.status[Status.WEBS] ?? 0) - 2);
     }
     this.pauseVehicles();
-    this.afterPartyTurn();
+    await this.afterPartyTurn();
   }
 
   /**
@@ -2443,12 +2448,12 @@ export class GameSession {
    * way — a shot that was out of range or out of sight has still been aimed,
    * which is what the C++ does when `fire_missile` returns.
    */
-  fireMissileAt(where: Location): boolean {
+  async fireMissileAt(where: Location): Promise<boolean> {
     const loaded = this.missile;
     if (loaded === null) return false;
     this.missile = null;
     this.mode = GameMode.COMBAT;
-    fireMissile(this, loaded, where);
+    await fireMissile(this, loaded, where);
     this.afterCombatAction();
     return true;
   }
@@ -2457,10 +2462,10 @@ export class GameSession {
    * The current PC swings at whatever is on `where`. Returns false when there's
    * nothing there to hit.
    */
-  attackAt(where: Location): boolean {
+  async attackAt(where: Location): Promise<boolean> {
     const target = this.univ.town?.monsterAt(where) ?? null;
     if (!target) return false;
-    pcAttack(this.univ, this.univ.curPc, target, this);
+    await pcAttack(this.univ, this.univ.curPc, target, this);
     this.afterCombatAction();
     return true;
   }
@@ -2583,7 +2588,7 @@ export class GameSession {
       if (doAttack) {
         if (monstHit.isFriendly) makeTownHostile(this);
         pc.lastAttacked = monstHit;
-        pcAttack(this.univ, this.univ.curPc, monstHit, this);
+        await pcAttack(this.univ, this.univ.curPc, monstHit, this);
         this.afterCombatAction();
         return true;
       }

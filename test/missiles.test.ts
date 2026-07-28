@@ -53,7 +53,7 @@ function anItem(variety: ItemType, extra: Partial<Item> = {}): Item {
 }
 
 describe('load_missile', () => {
-  it('refuses when nothing is equipped to shoot with', () => {
+  it('refuses when nothing is equipped to shoot with', async () => {
     const s = inTown();
     armWith(s.univ.currentPc);
     const r = loadMissile(s.univ);
@@ -61,19 +61,19 @@ describe('load_missile', () => {
     expect(r).toMatchObject({ message: 'Fire: Equip a missile.' });
   });
 
-  it('a bow with bolts is the wrong ammunition', () => {
+  it('a bow with bolts is the wrong ammunition', async () => {
     const s = inTown();
     armWith(s.univ.currentPc, anItem(ItemType.BOW), anItem(ItemType.BOLTS));
     expect(loadMissile(s.univ)).toMatchObject({ message: 'Fire: Wrong ammunition.' });
   });
 
-  it('a bow without arrows says which ammunition it wants', () => {
+  it('a bow without arrows says which ammunition it wants', async () => {
     const s = inTown();
     armWith(s.univ.currentPc, anItem(ItemType.BOW));
     expect(loadMissile(s.univ)).toMatchObject({ message: 'Fire: Equip some arrows.' });
   });
 
-  it('a bow and arrows fire at 12, and DISTANCE_MISSILE ammunition reaches further', () => {
+  it('a bow and arrows fire at 12, and DISTANCE_MISSILE ammunition reaches further', async () => {
     const s = inTown();
     const pc = s.univ.currentPc;
     armWith(pc, anItem(ItemType.BOW), anItem(ItemType.ARROW));
@@ -86,7 +86,7 @@ describe('load_missile', () => {
     expect(loadMissile(s.univ)).toMatchObject({ range: 16 });
   });
 
-  it('a thrown weapon wins outright and throws at 8', () => {
+  it('a thrown weapon wins outright and throws at 8', async () => {
     const s = inTown();
     armWith(s.univ.currentPc,
       anItem(ItemType.BOW), anItem(ItemType.ARROW), anItem(ItemType.THROWN_MISSILE));
@@ -94,7 +94,7 @@ describe('load_missile', () => {
     expect(r).toMatchObject({ mode: GameMode.THROWING, range: 8, missileSlot: 2, ammoSlot: 2 });
   });
 
-  it('a launcher that needs no ammunition is its own ammunition', () => {
+  it('a launcher that needs no ammunition is its own ammunition', async () => {
     const s = inTown();
     armWith(s.univ.currentPc, anItem(ItemType.MISSILE_NO_AMMO));
     expect(loadMissile(s.univ)).toMatchObject({ missileSlot: 0, ammoSlot: 0, range: 12 });
@@ -118,50 +118,50 @@ describe('fire_missile', () => {
     return { s, monst, pc };
   }
 
-  it('hits something two squares away and spends an arrow', () => {
+  it('hits something two squares away and spends an arrow', async () => {
     const { s, monst, pc } = aFight();
     const before = monst.health;
     const loaded = loadMissile(s.univ);
     if (!isLoaded(loaded)) throw new Error('should be armed');
-    fireMissile(s, loaded, monst.curLoc);
+    await fireMissile(s, loaded, monst.curLoc);
     expect(s.univ.transcript.join('\n')).toContain(`${pc.name} fires.`);
     expect(monst.health).toBeLessThan(before);
     expect(pc.items[1]!.charges).toBe(9);
   });
 
-  it('refuses a target beyond the range and keeps the arrow', () => {
+  it('refuses a target beyond the range and keeps the arrow', async () => {
     const { s, monst, pc } = aFight();
     const far = { x: pc.combatPos.x + 30, y: pc.combatPos.y };
     const loaded = loadMissile(s.univ);
     if (!isLoaded(loaded)) throw new Error('should be armed');
-    fireMissile(s, loaded, far);
+    await fireMissile(s, loaded, far);
     expect(s.univ.transcript.at(-1)).toBe('  Out of range.');
     expect(pc.items[1]!.charges).toBe(10);
     expect(monst.health).toBeGreaterThan(0);
   });
 
-  it('the last arrow leaves the pack when it is spent', () => {
+  it('the last arrow leaves the pack when it is spent', async () => {
     const { s, monst, pc } = aFight();
     pc.items[1]!.charges = 1;
     const loaded = loadMissile(s.univ);
     if (!isLoaded(loaded)) throw new Error('should be armed');
-    fireMissile(s, loaded, monst.curLoc);
+    await fireMissile(s, loaded, monst.curLoc);
     expect(pc.items[1]!.variety).toBe(ItemType.NO_ITEM);
   });
 
-  it('a returning missile never runs out', () => {
+  it('a returning missile never runs out', async () => {
     const { s, monst, pc } = aFight();
     pc.items[1]!.ability = ItemAbil.RETURNING_MISSILE;
     pc.items[1]!.charges = 1;
     const loaded = loadMissile(s.univ);
     if (!isLoaded(loaded)) throw new Error('should be armed');
-    fireMissile(s, loaded, monst.curLoc);
+    await fireMissile(s, loaded, monst.curLoc);
     expect(pc.items[1]!.charges).toBe(1);
   });
 });
 
 describe('calc_spec_dam', () => {
-  it('a slayer weapon only bites the race it names', () => {
+  it('a slayer weapon only bites the race it names', async () => {
     const s = inTown();
     const monst = s.univ.town!.monsters.find((c) => c.isAlive)!;
     monst.mon.race = Race.DRAGON;
@@ -171,7 +171,7 @@ describe('calc_spec_dam', () => {
     expect(miss.damage).toBe(0);
   });
 
-  it('a humanoid-bane weapon also bites nephilim, but not humans', () => {
+  it('a humanoid-bane weapon also bites nephilim, but not humans', async () => {
     const s = inTown();
     const monst = s.univ.town!.monsters.find((c) => c.isAlive)!;
     monst.mon.race = Race.NEPHIL;
@@ -182,7 +182,7 @@ describe('calc_spec_dam', () => {
     expect(calcSpecDam(s.univ, ItemAbil.SLAYER_WEAPON, 2, Race.HUMANOID, monst).damage).toBe(0);
   });
 
-  it('an undead-bane weapon also bites the skeletal', () => {
+  it('an undead-bane weapon also bites the skeletal', async () => {
     const s = inTown();
     const monst = s.univ.town!.monsters.find((c) => c.isAlive)!;
     monst.mon.race = Race.SKELETAL;
@@ -211,13 +211,13 @@ describe('on-hit item abilities', () => {
     return { s, monst, pc };
   }
 
-  function fire(s: GameSession, at: { x: number; y: number }): void {
+  async function fire(s: GameSession, at: { x: number; y: number }): Promise<void> {
     const loaded = loadMissile(s.univ);
     if (!isLoaded(loaded)) throw new Error('should be armed');
-    fireMissile(s, loaded, at);
+    await fireMissile(s, loaded, at);
   }
 
-  it('a soulsucking missile heals the firer, on the coin flip that says so', () => {
+  it('a soulsucking missile heals the firer, on the coin flip that says so', async () => {
     const { s, monst, pc } = aShot({
       ability: ItemAbil.SOULSUCKER, abilStrength: 10,
     });
@@ -227,25 +227,25 @@ describe('on-hit item abilities', () => {
     for (let i = 0; i < 20 && pc.curHealth === 100; i++) {
       pc.items[1]!.charges = 10;
       monst.health = 500;
-      fire(s, monst.curLoc);
+      await fire(s, monst.curLoc);
     }
     expect(s.univ.transcript.join('\n')).toContain('Missile drains life.');
     expect(pc.curHealth).toBeGreaterThan(100);
   });
 
-  it('a status missile applies its status', () => {
+  it('a status missile applies its status', async () => {
     const { s, monst } = aShot({
       ability: ItemAbil.STATUS_WEAPON, abilStrength: 8, abilData: Status.ACID,
     });
     for (let i = 0; i < 20 && (monst.status[Status.ACID] ?? 0) === 0; i++) {
       monst.health = 500;
-      fire(s, monst.curLoc);
+      await fire(s, monst.curLoc);
     }
     expect(s.univ.transcript.join('\n')).toContain('Missile drips acid.');
     expect(monst.status[Status.ACID] ?? 0).toBeGreaterThan(0);
   });
 
-  it('an antimagic missile drains a spellcaster and gives some back', () => {
+  it('an antimagic missile drains a spellcaster and gives some back', async () => {
     const { s, monst, pc } = aShot({
       ability: ItemAbil.ANTIMAGIC_WEAPON, abilStrength: 20,
     });
@@ -256,19 +256,19 @@ describe('on-hit item abilities', () => {
     pc.maxSp = 100;
     for (let i = 0; i < 20 && monst.mp === 60; i++) {
       monst.health = 500;
-      fire(s, monst.curLoc);
+      await fire(s, monst.curLoc);
     }
     expect(monst.mp).toBeLessThan(60);
     expect(s.univ.transcript.join('\n')).toContain('Missile drains energy.');
     expect(pc.curSp).toBeGreaterThan(0);
   });
 
-  it('a damaging missile lands its extra damage as its own type', () => {
+  it('a damaging missile lands its extra damage as its own type', async () => {
     const { s, monst } = aShot({
       ability: ItemAbil.DAMAGING_WEAPON, abilStrength: 5, abilData: 1, // FIRE
     });
     const before = monst.health;
-    fire(s, monst.curLoc);
+    await fire(s, monst.curLoc);
     // Two hits, so more than the 8d1+30 the arrow alone could manage.
     expect(monst.health).toBeLessThan(before);
   });

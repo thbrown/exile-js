@@ -75,17 +75,17 @@ export interface PatternOptions {
 /** The `eSpellPat` overloads — look the shape up, then place it. */
 export function placeSpellPattern(
   session: GameSession, pat: SpellPat, center: Location, options?: PatternOptions,
-): void;
+): Promise<void>;
 /** The `effect_pat_type` overloads — place a grid that is already in hand. */
 export function placeSpellPattern(
   session: GameSession, pat: EffectPattern, center: Location, options?: PatternOptions,
-): void;
-export function placeSpellPattern(
+): Promise<void>;
+export async function placeSpellPattern(
   session: GameSession,
   pat: SpellPat | EffectPattern,
   center: Location,
   options: PatternOptions = {},
-): void {
+): Promise<void> {
   const grid = copyPattern(
     typeof pat === 'number' ? getBuiltinPattern(pat, options.rot ?? 0) : pat);
 
@@ -99,12 +99,12 @@ export function placeSpellPattern(
   }
   if (code !== 0) modifyPattern(grid, code);
 
-  placeGrid(session, grid, center, options.whoHit ?? 0);
+  await placeGrid(session, grid, center, options.whoHit ?? 0);
 }
 
-function placeGrid(
+async function placeGrid(
   session: GameSession, pat: EffectPattern, center: Location, whoHit: number,
-): void {
+): Promise<void> {
   const { univ } = session;
   const town = univ.town;
   if (!town) return;
@@ -178,25 +178,25 @@ function placeGrid(
         const effect = cell(i, j);
         const dam = decodeDamage(effect);
         if (dam) {
-          damagePc(univ, pc, univ.rng.getRan(dam.dice, 1, 6), dam.type, Race.UNKNOWN);
+          await damagePc(univ, pc, univ.rng.getRan(dam.dice, 1, 6), dam.type, Race.UNKNOWN);
           continue;
         }
         if (effect >= 50) continue; // a code that decoded as MARKED: nothing
         switch (effect as FieldType) {
           case FieldType.WALL_FORCE:
-            damagePc(univ, pc, univ.rng.getRan(2, 1, 6), DamageType.MAGIC, Race.UNKNOWN);
+            await damagePc(univ, pc, univ.rng.getRan(2, 1, 6), DamageType.MAGIC, Race.UNKNOWN);
             break;
           case FieldType.WALL_FIRE:
-            damagePc(univ, pc, univ.rng.getRan(1, 1, 6) + 1, DamageType.FIRE, Race.UNKNOWN);
+            await damagePc(univ, pc, univ.rng.getRan(1, 1, 6) + 1, DamageType.FIRE, Race.UNKNOWN);
             break;
           case FieldType.WALL_ICE:
-            damagePc(univ, pc, univ.rng.getRan(2, 1, 6), DamageType.COLD, Race.UNKNOWN);
+            await damagePc(univ, pc, univ.rng.getRan(2, 1, 6), DamageType.COLD, Race.UNKNOWN);
             break;
           case FieldType.WALL_BLADES:
-            damagePc(univ, pc, univ.rng.getRan(4, 1, 8), DamageType.WEAPON, Race.UNKNOWN);
+            await damagePc(univ, pc, univ.rng.getRan(4, 1, 8), DamageType.WEAPON, Race.UNKNOWN);
             break;
           case FieldType.OBJECT_BLOCK:
-            damagePc(univ, pc, univ.rng.getRan(6, 1, 8), DamageType.WEAPON, Race.UNKNOWN);
+            await damagePc(univ, pc, univ.rng.getRan(6, 1, 8), DamageType.WEAPON, Race.UNKNOWN);
             break;
           default:
             break;
@@ -224,30 +224,30 @@ function placeGrid(
 
         const dam = decodeDamage(effect);
         if (dam) {
-          damageMonst(univ, monst, whoHit, univ.rng.getRan(dam.dice, 1, 6), dam.type, { session });
+          await damageMonst(univ, monst, whoHit, univ.rng.getRan(dam.dice, 1, 6), dam.type, { session });
           continue;
         }
         if (effect >= 50) continue;
         switch (effect as FieldType) {
           case FieldType.FIELD_WEB: monst.web(3); break;
           case FieldType.WALL_FORCE:
-            damageMonst(
+            await damageMonst(
               univ, monst, whoHit, univ.rng.getRan(3, 1, 6), DamageType.MAGIC, { session });
             break;
           case FieldType.WALL_FIRE:
-            damageMonst(
+            await damageMonst(
               univ, monst, whoHit, univ.rng.getRan(2, 1, 6), DamageType.FIRE, { session });
             break;
           case FieldType.WALL_ICE:
-            damageMonst(
+            await damageMonst(
               univ, monst, whoHit, univ.rng.getRan(3, 1, 6), DamageType.COLD, { session });
             break;
           case FieldType.WALL_BLADES:
-            damageMonst(
+            await damageMonst(
               univ, monst, whoHit, univ.rng.getRan(6, 1, 8), DamageType.WEAPON, { session });
             break;
           case FieldType.OBJECT_BLOCK:
-            damageMonst(
+            await damageMonst(
               univ, monst, whoHit, univ.rng.getRan(6, 1, 8), DamageType.WEAPON, { session });
             break;
           case FieldType.CLOUD_STINK: monst.curse(univ.rng.getRan(1, 1, 2)); break;

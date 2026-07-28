@@ -251,9 +251,9 @@ function seekTarget(
  * knows which slots are in play.
  *
  */
-export function fireMissile(
+export async function fireMissile(
   session: GameSession, loaded: LoadedMissile, target: Location,
-): void {
+): Promise<void> {
   const univ = session.univ;
   const firer = univ.currentPc;
   const missile = firer.items[loaded.missileSlot]!;
@@ -308,7 +308,7 @@ export function fireMissile(
     firer.voidSanctuary();
     univ.addStringToBuf('  The arrow explodes!');
     runAMissile(firer.combatPos, aim, 2, 1, 5, 0, 0, 100);
-    placeSpellPattern(session, SpellPat.RADIUS_2, aim, {
+    await placeSpellPattern(session, SpellPat.RADIUS_2, aim, {
       damage: { type: ammo.abilData as DamageType, dice: ammo.abilStrength * 2 },
       whoHit: univ.curPc,
     });
@@ -339,20 +339,20 @@ export function fireMissile(
       univ.addStringToBuf('  There is a flash of light.');
       victim.heal(r2);
     } else if (victim instanceof Creature) {
-      weaponDamage = damageMonst(univ, victim, univ.curPc, r2, DamageType.WEAPON,
+      weaponDamage = await damageMonst(univ, victim, univ.curPc, r2, DamageType.WEAPON,
         { soundType: 13, doPrint: false, session });
       if (spec.damage > 0) {
-        specialDamage = damageMonst(univ, victim, univ.curPc, spec.damage, spec.damType,
+        specialDamage = await damageMonst(univ, victim, univ.curPc, spec.damage, spec.damType,
           { soundType: 0, doPrint: false, session });
       }
       victim.damagedMsg(weaponDamage, specialDamage);
     } else if (victim instanceof Player) {
       // "Should the race really be included here? Maybe it's meant for melee
       // attacks only." — kept as it is.
-      weaponDamage = damagePc(univ, victim, r2, DamageType.WEAPON, firer.race,
+      weaponDamage = await damagePc(univ, victim, r2, DamageType.WEAPON, firer.race,
         { soundType: 0, doPrint: false });
       if (spec.damage > 0) {
-        specialDamage = damagePc(univ, victim, spec.damage, spec.damType, firer.race,
+        specialDamage = await damagePc(univ, victim, spec.damage, spec.damType, firer.race,
           { soundType: 0, doPrint: false });
       }
       victim.damagedMsg(weaponDamage, specialDamage);

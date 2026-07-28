@@ -50,19 +50,19 @@ function poisonWeapon(session: GameSession, pcNum: number, howMuch: number): voi
  * within ten squares *except* whoever is standing on the centre, and the
  * further away the harder it lands.
  */
-export function doShockwave(session: GameSession, target: { x: number; y: number }): void {
+export async function doShockwave(session: GameSession, target: { x: number; y: number }): Promise<void> {
   const { univ } = session;
   for (const pc of univ.party.pcs) {
     const d = dist(target, pc.combatPos);
     if (d <= 0 || d >= 11 || pc.mainStatus !== MainStatus.ALIVE) continue;
-    damagePc(univ, pc, univ.rng.getRan(2 + Math.trunc(d / 2), 1, 6), DamageType.UNBLOCKABLE);
+    await damagePc(univ, pc, univ.rng.getRan(2 + Math.trunc(d / 2), 1, 6), DamageType.UNBLOCKABLE);
   }
   for (const monst of univ.town?.monsters ?? []) {
     if (!monst.isAlive) continue;
     const d = dist(target, monst.curLoc);
     if (d <= 0 || d >= 11) continue;
     if (session.canSeeLight(target, monst.curLoc) >= SIGHT_BLOCKED) continue;
-    damageMonst(univ, monst, univ.curPc,
+    await damageMonst(univ, monst, univ.curPc,
       univ.rng.getRan(2 + Math.trunc(d / 2), 1, 6), DamageType.UNBLOCKABLE, { session });
   }
 }
@@ -75,10 +75,10 @@ export function doShockwave(session: GameSession, target: { x: number; y: number
  * casting dialog. As in `spellTown.ts`, and for the same reason, the caster
  * stands in for that until the dialog exists.
  */
-export function combatImmedMageCast(
+export async function combatImmedMageCast(
   session: GameSession, pcNum: number, spellNum: Spell,
   freebie = false, storeItemSpellLevel = 1,
-): void {
+): Promise<void> {
   const { univ } = session;
   const caster = univ.party.pcs[pcNum];
   if (!caster) return;
@@ -96,7 +96,7 @@ export function combatImmedMageCast(
     case Spell.SHOCKWAVE:
       spend();
       univ.addStringToBuf('  The ground shakes!');
-      doShockwave(session, caster.combatPos);
+      await doShockwave(session, caster.combatPos);
       break;
 
     case Spell.HASTE_MINOR:
@@ -177,12 +177,12 @@ export function combatImmedMageCast(
 
     case Spell.BLADE_AURA:
       // Note: no cost — it's a scenario-granted spell.
-      placeSpellPattern(session, SpellPat.RADIUS_2, caster.combatPos,
+      await placeSpellPattern(session, SpellPat.RADIUS_2, caster.combatPos,
         { field: FieldType.WALL_BLADES, whoHit: 6 });
       break;
 
     case Spell.FLAME_AURA:
-      placeSpellPattern(session, SpellPat.OPEN_SQUARE, caster.combatPos,
+      await placeSpellPattern(session, SpellPat.OPEN_SQUARE, caster.combatPos,
         { damage: { type: DamageType.FIRE, dice: 6 }, whoHit: pcNum });
       break;
 
@@ -194,10 +194,10 @@ export function combatImmedMageCast(
 }
 
 /** `combat_immed_priest_cast` — the priest half of the same. */
-export function combatImmedPriestCast(
+export async function combatImmedPriestCast(
   session: GameSession, pcNum: number, spellNum: Spell,
   freebie = false, storeItemSpellLevel = 1,
-): void {
+): Promise<void> {
   const { univ } = session;
   const caster = univ.party.pcs[pcNum];
   if (!caster) return;
@@ -255,7 +255,7 @@ export function combatImmedPriestCast(
       spend();
       livingSound(24);
       univ.addStringToBuf('  Protective field created.');
-      placeSpellPattern(session, SpellPat.PROT, caster.combatPos, { whoHit: 6 });
+      await placeSpellPattern(session, SpellPat.PROT, caster.combatPos, { whoHit: 6 });
       break;
 
     case Spell.AUGMENTATION:
@@ -287,9 +287,9 @@ export function combatImmedPriestCast(
  *
  * Picking the spell is the caller's job; the C++ opens `pick_spell` here.
  */
-export function combatCastSpell(
+export async function combatCastSpell(
   session: GameSession, spellNum: Spell, freebie = false,
-): void {
+): Promise<void> {
   const { univ } = session;
   const pcNum = univ.curPc;
   const caster = univ.party.pcs[pcNum];
@@ -319,8 +319,8 @@ export function combatCastSpell(
 
     case SpellRefer.IMMED:
       takeAp(univ, SPELL_AP);
-      if (isPriest) combatImmedPriestCast(session, pcNum, spellNum, freebie);
-      else combatImmedMageCast(session, pcNum, spellNum, freebie);
+      if (isPriest) await combatImmedPriestCast(session, pcNum, spellNum, freebie);
+      else await combatImmedMageCast(session, pcNum, spellNum, freebie);
       session.afterCombatAction();
       break;
 

@@ -93,7 +93,7 @@ describe('readMonstersFromXml', () => {
 });
 
 describe('parseDice', () => {
-  it('parses NdM and dM forms', () => {
+  it('parses NdM and dM forms', async () => {
     expect(parseDice('2d6', 't')).toEqual({ count: 2, sides: 6 });
     expect(parseDice('d8', 't')).toEqual({ count: 1, sides: 8 });
     expect(parseDice('10d12', 't')).toEqual({ count: 10, sides: 12 });

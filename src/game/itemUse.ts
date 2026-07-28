@@ -491,7 +491,7 @@ export async function useItem(
           case ItemUse.HARM_ONE:
             say('  You feel terrible.');
             drainPc(pc, str * 5);
-            damagePc(univ, pc, 20 * str, DamageType.UNBLOCKABLE, Race.HUMAN);
+            await damagePc(univ, pc, 20 * str, DamageType.UNBLOCKABLE, Race.HUMAN);
             pc.disease(2 * str, univ.rng);
             pc.dumbfound(2 * str, univ.rng);
             break;
@@ -504,7 +504,7 @@ export async function useItem(
             say('  You all feel terrible.');
             for (const other of party.pcs) {
               drainPc(other, str * 5);
-              damagePc(univ, other, 20 * str, DamageType.UNBLOCKABLE, Race.HUMAN);
+              await damagePc(univ, other, 20 * str, DamageType.UNBLOCKABLE, Race.HUMAN);
               other.disease(2 * str, univ.rng);
               other.dumbfound(2 * str, univ.rng);
             }
@@ -563,7 +563,7 @@ export async function useItem(
             break;
           case ItemUse.HARM_ONE:
             say('  You feel sick.');
-            damagePc(univ, pc, 20 * str, DamageType.UNBLOCKABLE, Race.HUMAN);
+            await damagePc(univ, pc, 20 * str, DamageType.UNBLOCKABLE, Race.HUMAN);
             break;
           case ItemUse.HELP_ALL:
             say('  You all feel better.');
@@ -571,7 +571,7 @@ export async function useItem(
             break;
           case ItemUse.HARM_ALL:
             say('  You all feel sick.');
-            hitParty(univ, 20 * str, DamageType.UNBLOCKABLE);
+            await hitParty(univ, 20 * str, DamageType.UNBLOCKABLE);
             break;
         }
         break;
@@ -635,7 +635,7 @@ export async function useItem(
                   for (const other of party.pcs) other.mainStatus = MainStatus.DEAD;
                 } else if (current > 1) {
                   say('  You plummet to the ground.');
-                  hitParty(univ, univ.rng.getRan(current, 1, 12), DamageType.SPECIAL);
+                  await hitParty(univ, univ.rng.getRan(current, 1, 12), DamageType.SPECIAL);
                 } else say('  You land safely.');
               } else say('  You start to descend.');
               break;
@@ -683,7 +683,7 @@ export async function useItem(
             break;
           case ItemUse.HARM_ONE:
             say('  You feel terrible.');
-            damagePc(univ, pc, str * 25, DamageType.UNBLOCKABLE, Race.UNKNOWN);
+            await damagePc(univ, pc, str * 25, DamageType.UNBLOCKABLE, Race.UNKNOWN);
             pc.poison(str, univ.rng);
             break;
           case ItemUse.HELP_ALL:
@@ -693,7 +693,7 @@ export async function useItem(
             break;
           case ItemUse.HARM_ALL:
             say('  You all feel terrible.');
-            hitParty(univ, str * 25, DamageType.UNBLOCKABLE);
+            await hitParty(univ, str * 25, DamageType.UNBLOCKABLE);
             party.poisonAll(str, univ.rng);
             break;
         }
@@ -740,8 +740,8 @@ export async function useItem(
               startFancySpellTargeting(session, spell, true, itemSpellLevel);
               break;
             case SpellRefer.IMMED:
-              if (priest) combatImmedPriestCast(session, univ.curPc, spell, true, itemSpellLevel);
-              else combatImmedMageCast(session, univ.curPc, spell, true, itemSpellLevel);
+              if (priest) await combatImmedPriestCast(session, univ.curPc, spell, true, itemSpellLevel);
+              else await combatImmedMageCast(session, univ.curPc, spell, true, itemSpellLevel);
               break;
           }
         } else if (priest) doPriestSpell(session, univ.curPc, spell, true, itemSpellLevel);

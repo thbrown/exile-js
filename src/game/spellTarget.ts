@@ -104,7 +104,7 @@ export function cancelTownTargeting(session: GameSession): void {
  * Returns to TOWN either way: a spell aimed out of the town or into the dark
  * has still been cast, which is what the C++ does.
  */
-export function castTownSpell(session: GameSession, where: Location): void {
+export async function castTownSpell(session: GameSession, where: Location): Promise<void> {
   const target = session.townTarget;
   if (!target) return;
   session.townTarget = null;
@@ -172,14 +172,14 @@ export function castTownSpell(session: GameSession, where: Location): void {
     case Spell.DISPEL_SPHERE:
     case Spell.DISPEL_SQUARE:
       univ.addStringToBuf('  You attempt to dispel.');
-      placeSpellPattern(session, target.pattern, where,
+      await placeSpellPattern(session, target.pattern, where,
         { field: FieldType.FIELD_DISPEL, whoHit: 7 });
       break;
 
     case Spell.MOVE_MOUNTAINS:
     case Spell.MOVE_MOUNTAINS_MASS:
       univ.addStringToBuf('  You blast the area.');
-      placeSpellPattern(session, target.pattern, where,
+      await placeSpellPattern(session, target.pattern, where,
         { field: FieldType.FIELD_SMASH, whoHit: 7 });
       session.updateExplored(univ.party.townLoc);
       break;

@@ -37,7 +37,7 @@ function inTown(seed?: number): GameSession {
 }
 
 describe('place_item', () => {
-  it('reuses an empty slot before growing the list', () => {
+  it('reuses an empty slot before growing the list', async () => {
     const { univ } = inTown();
     const town = univ.town!;
     town.items = [defaultItem(), { ...defaultItem(), variety: ItemType.POTION }];
@@ -48,7 +48,7 @@ describe('place_item', () => {
     expect(town.items[0]!.itemLoc).toEqual({ x: 5, y: 6 });
   });
 
-  it('appends when every slot is taken', () => {
+  it('appends when every slot is taken', async () => {
     const { univ } = inTown();
     const town = univ.town!;
     town.items = [{ ...defaultItem(), variety: ItemType.POTION }];
@@ -56,7 +56,7 @@ describe('place_item', () => {
     expect(town.items.map((i) => i.variety)).toEqual([ItemType.POTION, ItemType.WAND]);
   });
 
-  it('reset_item_max trims empty slots off the end', () => {
+  it('reset_item_max trims empty slots off the end', async () => {
     const { univ } = inTown();
     const town = univ.town!;
     town.items = [{ ...defaultItem(), variety: ItemType.POTION }, defaultItem(), defaultItem()];
@@ -66,21 +66,21 @@ describe('place_item', () => {
 });
 
 describe('item_val', () => {
-  it('is the plain value with no charges, and per-charge with them', () => {
+  it('is the plain value with no charges, and per-charge with them', async () => {
     expect(itemVal({ ...defaultItem(), value: 30, charges: 0 })).toBe(30);
     expect(itemVal({ ...defaultItem(), value: 30, charges: 4 })).toBe(120);
   });
 });
 
 describe('place_glands', () => {
-  it('leaves nothing when the monster has no corpse item', () => {
+  it('leaves nothing when the monster has no corpse item', async () => {
     const { univ } = inTown();
     univ.town!.items = [];
     placeGlands(univ, { x: 3, y: 3 }, { ...defaultMonster(), corpseItem: -1 });
     expect(univ.town!.items).toHaveLength(0);
   });
 
-  it('always leaves one at a chance of 100', () => {
+  it('always leaves one at a chance of 100', async () => {
     const { univ } = inTown();
     univ.town!.items = [];
     // Item 1 of any scenario is a real item; corpse_item_chance is compared
@@ -92,7 +92,7 @@ describe('place_glands', () => {
 });
 
 describe('place_treasure', () => {
-  it('a rich corpse leaves something behind', () => {
+  it('a rich corpse leaves something behind', async () => {
     const { univ } = inTown(12345);
     univ.town!.items = [];
     placeTreasure(univ, { x: 8, y: 8 }, 10, 4, 0);
@@ -103,7 +103,7 @@ describe('place_treasure', () => {
     }
   });
 
-  it('the poorest class leaves almost nothing', () => {
+  it('the poorest class leaves almost nothing', async () => {
     // treas_odds[0] is {10,0,0,0,0,0}: one pass at 10% and four dead ones, and
     // the gold roll for loot 0 is `0 * (...)`, so amt can never clear 3.
     const { univ } = inTown(999);
@@ -116,7 +116,7 @@ describe('place_treasure', () => {
     expect(total).toBeLessThan(20);
   });
 
-  it('is deterministic for a given seed — the call order is the spec', () => {
+  it('is deterministic for a given seed — the call order is the spec', async () => {
     const a = inTown(4242);
     const b = inTown(4242);
     a.univ.town!.items = [];
@@ -127,7 +127,7 @@ describe('place_treasure', () => {
       .toEqual(b.univ.town!.items.map((i) => i.fullName));
   });
 
-  it('ignores a treasure class outside 0-4', () => {
+  it('ignores a treasure class outside 0-4', async () => {
     const { univ } = inTown();
     univ.town!.items = [];
     placeTreasure(univ, { x: 8, y: 8 }, 5, 7, 0);

@@ -38,7 +38,7 @@ function newSession(): GameSession {
 }
 
 describe('canDrawTerrainSpot (town, out of combat)', () => {
-  it('refuses an unexplored, unlit square by default', () => {
+  it('refuses an unexplored, unlit square by default', async () => {
     const s = newSession();
     const dim = s.univ.town!.record.maxDim;
     // Far corner of the map: certainly unexplored from a fresh town entry.
@@ -53,7 +53,7 @@ describe('canDrawTerrainSpot (town, out of combat)', () => {
    * arrows while looking around left every unexplored square black, even
    * ones directly in front of the party that `partyCanSee` says are visible.
    */
-  it('MODE_LOOK_TOWN falls back to partyCanSee for an unexplored square the party can actually see', () => {
+  it('MODE_LOOK_TOWN falls back to partyCanSee for an unexplored square the party can actually see', async () => {
     const s = newSession();
     const dim = s.univ.town!.record.maxDim;
     const from = s.univ.party.townLoc;
@@ -87,7 +87,7 @@ describe('canDrawTerrainSpot (town, out of combat)', () => {
     expect(canDrawTerrainSpot(s, near.x, near.y, dim, dim)).toBe(true);
   });
 
-  it('still refuses a square outside party_can_see even while looking', () => {
+  it('still refuses a square outside party_can_see even while looking', async () => {
     const s = newSession();
     const dim = s.univ.town!.record.maxDim;
     s.mode = GameMode.LOOK_TOWN;
@@ -125,7 +125,7 @@ describe('canDrawTerrainSpot (town combat, monsters going)', () => {
     return null;
   }
 
-  it('draws unexplored ground the party can see while the monsters go', () => {
+  it('draws unexplored ground the party can see while the monsters go', async () => {
     const s = combatSession();
     const dim = s.univ.town!.record.maxDim;
     const spot = unexploredButVisible(s);
@@ -137,7 +137,7 @@ describe('canDrawTerrainSpot (town combat, monsters going)', () => {
     expect(canDrawTerrainSpot(s, x, y, dim, dim)).toBe(true);
   });
 
-  it('does not draw what no PC can see, monsters going or not', () => {
+  it('does not draw what no PC can see, monsters going or not', async () => {
     const s = combatSession();
     const dim = s.univ.town!.record.maxDim;
     const far = { x: dim - 1, y: dim - 1 };

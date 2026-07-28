@@ -16,7 +16,11 @@ page.on('console', (m) => {
   if (m.type() === 'error') errors.push(`console: ${m.text()}`);
 });
 
-await page.goto(process.argv[2] ?? 'http://localhost:5199/');
+// `?pace=1` runs at the original's own animation speed rather than the
+// play-testing default. Damage waits for its blast now, so a step that swings
+// twenty-five times waits for twenty-five of them — at the shipped 3x pace this
+// gate would take minutes. The ordering being checked is the same either way.
+await page.goto(process.argv[2] ?? 'http://localhost:5199/?pace=1');
 await page.waitForFunction(() => window.__session !== undefined, { timeout: 20000 });
 await page.waitForTimeout(600);
 
@@ -747,7 +751,10 @@ const combat = await page.evaluate(async () => {
   for (let i = 0; i < 25 && monst.health === hpBefore; i++) {
     pc.ap = 4;
     univ.curPc = univ.party.pcs.indexOf(pc);
-    s.attackAt(monst.curLoc);
+    // Awaited: a swing waits for its own blast now (`damage_pc` only takes the
+    // health off after `boom_space` returns), so firing these off without
+    // waiting would run twenty-five attacks on top of each other.
+    await s.attackAt(monst.curLoc);
   }
   window.__redraw();
   return {
@@ -959,7 +966,7 @@ const booms = await page.evaluate(async () => {
   const before = monst.health;
   for (let i = 0; i < 25 && monst.health === before; i++) {
     pc.ap = 4;
-    s.attackAt(monst.curLoc);
+    await s.attackAt(monst.curLoc);
   }
   const boomCount = window.__screen.booms.length;
   const boom = boomCount > 0 ? { ...window.__screen.booms[0], where: { ...window.__screen.booms[0].where } } : null;
@@ -992,7 +999,7 @@ const loot = await page.evaluate(async () => {
   pc.equip[0] = true;
   for (let i = 0; i < 30 && monst.isAlive; i++) {
     pc.ap = 4;
-    s.attackAt(where);
+    await s.attackAt(where);
   }
   const dropped = univ.town.items.filter((it) => it.itemLoc.x === where.x && it.itemLoc.y === where.y);
   window.__redraw();
@@ -1045,7 +1052,7 @@ const attackFriendlyDone = await page.evaluate(async () => {
 console.log('ATTACK FRIENDLY:', JSON.stringify({ ...attackFriendly, ...attackFriendlyDone }));
 
 // The Parry and Stand Ready buttons on the fight toolbar.
-const parryButtons = await page.evaluate(() => {
+const parryButtons = await page.evaluate(async () => {
   const s = window.__session;
   const screen = window.__screen;
   if (s.mode !== 9) s.startCombat(s.univ.party.direction);
@@ -1067,7 +1074,7 @@ const parryButtons = await page.evaluate(() => {
   // Spending the turn hands over to the next PC, so re-read who's acting.
   const next = s.univ.currentPc;
   next.ap = 4;
-  s.pause();
+  await s.pause();
   out.standReady = { value: next.parry, ap: next.ap };
   s.endCombat();
   window.__redraw();
@@ -1111,7 +1118,7 @@ const missileAimed = await page.evaluate(() => {
   };
 });
 await shot('02g-aiming');
-const missileFired = await page.evaluate(() => {
+const missileFired = await page.evaluate(async () => {
   const s = window.__session;
   const monst = window.__missileMonst;
   // Re-assert the shot's setup. Arming the bow went through a real keypress,
@@ -1128,12 +1135,16 @@ const missileFired = await page.evaluate(() => {
   // townsperson's thrown spear can still be in flight here — since monster
   // missiles became visible, `missiles` is not the party's shot alone.
   window.__screen.missiles = [];
-  s.fireMissileAt(window.__missileTarget);
-  // run_a_missile's sink fires synchronously, so the arrow is already in the
-  // air by the time fireMissileAt returns.
+  // Started, then sampled, then awaited. `fireMissileAt` runs as far as
+  // `run_a_missile` synchronously — the arrow is in the air the moment the
+  // call is made — but it no longer *returns* there: the damage behind it
+  // waits for the flight and the blast. Awaiting first would read the sink
+  // after the arrow had already landed and been swept up.
+  const shot = s.fireMissileAt(window.__missileTarget);
   const launched = window.__screen.missiles.map((m) => ({
     type: m.type, path: m.pathType, from: m.from, dest: m.dest,
   }));
+  await shot;
   window.__redraw();
   return {
     mode: s.mode, armed: s.missile !== null,
@@ -1183,14 +1194,14 @@ console.log('MISSILE FLIGHT:', JSON.stringify(missileFlight));
 // the one builtin whose cells are field types rather than a single shape, so
 // one call raises four different kinds of wall in concentric rings — which
 // makes it the best single check that the tables and the field overlay agree.
-const pattern = await page.evaluate(() => {
+const pattern = await page.evaluate(async () => {
   const s = window.__session;
   const town = s.univ.town;
   if (!town) return { skipped: 'not in a town' };
   const pc = s.univ.party.pcs[s.univ.firstActivePc()];
   const at = { ...(s.mode === 9 ? pc.combatPos : s.univ.party.townLoc) };
   s.center = { ...at };
-  window.__placePattern(at);
+  await window.__placePattern(at);
   // Count what actually landed, by ring: 1 = force wall, 5 = ice, 6 = blades,
   // 3 = antimagic.
   const counts = { forceWall: 0, ice: 0, blades: 0, antimagic: 0 };
@@ -1310,7 +1321,7 @@ const combatSpell = await page.evaluate(async () => {
   if (monst) { monst.curLoc = { ...at }; monst.attitude = 2; }
   const hpBefore = monst ? monst.health : null;
   tgt.startSpellTargeting(s, sp.Spell.FLAME, false, 1);
-  tgt.doCombatCast(s, at);
+  await tgt.doCombatCast(s, at);
   window.__redraw();
   return {
     scroll: { shift, moved, before, scrolled },
@@ -1325,6 +1336,10 @@ console.log('COMBAT SPELL:', JSON.stringify(combatSpell));
 // The explosion must not beat the projectile onto the screen. Fireball is the
 // case that broke: it damages inside its own arm, so its boom used to be
 // created before the shared volley booked the missile's slot.
+// Quiet first: a monster round left over from the step before would be laying
+// down its own "takes N" lines while this one measures, and this step is about
+// what *the fireball* says and when.
+await idle();
 const boomOrder = await page.evaluate(async () => {
   const s = window.__session;
   const sc = window.__screen;
@@ -1343,12 +1358,35 @@ const boomOrder = await page.evaluate(async () => {
   if (monst) { monst.curLoc = { ...at }; monst.attitude = 2; monst.health = 500; }
   const linesBefore = s.univ.visibleTranscript(performance.now()).length;
   tgt.startSpellTargeting(s, sp.Spell.FIREBALL, false, 1);
-  tgt.doCombatCast(s, at);
+  const missiles = [];
+  const booms = [];
+  // Both sinks feed the screen, and the screen sweeps expired ones up — with
+  // the cast awaited, reading `sc.missiles` afterwards would find an empty
+  // sky. Record them as they are raised instead.
+  const missileSink = (m) => missiles.push(m.started);
+  const boomSink = (b) => booms.push(b.starts);
+  window.__watchAnim(missileSink, boomSink);
+  await tgt.doCombatCast(s, at);
+  window.__watchAnim(null, null);
+  // The question is one of *scheduling*, not of when this script happened to
+  // look: nothing the spell says about damage may be due before its
+  // projectiles have landed. `visibleTranscript(t)` is the pane as it stood at
+  // time `t`, so asking it at the launch moment is the sample-independent
+  // version of "the damage text must not beat the projectile".
+  const launch = missiles.length > 0 ? Math.max(...missiles) : 0;
+  // Every line the cast added, with the moment it is due on screen.
+  const added = s.univ.transcript.slice(linesBefore).map((text, i) => ({
+    text, at: s.univ.transcriptAt[linesBefore + i],
+  }));
+  const damageLines = added.filter((l) => / takes \d+|is dead|undamaged/.test(l.text));
   return {
-    missiles: sc.missiles.map((m) => m.started),
-    booms: sc.booms.map((b) => b.starts),
-    // handle_marked_damage: the damage line must not be on screen yet either.
-    linesNow: s.univ.visibleTranscript(performance.now()).length - linesBefore,
+    missiles,
+    booms,
+    // The spell's own announcements ("… casts Fireball.") are due before the
+    // projectiles, as they should be; what must not be is anything that says
+    // what the spell *did*.
+    damageBeforeLanding: damageLines.filter((l) => l.at <= launch).length,
+    damageLines: damageLines.length,
     linesEventually: s.univ.visibleTranscript(Infinity).length - linesBefore,
   };
 });
@@ -1359,9 +1397,11 @@ if (!boomOrder.booms.every((b) => b >= Math.max(...boomOrder.missiles) + 200))
   throw new Error(`the explosion beat the projectile: ${JSON.stringify(boomOrder)}`);
 if (boomOrder.linesEventually <= 0)
   throw new Error('Fireball said nothing at all, so the text test proves nothing');
-if (boomOrder.linesNow !== 0)
+if (boomOrder.damageLines === 0)
+  throw new Error('Fireball damaged nothing, so the text test proves nothing');
+if (boomOrder.damageBeforeLanding !== 0)
   throw new Error(`the damage text beat the projectile: ${JSON.stringify(boomOrder)}`);
-await page.evaluate(() => { if (window.__session.mode === 9) window.__session.endCombat(); });
+await page.evaluate(async () => { if (window.__session.mode === 9) window.__session.endCombat(); });
 if (!combatSpell.scroll.moved || combatSpell.scroll.scrolled.x !== combatSpell.scroll.before.x - 1)
   throw new Error('clicking the terrain border did not scroll the view');
 // Squares genuinely behind a wall stay dark, so the test isn't "all 81 draw" —

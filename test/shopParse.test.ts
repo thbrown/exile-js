@@ -24,7 +24,7 @@ beforeAll(async () => {
 });
 
 describe('reading <shop> from scenario.xml', () => {
-  it('loads every shop in the scenario', () => {
+  it('loads every shop in the scenario', async () => {
     expect(scen.shops.length).toBe(20);
     for (const shop of scen.shops) expect(shop.name.length).toBeGreaterThan(0);
     // Valleydy leaves four slots as empty "Unused Shop" placeholders.
@@ -34,7 +34,7 @@ describe('reading <shop> from scenario.xml', () => {
     expect(scen.shops[7]!.numItems()).toBe(37);
   });
 
-  it('resolves item entries against the scenario item list', () => {
+  it('resolves item entries against the scenario item list', async () => {
     const shop = scen.shops.find((s) =>
       s.items.some((e) => e.type === ShopItemType.ITEM))!;
     const entry = shop.items.find((e) => e.type === ShopItemType.ITEM)!;
@@ -44,7 +44,7 @@ describe('reading <shop> from scenario.xml', () => {
     expect(entry.item.ident).toBe(true);
   });
 
-  it('names spells and skills from the string resources', () => {
+  it('names spells and skills from the string resources', async () => {
     for (const shop of scen.shops) {
       for (const entry of shop.items) {
         if (entry.type === ShopItemType.MAGE_SPELL || entry.type === ShopItemType.PRIEST_SPELL
@@ -56,7 +56,7 @@ describe('reading <shop> from scenario.xml', () => {
     }
   });
 
-  it('reads the healing shop as healing services', () => {
+  it('reads the healing shop as healing services', async () => {
     const healer = scen.shops.find((s) => s.prompt === ShopPrompt.HEALING)!;
     expect(healer.type).toBe(ShopType.ALLOW_DEAD);
     for (const entry of healer.items) {
@@ -65,14 +65,14 @@ describe('reading <shop> from scenario.xml', () => {
     }
   });
 
-  it('reads the magic shops as random treasure', () => {
+  it('reads the magic shops as random treasure', async () => {
     const magic = scen.shops.filter((s) => s.type === ShopType.RANDOM);
     expect(magic.length).toBeGreaterThan(0);
     for (const entry of magic[0]!.items)
       expect(entry.type).toBe(ShopItemType.TREASURE);
   });
 
-  it('reads the store-items rect', () => {
+  it('reads the store-items rect', async () => {
     expect(scen.storeItemRects.get(0)).toEqual({ top: 0, left: 0, bottom: 47, right: 47 });
   });
 });
@@ -121,7 +121,7 @@ describe('shop entry forms', () => {
 });
 
 describe('prices', () => {
-  it('scales with the shop cost adjustment (cost_mult)', () => {
+  it('scales with the shop cost adjustment (cost_mult)', async () => {
     const entry = { type: ShopItemType.ITEM, quantity: 0, index: 0, item: { ...scen.scenItems[0]! } };
     entry.item.value = 100;
     entry.item.charges = 0;
@@ -131,7 +131,7 @@ describe('prices', () => {
     expect(shopItemCost(entry, 6)).toBe(250);
   });
 
-  it('charges per charge for a wand', () => {
+  it('charges per charge for a wand', async () => {
     const entry = { type: ShopItemType.ITEM, quantity: 0, index: 0, item: { ...scen.scenItems[0]! } };
     entry.item.value = 10;
     entry.item.charges = 4;

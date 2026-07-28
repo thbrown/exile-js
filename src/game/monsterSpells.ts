@@ -266,9 +266,9 @@ function pickSpell(
 }
 
 /** `monst_cast_mage` (:3207). Returns whether the monster actually acted. */
-export function monstCastMage(
+export async function monstCastMage(
   session: GameSession, caster: Creature, targ: number,
-): boolean {
+): Promise<boolean> {
   const { univ } = session;
   const town = univ.town;
   if (!town || !castable(session, caster, targ)) return false;
@@ -319,8 +319,8 @@ export function monstCastMage(
   castNote(session, caster, spell);
   caster.mp -= cost;
 
-  const hit = (dam: number, type: DamageType): void => {
-    if (victim) damageTarget(univ, victim, dam, type, 7, Race.UNKNOWN, true, session);
+  const hit = async (dam: number, type: DamageType): Promise<void> => {
+    if (victim) await damageTarget(univ, victim, dam, type, 7, Race.UNKNOWN, true, session);
   };
   const summonN = (which: number, count: number, dice: number): void => {
     if (which === 0) return;
@@ -339,7 +339,7 @@ export function monstCastMage(
     case Spell.HASTE_MINOR: livingSound(25); caster.slow(-2); break;
     case Spell.STRENGTH: livingSound(25); caster.curse(-3); break;
     case Spell.CLOUD_FLAME:
-      placeSpellPattern(session, SpellPat.SINGLE, victLoc,
+      await placeSpellPattern(session, SpellPat.SINGLE, victLoc,
         { field: FieldType.WALL_FIRE, whoHit: 7 });
       break;
     case Spell.FLAME:
@@ -351,7 +351,7 @@ export function monstCastMage(
     case Spell.SLOW: victim?.slow(2 + Math.trunc(caster.getLevel() / 2)); break;
     case Spell.DUMBFOUND: victim?.dumbfound(2, rng); break;
     case Spell.CLOUD_STINK:
-      placeSpellPattern(session, SpellPat.SQUARE, target,
+      await placeSpellPattern(session, SpellPat.SQUARE, target,
         { field: FieldType.CLOUD_STINK, whoHit: 7 });
       break;
     case Spell.SUMMON_BEAST:
@@ -359,11 +359,11 @@ export function monstCastMage(
       summonN(getSummonMonster(session, 1), 1, 3);
       break;
     case Spell.CONFLAGRATION:
-      placeSpellPattern(session, SpellPat.RADIUS_2, target,
+      await placeSpellPattern(session, SpellPat.RADIUS_2, target,
         { field: FieldType.WALL_FIRE, whoHit: 7 });
       break;
     case Spell.FIREBALL:
-      placeSpellPattern(session, SpellPat.SQUARE, target, {
+      await placeSpellPattern(session, SpellPat.SQUARE, target, {
         damage: {
           type: DamageType.FIRE,
           dice: Math.min(29, 1 + Math.trunc((caster.getLevel() * 3) / 4)),
@@ -385,7 +385,7 @@ export function monstCastMage(
       break;
     case Spell.WEB:
       livingSound(25);
-      placeSpellPattern(session, SpellPat.RADIUS_2, target,
+      await placeSpellPattern(session, SpellPat.RADIUS_2, target,
         { field: FieldType.FIELD_WEB, whoHit: 7 });
       break;
     case Spell.POISON:
@@ -417,7 +417,7 @@ export function monstCastMage(
       livingSound(4);
       break;
     case Spell.FIRESTORM:
-      placeSpellPattern(session, SpellPat.RADIUS_2, target, {
+      await placeSpellPattern(session, SpellPat.RADIUS_2, target, {
         damage: {
           type: DamageType.FIRE,
           dice: Math.min(29, 1 + Math.trunc((caster.getLevel() * 3) / 4) + 3),
@@ -426,7 +426,7 @@ export function monstCastMage(
       });
       break;
     case Spell.SHOCKSTORM:
-      placeSpellPattern(session, SpellPat.RADIUS_2, target,
+      await placeSpellPattern(session, SpellPat.RADIUS_2, target,
         { field: FieldType.WALL_FORCE, whoHit: 7 });
       break;
     case Spell.POISON_MAJOR:
@@ -452,7 +452,7 @@ export function monstCastMage(
       livingSound(4);
       break;
     case Spell.SHOCKWAVE:
-      doShockwave(session, caster.curLoc);
+      await doShockwave(session, caster.curLoc);
       break;
     default:
       univ.addStringToBuf(
@@ -463,9 +463,9 @@ export function monstCastMage(
 }
 
 /** `monst_cast_priest` (:3550). */
-export function monstCastPriest(
+export async function monstCastPriest(
   session: GameSession, caster: Creature, targ: number,
-): boolean {
+): Promise<boolean> {
   const { univ } = session;
   const town = univ.town;
   if (!town || !castable(session, caster, targ)) return false;
@@ -507,8 +507,8 @@ export function monstCastPriest(
   castNote(session, caster, spell);
   caster.mp -= cost;
 
-  const hit = (dam: number, type: DamageType): void => {
-    if (victim) damageTarget(univ, victim, dam, type, 7, Race.UNKNOWN, true, session);
+  const hit = async (dam: number, type: DamageType): Promise<void> => {
+    if (victim) await damageTarget(univ, victim, dam, type, 7, Race.UNKNOWN, true, session);
   };
   const summon1 = (which: number, dice: number): boolean =>
     summonMonster(session, which, caster.curLoc, rng.getRan(dice, 1, 4),
@@ -518,7 +518,7 @@ export function monstCastPriest(
     case Spell.WRACK: hit(rng.getRan(2, 1, 4), DamageType.UNBLOCKABLE); break;
     case Spell.GOO:
       livingSound(24);
-      placeSpellPattern(session, SpellPat.SINGLE, victLoc,
+      await placeSpellPattern(session, SpellPat.SINGLE, victLoc,
         { field: FieldType.FIELD_WEB, whoHit: 7 });
       break;
     case Spell.BLESS_MINOR: case Spell.BLESS:
@@ -608,7 +608,7 @@ export function monstCastPriest(
       break;
     }
     case Spell.FLAMESTRIKE:
-      placeSpellPattern(session, SpellPat.SQUARE, target, {
+      await placeSpellPattern(session, SpellPat.SQUARE, target, {
         damage: { type: DamageType.FIRE, dice: 2 + Math.trunc(caster.getLevel() / 2) + 2 },
         whoHit: 7,
       });
@@ -626,7 +626,7 @@ export function monstCastPriest(
       caster.avatar();
       break;
     case Spell.DIVINE_THUD:
-      placeSpellPattern(session, SpellPat.RADIUS_2, target, {
+      await placeSpellPattern(session, SpellPat.RADIUS_2, target, {
         damage: {
           type: DamageType.MAGIC,
           dice: Math.min(29, Math.trunc((caster.getLevel() * 3) / 4) + 5),

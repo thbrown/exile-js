@@ -41,14 +41,14 @@ function livePcs(session: GameSession): Player[] {
  * do_poison (boe.combat.cpp:4365) — poison bites everyone carrying it, then
  * usually fades by one.
  */
-export function doPoison(session: GameSession): void {
+export async function doPoison(session: GameSession): Promise<void> {
   const { univ } = session;
   const poisoned = livePcs(session).filter((pc) => (pc.status[Status.POISON] ?? 0) > 0);
   if (poisoned.length === 0) return;
   univ.addStringToBuf('Poison:');
   for (const pc of poisoned) {
     const r1 = univ.rng.getRan(pc.status[Status.POISON] ?? 0, 1, 6);
-    damagePc(univ, pc, r1, DamageType.POISON, Race.UNKNOWN);
+    await damagePc(univ, pc, r1, DamageType.POISON, Race.UNKNOWN);
     if (univ.rng.getRan(1, 0, 8) < 6) moveToZero(pc, Status.POISON);
     // The C++ asks the same question twice and only the second one checks the
     // trait, so a hardy PC shakes poison off about twice as fast. Its own
@@ -92,14 +92,14 @@ export function handleDisease(session: GameSession): void {
  * handle_acid (boe.combat.cpp:4435) — acid burns every turn, not on a clock,
  * and always fades by one afterwards.
  */
-export function handleAcid(session: GameSession): void {
+export async function handleAcid(session: GameSession): Promise<void> {
   const { univ } = session;
   const burning = livePcs(session).filter((pc) => (pc.status[Status.ACID] ?? 0) > 0);
   if (burning.length === 0) return;
   univ.addStringToBuf('Acid:');
   for (const pc of burning) {
     const r1 = univ.rng.getRan(pc.status[Status.ACID] ?? 0, 1, 6);
-    damagePc(univ, pc, r1, DamageType.ACID, Race.UNKNOWN);
+    await damagePc(univ, pc, r1, DamageType.ACID, Race.UNKNOWN);
     moveToZero(pc, Status.ACID);
   }
 }
@@ -110,7 +110,7 @@ export function handleAcid(session: GameSession): void {
  * MODE_TOWN specifically — during combat none of this happens, which is why a
  * long fight doesn't heal anyone.
  */
-export function increaseAgeEffects(session: GameSession): void {
+export async function increaseAgeEffects(session: GameSession): Promise<void> {
   const { univ } = session;
   const { party } = univ;
   const outdoors = session.mode === GameMode.OUTDOORS;
@@ -120,13 +120,13 @@ export function increaseAgeEffects(session: GameSession): void {
 
   // --- Poison, disease, acid ------------------------------------------------
   if (party.pcs.some((pc) => (pc.status[Status.POISON] ?? 0) > 0)) {
-    if ((outdoors && age % 50 === 0) || (town && age % 20 === 0)) doPoison(session);
+    if ((outdoors && age % 50 === 0) || (town && age % 20 === 0)) await doPoison(session);
   }
   if (party.pcs.some((pc) => (pc.status[Status.DISEASE] ?? 0) > 0)) {
     if ((outdoors && age % 100 === 0) || (town && age % 25 === 0)) handleDisease(session);
   }
   // Acid has no clock: it burns every single turn.
-  if (party.pcs.some((pc) => (pc.status[Status.ACID] ?? 0) > 0)) handleAcid(session);
+  if (party.pcs.some((pc) => (pc.status[Status.ACID] ?? 0) > 0)) await handleAcid(session);
 
   // --- Health ---------------------------------------------------------------
   if (outdoors) {

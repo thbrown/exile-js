@@ -59,7 +59,7 @@ function caster(s: GameSession): Player {
 }
 
 describe('the small helpers', () => {
-  it('increase_light never goes below zero', () => {
+  it('increase_light never goes below zero', async () => {
     const s = inTown();
     increaseLight(s, 50);
     expect(s.univ.party.lightLevel).toBe(50);
@@ -67,7 +67,7 @@ describe('the small helpers', () => {
     expect(s.univ.party.lightLevel).toBe(0);
   });
 
-  it('give_food ignores a negative amount rather than taking it', () => {
+  it('give_food ignores a negative amount rather than taking it', async () => {
     const s = inTown();
     const before = s.univ.party.food;
     giveFood(s, -50);
@@ -78,7 +78,7 @@ describe('the small helpers', () => {
 });
 
 describe('do_mage_spell', () => {
-  it('Light brightens the lantern and costs its points', () => {
+  it('Light brightens the lantern and costs its points', async () => {
     const s = inTown();
     const pc = caster(s);
     const sp = pc.curSp;
@@ -87,7 +87,7 @@ describe('do_mage_spell', () => {
     expect(pc.curSp).toBe(sp - (SPELLS[Spell.LIGHT]!.cost ?? 0));
   });
 
-  it('a freebie casting costs nothing', () => {
+  it('a freebie casting costs nothing', async () => {
     const s = inTown();
     const pc = caster(s);
     const sp = pc.curSp;
@@ -96,7 +96,7 @@ describe('do_mage_spell', () => {
     expect(pc.curSp).toBe(sp);
   });
 
-  it('an Anama refuses mage magic outright', () => {
+  it('an Anama refuses mage magic outright', async () => {
     const s = inTown();
     const pc = caster(s);
     pc.traits[Trait.ANAMA] = true;
@@ -107,7 +107,7 @@ describe('do_mage_spell', () => {
     expect(pc.curSp).toBe(sp);
   });
 
-  it('a pacifist refuses a non-peaceful spell but casts a peaceful one', () => {
+  it('a pacifist refuses a non-peaceful spell but casts a peaceful one', async () => {
     const s = inTown();
     const pc = caster(s);
     pc.traits[Trait.PACIFIST] = true;
@@ -119,7 +119,7 @@ describe('do_mage_spell', () => {
     expect(s.univ.transcript.at(-1)).toContain("You're a pacifist");
   });
 
-  it('Stealth and Flight sit on the party, not a PC', () => {
+  it('Stealth and Flight sit on the party, not a PC', async () => {
     const s = inTown();
     const pc = caster(s);
     doMageSpell(s, 0, Spell.STEALTH);
@@ -133,7 +133,7 @@ describe('do_mage_spell', () => {
     expect(pc.curSp).toBe(sp);
   });
 
-  it('True Sight explores the squares around the party', () => {
+  it('True Sight explores the squares around the party', async () => {
     const s = inTown();
     caster(s);
     const at = s.univ.party.townLoc;
@@ -145,7 +145,7 @@ describe('do_mage_spell', () => {
     expect(town.isExplored(at.x + 2, at.y + 2)).toBe(true);
   });
 
-  it('Protection raises the whole party\'s magic resistance', () => {
+  it('Protection raises the whole party\'s magic resistance', async () => {
     const s = inTown();
     const pc = caster(s);
     doMageSpell(s, 0, Spell.PROTECTION);
@@ -157,7 +157,7 @@ describe('do_mage_spell', () => {
     expect(s.univ.transcript.at(-1)).toBe('  Party protected.');
   });
 
-  it('a spell that wants a square goes into targeting, charging nothing yet', () => {
+  it('a spell that wants a square goes into targeting, charging nothing yet', async () => {
     const s = inTown();
     const pc = caster(s);
     const sp = pc.curSp;
@@ -169,7 +169,7 @@ describe('do_mage_spell', () => {
     expect(pc.curSp).toBe(sp);
   });
 
-  it('reports a mage spell with no town implementation', () => {
+  it('reports a mage spell with no town implementation', async () => {
     const s = inTown();
     caster(s);
     // Spark is a combat-only spell; do_mage_spell has no arm for it.
@@ -179,7 +179,7 @@ describe('do_mage_spell', () => {
 });
 
 describe('store_spell_target', () => {
-  it('a single-target spell with nobody chosen does nothing, and costs nothing', () => {
+  it('a single-target spell with nobody chosen does nothing, and costs nothing', async () => {
     // The C++ leaves store_spell_target at 6 when no target button was
     // pressed, and every `if(target < 6)` arm then falls straight through.
     const s = inTown();
@@ -192,7 +192,7 @@ describe('store_spell_target', () => {
     expect(pc.curSp).toBe(sp);
   });
 
-  it('heals whoever the dialog aimed at, not the caster', () => {
+  it('heals whoever the dialog aimed at, not the caster', async () => {
     const s = inTown();
     const pc = caster(s);
     const other = s.univ.party.pcs[2]!;
@@ -208,7 +208,7 @@ describe('store_spell_target', () => {
 });
 
 describe('do_priest_spell', () => {
-  it('Minor Heal heals and says how much', () => {
+  it('Minor Heal heals and says how much', async () => {
     const s = inTown();
     const pc = caster(s);
     pc.curHealth = 1;
@@ -217,7 +217,7 @@ describe('do_priest_spell', () => {
     expect(s.univ.transcript.at(-1)).toMatch(/healed \d+\./);
   });
 
-  it('Manna feeds the party', () => {
+  it('Manna feeds the party', async () => {
     const s = inTown();
     caster(s);
     const before = s.univ.party.food;
@@ -226,7 +226,7 @@ describe('do_priest_spell', () => {
     expect(s.univ.transcript.at(-1)).toMatch(/You gain \d+ food\./);
   });
 
-  it('Location reads out where you are', () => {
+  it('Location reads out where you are', async () => {
     const s = inTown();
     caster(s);
     const at = s.univ.party.townLoc;
@@ -234,7 +234,7 @@ describe('do_priest_spell', () => {
     expect(s.univ.transcript.at(-1)).toBe(`  You're at: x ${at.x}  y ${at.y}.`);
   });
 
-  it('Cure Poison takes poison off', () => {
+  it('Cure Poison takes poison off', async () => {
     const s = inTown();
     const pc = caster(s);
     pc.status[Status.POISON] = 5;
@@ -242,7 +242,7 @@ describe('do_priest_spell', () => {
     expect(pc.status[Status.POISON]!).toBeLessThan(5);
   });
 
-  it('Awaken and Cure Paralysis notice when there is nothing to do', () => {
+  it('Awaken and Cure Paralysis notice when there is nothing to do', async () => {
     const s = inTown();
     const pc = caster(s);
     pc.status[Status.ASLEEP] = 0;
@@ -253,7 +253,7 @@ describe('do_priest_spell', () => {
     expect(s.univ.transcript.at(-1)).toContain("isn't paralyzed");
   });
 
-  it('Cleanse clears disease and webs together', () => {
+  it('Cleanse clears disease and webs together', async () => {
     const s = inTown();
     const pc = caster(s);
     pc.status[Status.DISEASE] = 4;
@@ -263,7 +263,7 @@ describe('do_priest_spell', () => {
     expect(pc.status[Status.WEBS]).toBe(0);
   });
 
-  it('Heal All heals everybody', () => {
+  it('Heal All heals everybody', async () => {
     const s = inTown();
     caster(s);
     for (const pc of s.univ.party.pcs) pc.curHealth = 1;
@@ -274,7 +274,7 @@ describe('do_priest_spell', () => {
     expect(s.univ.transcript.at(-1)).toMatch(/Party healed \d+\./);
   });
 
-  it('Mass Sanctuary hides the living only', () => {
+  it('Mass Sanctuary hides the living only', async () => {
     const s = inTown();
     caster(s);
     const dead = s.univ.party.pcs[3]!;
@@ -285,7 +285,7 @@ describe('do_priest_spell', () => {
     expect(s.univ.party.pcs[0]!.status[Status.INVISIBLE]!).toBeGreaterThanOrEqual(0);
   });
 
-  it('Detect Life and Firewalk sit on the party', () => {
+  it('Detect Life and Firewalk sit on the party', async () => {
     const s = inTown();
     caster(s);
     doPriestSpell(s, 0, Spell.DETECT_LIFE);
@@ -294,14 +294,14 @@ describe('do_priest_spell', () => {
     expect(s.univ.party.partyStatus[PartyStatus.FIREWALK]).toBeGreaterThan(0);
   });
 
-  it('Word of Recall refuses indoors', () => {
+  it('Word of Recall refuses indoors', async () => {
     const s = inTown();
     caster(s);
     doPriestSpell(s, 0, Spell.WORD_RECALL);
     expect(s.univ.transcript.at(-1)).toContain('Can only cast outdoors');
   });
 
-  it('Remove Curse uncurses what it can', () => {
+  it('Remove Curse uncurses what it can', async () => {
     const s = inTown();
     const pc = caster(s);
     // The spell walks every slot and only looks at `cursed`, so the slot's
@@ -317,7 +317,7 @@ describe('do_priest_spell', () => {
 });
 
 describe('cast_spell', () => {
-  it('sends a mage spell one way and a priest spell the other', () => {
+  it('sends a mage spell one way and a priest spell the other', async () => {
     const s = inTown();
     caster(s);
     castSpell(s, 0, Spell.LIGHT);
@@ -327,14 +327,14 @@ describe('cast_spell', () => {
     expect(s.univ.party.food).toBeGreaterThan(before);
   });
 
-  it('names the caster and the spell', () => {
+  it('names the caster and the spell', async () => {
     const s = inTown();
     const pc = caster(s);
     castSpell(s, 0, Spell.LIGHT);
     expect(s.univ.transcript).toContain(`${pc.name} casts Light.`);
   });
 
-  it('nothing can be cast standing in an antimagic field', () => {
+  it('nothing can be cast standing in an antimagic field', async () => {
     const s = inTown();
     const pc = caster(s);
     const at = s.univ.party.townLoc;

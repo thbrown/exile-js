@@ -62,7 +62,7 @@ function friendlyBeside(univ: Universe, session: GameSession, index = 1): Creatu
 }
 
 describe('setTownAttitude', () => {
-  it('make_town_hostile turns the whole population and sets the town flag', () => {
+  it('make_town_hostile turns the whole population and sets the town flag', async () => {
     const { univ, session } = newGame();
     friendlyBeside(univ, session);
     expect(univ.town!.monsters.some((m) => m.isFriendly)).toBe(true);
@@ -76,7 +76,7 @@ describe('setTownAttitude', () => {
     }
   });
 
-  it('a negative hi counts back from the end, and a summon is left alone', () => {
+  it('a negative hi counts back from the end, and a summon is left alone', async () => {
     const { univ, session } = newGame();
     const summoned = friendlyBeside(univ, session);
     summoned.summonTime = 5;
@@ -89,7 +89,7 @@ describe('setTownAttitude', () => {
     expect(univ.town!.monsters[0]!.attitude).toBe(Attitude.HOSTILE_A);
   });
 
-  it('only touches the named slot range', () => {
+  it('only touches the named slot range', async () => {
     const { univ, session } = newGame();
     const monsters = univ.town!.monsters;
     expect(monsters.length).toBeGreaterThan(2);
@@ -105,7 +105,7 @@ describe('setTownAttitude', () => {
     expect(univ.town!.monstHostile).toBe(false);
   });
 
-  it('a guard turned hostile gets tripled health, haste and a blessing', () => {
+  it('a guard turned hostile gets tripled health, haste and a blessing', async () => {
     const { univ, session } = newGame();
     const monst = friendlyBeside(univ, session);
     monst.mon.guard = true;
@@ -122,7 +122,7 @@ describe('setTownAttitude', () => {
     }
   });
 
-  it('an arena fight has no town population to turn', () => {
+  it('an arena fight has no town population to turn', async () => {
     const { univ, session } = newGame();
     friendlyBeside(univ, session);
     session.mode = GameMode.COMBAT;
@@ -181,7 +181,7 @@ describe('attacking a peaceful creature', () => {
 });
 
 describe('theft', () => {
-  it('taking someone else\'s property in plain sight is a crime', () => {
+  it('taking someone else\'s property in plain sight is a crime', async () => {
     const { univ, session } = newGame();
     const monst = friendlyBeside(univ, session);
     const item = univ.town!.items.find((i) => i.variety !== 0);
@@ -195,7 +195,7 @@ describe('theft', () => {
     expect(univ.town!.monstHostile).toBe(true);
   });
 
-  it('taking your own property is not', () => {
+  it('taking your own property is not', async () => {
     const { univ, session } = newGame();
     friendlyBeside(univ, session);
     const item = univ.town!.items.find((i) => i.variety !== 0);

@@ -241,14 +241,14 @@ function dirToward(from: Location, to: Location): number {
  * instead of act. Kept out of `char_parry`/`handle_pause` themselves because
  * it's the monster's *movement*, not the PC's own turn, that triggers it.
  */
-function checkParryOpportunity(session: GameSession, monst: Creature): void {
+async function checkParryOpportunity(session: GameSession, monst: Creature): Promise<void> {
   if (!monst.isAlive) return;
   for (const pc of session.univ.party.pcs) {
     if (pc.parry <= 99) continue;
     if (!monstAdjacent(monst, pc.combatPos)) continue;
     if (pc.traits[Trait.PACIFIST]) continue;
     pc.parry = 0;
-    pcAttack(session.univ, session.univ.party.pcs.indexOf(pc), monst, session);
+    await pcAttack(session.univ, session.univ.party.pcs.indexOf(pc), monst, session);
   }
 }
 
@@ -457,11 +457,11 @@ function isHumanoidRace(race: Race): boolean {
  * TODO(M5b): the TOUCH abilities that fire on a landed hit — stun, petrify,
  * drain, steal — need the uAbility port.
  */
-export function monsterAttack(
+export async function monsterAttack(
   session: GameSession,
   monst: Creature,
   target: Living,
-): void {
+): Promise<void> {
   const univ = session.univ;
   // A peaceful monster won't turn on the party or on another ally.
   if (monst.isFriendly && target.isFriendly) return;
@@ -527,10 +527,10 @@ export function monsterAttack(
     const soundType = monstSoundType(monst, attack);
     let damaged = 0;
     if (monstTarget) {
-      damaged = damageMonst(univ, monstTarget, 7, r2, damType,
+      damaged = await damageMonst(univ, monstTarget, 7, r2, damType,
         { doPrint: false, soundType, session });
     } else if (pcTarget) {
-      damaged = damagePc(univ, pcTarget, r2, damType, monst.mon.race, { soundType });
+      damaged = await damagePc(univ, pcTarget, r2, damType, monst.mon.race, { soundType });
     }
     if (damaged <= 0) continue;
 
@@ -538,7 +538,7 @@ export function monsterAttack(
     if (target.isShielded(univ.rng)) {
       const shared = monst.getSharedDmg(storeHp - target.getHealth(), univ.rng);
       univ.addStringToBuf('  Shares damage!');
-      damageMonst(univ, monst, pcTarget ? 6 : 7, shared, DamageType.MAGIC, { session });
+      await damageMonst(univ, monst, pcTarget ? 6 : 7, shared, DamageType.MAGIC, { session });
     }
 
     // Only the first attack carries the poison.
@@ -579,9 +579,9 @@ export function monsterAttack(
  * It looks like a slip, but a "fix" would change how hard several monsters
  * hit, so it stays with a test pinning it.
  */
-function monsterTouches(
+async function monsterTouches(
   session: GameSession, monst: Creature, target: Living, attackIndex: number,
-): void {
+): Promise<void> {
   const univ = session.univ;
   const pcTarget = target instanceof Player ? target : null;
 
@@ -630,7 +630,7 @@ function monsterTouches(
         continue;
     }
     if (sound > 0) livingSound(sound);
-    monsterBasicAbil(session, monst, key, abil, target);
+    await monsterBasicAbil(session, monst, key, abil, target);
   }
 }
 
@@ -848,7 +848,7 @@ export async function doMonsterTurn(session: GameSession): Promise<void> {
           if (mu > 0 && univ.rng.getRan(1, 1, 10) < (cl > 0 ? 6 : 9)) {
             if (!adjacent || univ.rng.getRan(1, 0, 2) < 2
               || monst.number >= 160 || monst.getLevel() > 9) {
-              monstCastMage(session, monst, target);
+              await monstCastMage(session, monst, target);
               // The C++ discards the return and counts the turn as spent either
               // way, so a monster that couldn't afford the spell still loses its
               // action points. Its own TODO asks whether that is right.
@@ -858,7 +858,7 @@ export async function doMonsterTurn(session: GameSession): Promise<void> {
           }
           if (!actedYet && cl > 0 && univ.rng.getRan(1, 1, 8) < 7) {
             if (!adjacent || univ.rng.getRan(1, 0, 2) < 2 || monst.getLevel() > 9) {
-              monstCastPriest(session, monst, target);
+              await monstCastPriest(session, monst, target);
               monst.ap = Math.max(0, monst.ap - 4);
               actedYet = true;
             }
@@ -903,7 +903,7 @@ export async function doMonsterTurn(session: GameSession): Promise<void> {
             who = monst.isFriendly ? null : univ.party.pcs[victim]!;
           }
           if (who && who.isAlive && monstAdjacent(monst, targSpace)) {
-            monsterAttack(session, monst, who);
+            await monsterAttack(session, monst, who);
             monst.ap = Math.max(0, monst.ap - 4);
             actedYet = true;
           }
@@ -954,7 +954,7 @@ export async function doMonsterTurn(session: GameSession): Promise<void> {
           // don't reorder them.
           const radiate = monst.mon.abil[MonstAbil.RADIATE];
           if (radiate?.active && univ.rng.getRan(1, 1, 100) < radiate.radiate.chance) {
-            placeSpellPattern(session, radiate.radiate.pat, monst.curLoc, {
+            await placeSpellPattern(session, radiate.radiate.pat, monst.curLoc, {
               field: radiate.radiate.type as FieldType,
               rot: monst.direction + 6,
               // 7 is out of the 0-5 PC range, so nobody is credited with a kill.
@@ -994,7 +994,7 @@ export async function combatRunMonst(session: GameSession): Promise<void> {
 
   // The fields act right after the monsters do, before the clock and the
   // statuses tick — a wall of fire burns you on the same turn it was cast.
-  processFields(session);
+  await processFields(session);
 
   univ.party.lightLevel = moveToZero(univ.party.lightLevel);
   const lighting = univ.townRecord?.lightingType ?? 0;
@@ -1023,9 +1023,9 @@ export async function combatRunMonst(session: GameSession): Promise<void> {
   specialIncreaseAge(session);
   // Poison, disease and acid bite far more often in combat than they do on the
   // road: every other round rather than every fiftieth turn.
-  if (univ.party.age % 2 === 0) doPoison(session);
+  if (univ.party.age % 2 === 0) await doPoison(session);
   if (univ.party.age % 3 === 0) handleDisease(session);
-  handleAcid(session);
+  await handleAcid(session);
   // `handle_marked_damage` is ported (game/damage.ts) but is not called here:
   // combat_run_monst's copy exists for the volleys a *monster* fires, and
   // nothing on the monster side opens one yet. `doCombatCast` is the only

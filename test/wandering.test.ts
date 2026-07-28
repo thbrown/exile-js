@@ -65,7 +65,7 @@ async function stepAnywhere(s: GameSession): Promise<boolean> {
 }
 
 describe('outdoor wandering groups', () => {
-  it('an empty encounter is null and a populated one is not', () => {
+  it('an empty encounter is null and a populated one is not', async () => {
     expect(wanderingIsNull(emptyOutWandering())).toBe(true);
     expect(wanderingIsNull(aGroup())).toBe(false);
   });

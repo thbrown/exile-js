@@ -39,6 +39,11 @@ http://localhost:5199/?scenario=busywork
   monster before it acts, the bar above the map names it (`Guard (ap: 4)`) and
   a projectile is slow enough to follow — the camera swings onto its target
   half way through the flight.
+- **A blow waits for its explosion.** The health only comes off, the death
+  only happens and the turn only changes hands once the blast has finished
+  playing, as in the original. Keys pressed during it are dropped rather than
+  queued (also as in the original), so at 3x a crowded round takes a while —
+  press `=` a couple of times if you want it brisk.
 
 ### Actions
 - **F** — fight / attack at close range

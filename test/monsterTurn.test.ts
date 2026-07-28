@@ -182,7 +182,7 @@ describe('a monster taking its turn', () => {
     expect(pc.parry).toBe(100);
   });
 
-  it('monsterAttack rolls each of its attacks', () => {
+  it('monsterAttack rolls each of its attacks', async () => {
     const { univ, session, monst } = combatWithOne();
     const pc = univ.party.pcs[0]!;
     monst.mon.attacks = [
@@ -194,19 +194,19 @@ describe('a monster taking its turn', () => {
     let landed = 0;
     for (let i = 0; i < 10; i++) {
       pc.curHealth = 200;
-      monsterAttack(session, monst, pc);
+      await monsterAttack(session, monst, pc);
       if (pc.curHealth < 200) landed++;
     }
     expect(landed).toBeGreaterThan(0);
     expect(univ.transcript.some((l) => l.includes('attacks'))).toBe(true);
   });
 
-  it('a peaceful monster will not touch the party', () => {
+  it('a peaceful monster will not touch the party', async () => {
     const { univ, session, monst } = combatWithOne();
     monst.attitude = Attitude.DOCILE;
     const pc = univ.party.pcs[0]!;
     monst.curLoc = loc(pc.combatPos.x + 1, pc.combatPos.y);
-    monsterAttack(session, monst, pc);
+    await monsterAttack(session, monst, pc);
     expect(pc.curHealth).toBe(200);
   });
 
@@ -282,7 +282,7 @@ describe('a monster taking its turn', () => {
     expect(monst.curLoc).toEqual(before);
   });
 
-  it('closestPc finds the nearest survivor', () => {
+  it('closestPc finds the nearest survivor', async () => {
     const { univ } = combatWithOne();
     univ.party.pcs[0]!.mainStatus = MainStatus.DEAD;
     const near = closestPc(univ, univ.party.pcs[1]!.combatPos);
@@ -340,7 +340,7 @@ describe('a charmed monster fights its former allies', () => {
     return { univ, session, charmed, hostile };
   }
 
-  it('picks the other side as a target', () => {
+  it('picks the other side as a target', async () => {
     const { session, charmed, hostile } = twoMonstersAdjacent();
     // A friendly creature never targets a PC at all (pickTargetPc refuses
     // outright), so this alone proves it falls back to the hostile monster.
@@ -392,7 +392,7 @@ describe('encounters in town mode', () => {
     return { univ, session, monst };
   }
 
-  it('a hostile monster notices the party and says so', () => {
+  it('a hostile monster notices the party and says so', async () => {
     const { univ, session, monst } = townWithOne();
     monst.active = CreatureStatus.IDLE;
     for (let i = 0; i < 30 && monst.active === CreatureStatus.IDLE; i++) doMonsters(session);
@@ -400,7 +400,7 @@ describe('encounters in town mode', () => {
     expect(univ.transcript).toContain('Monster saw you!');
   });
 
-  it('and then walks over to the party', () => {
+  it('and then walks over to the party', async () => {
     const { univ, session, monst } = townWithOne();
     monst.active = CreatureStatus.ALERTED;
     const before = Math.abs(monst.curLoc.x - univ.party.townLoc.x);
@@ -449,7 +449,7 @@ describe('encounters in town mode', () => {
       .toBeLessThanOrEqual(dist(startedAt, home));
   });
 
-  it('a sleeping monster stays put', () => {
+  it('a sleeping monster stays put', async () => {
     const { session, monst } = townWithOne();
     monst.active = CreatureStatus.ALERTED;
     monst.status[Status.ASLEEP] = 6;
@@ -593,7 +593,7 @@ describe('monsters_going', () => {
 });
 
 describe('the status bar text', () => {
-  it('names the monster that is going, and the PC otherwise', () => {
+  it('names the monster that is going, and the PC otherwise', async () => {
     const { univ, session, monst } = combatWithOne();
     univ.curPc = 0;
     univ.party.pcs[0]!.ap = 4;

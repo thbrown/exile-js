@@ -56,11 +56,11 @@ function archmage(s: GameSession): Player {
 }
 
 describe('the spell dictionary', () => {
-  it('has all 147 of spell.cpp\'s entries', () => {
+  it('has all 147 of spell.cpp\'s entries', async () => {
     expect(Object.keys(SPELLS).length).toBe(147);
   });
 
-  it('keeps the numbers the save format uses', () => {
+  it('keeps the numbers the save format uses', async () => {
     expect(Spell.LIGHT).toBe(0);
     expect(Spell.RECHARGE).toBe(78);
     expect(Spell.BLESS_MINOR).toBe(100);
@@ -68,7 +68,7 @@ describe('the spell dictionary', () => {
     expect(Spell.NIRVANA).toBe(167);
   });
 
-  it('transcribes a spell exactly (M_SPARK)', () => {
+  it('transcribes a spell exactly (M_SPARK)', async () => {
     // cSpell(eSpell::SPARK).asType(MAGE_SPELLS).asLevel(1)
     //   .withRange(6).withTargetLock().withCost(1).withRefer(REFER_TARGET).when(WHEN_COMBAT)
     expect(SPELLS[Spell.SPARK]).toEqual({
@@ -82,13 +82,13 @@ describe('the spell dictionary', () => {
     });
   });
 
-  it('needsSelect() implies peaceful, as the C++ builder does', () => {
+  it('needsSelect() implies peaceful, as the C++ builder does', async () => {
     // M_HASTE_MINOR calls needsSelect() and never calls asPeaceful().
     expect(SPELLS[Spell.HASTE_MINOR]?.select).toBe(SpellSelect.ACTIVE);
     expect(SPELLS[Spell.HASTE_MINOR]?.peaceful).toBe(true);
   });
 
-  it('knows which list a spell is on', () => {
+  it('knows which list a spell is on', async () => {
     expect(isMage(Spell.LIGHT)).toBe(true);
     expect(isPriest(Spell.LIGHT)).toBe(false);
     expect(isPriest(Spell.BLESS_MINOR)).toBe(true);
@@ -100,7 +100,7 @@ describe('the spell dictionary', () => {
     expect(isPriestSide(Spell.RECHARGE)).toBe(false);
   });
 
-  it('maps list positions to spell numbers', () => {
+  it('maps list positions to spell numbers', async () => {
     expect(spellFromNum(Skill.MAGE_SPELLS, 0)).toBe(Spell.LIGHT);
     expect(spellFromNum(Skill.PRIEST_SPELLS, 0)).toBe(Spell.BLESS_MINOR);
     expect(spellFromNum(Skill.MAGE_SPELLS, 62)).toBe(Spell.NONE);
@@ -109,14 +109,14 @@ describe('the spell dictionary', () => {
     expect(spellFromRawNum(99)).toBe(Spell.NONE);
   });
 
-  it('names spells out of the magic-names table', () => {
+  it('names spells out of the magic-names table', async () => {
     expect(spellName(Spell.LIGHT)).toBe('Light');
     expect(spellName(Spell.SPARK)).toBe('Spark');
     expect(spellName(Spell.BLESS_MINOR)).toBe('Minor Bless');
     expect(spellName(Spell.NONE)).toBe('INVALID SPELL');
   });
 
-  it('gives every mage and priest list slot a spell', () => {
+  it('gives every mage and priest list slot a spell', async () => {
     for (let i = 0; i < NUM_NORMAL_SPELLS; i++) {
       expect(SPELLS[i as Spell], `mage ${i}`).toBeDefined();
       expect(SPELLS[(i + 100) as Spell], `priest ${i}`).toBeDefined();
@@ -125,20 +125,20 @@ describe('the spell dictionary', () => {
 });
 
 describe('pc_can_cast_spell, for one spell', () => {
-  it('lets a trained caster cast a spell they know', () => {
+  it('lets a trained caster cast a spell they know', async () => {
     const s = inTown();
     const pc = archmage(s);
     expect(pcCanCastSpell(s, pc, Spell.LIGHT)).toBe(true);
   });
 
-  it('refuses a spell the PC has not learned', () => {
+  it('refuses a spell the PC has not learned', async () => {
     const s = inTown();
     const pc = archmage(s);
     pc.mageSpells[Spell.LIGHT] = false;
     expect(pcCanCastSpell(s, pc, Spell.LIGHT)).toBe(false);
   });
 
-  it('refuses a spell above the PC\'s skill', () => {
+  it('refuses a spell above the PC\'s skill', async () => {
     const s = inTown();
     const pc = archmage(s);
     pc.skills[Skill.MAGE_SPELLS] = 1;
@@ -147,14 +147,14 @@ describe('pc_can_cast_spell, for one spell', () => {
     expect(pcCanCastSpell(s, pc, Spell.QUICKFIRE)).toBe(false);
   });
 
-  it('refuses when the spell points are short', () => {
+  it('refuses when the spell points are short', async () => {
     const s = inTown();
     const pc = archmage(s);
     pc.curSp = 0;
     expect(pcCanCastSpell(s, pc, Spell.LIGHT)).toBe(false);
   });
 
-  it('honours where a spell may be cast', () => {
+  it('honours where a spell may be cast', async () => {
     const s = inTown();
     const pc = archmage(s);
     // Identify is a town/outdoors spell, never a combat one.
@@ -168,7 +168,7 @@ describe('pc_can_cast_spell, for one spell', () => {
     expect(pcCanCastSpell(s, pc, Spell.SPARK)).toBe(false);
   });
 
-  it('a pacifist may only cast the peaceful spells', () => {
+  it('a pacifist may only cast the peaceful spells', async () => {
     const s = inTown();
     const pc = archmage(s);
     pc.traits[Trait.PACIFIST] = true;
@@ -179,7 +179,7 @@ describe('pc_can_cast_spell, for one spell', () => {
     expect(pcCanCastSpell(s, pc, Spell.SPARK)).toBe(false);
   });
 
-  it('dumbfounding takes the high spells first, enlightenment gives skill', () => {
+  it('dumbfounding takes the high spells first, enlightenment gives skill', async () => {
     const s = inTown();
     const pc = archmage(s);
     // The test is `DUMB >= 8 - level`, so the higher the spell the sooner it
@@ -202,7 +202,7 @@ describe('pc_can_cast_spell, for one spell', () => {
     expect(pcCanCastSpell(s, pc, Spell.QUICKFIRE)).toBe(true);
   });
 
-  it('nothing can be cast asleep, paralysed or dead', () => {
+  it('nothing can be cast asleep, paralysed or dead', async () => {
     const s = inTown();
     const pc = archmage(s);
     pc.status[Status.ASLEEP] = 3;
@@ -215,7 +215,7 @@ describe('pc_can_cast_spell, for one spell', () => {
     expect(pcCanCastSpell(s, pc, Spell.LIGHT)).toBe(false);
   });
 
-  it('a raise-dead spell needs somebody dead to raise', () => {
+  it('a raise-dead spell needs somebody dead to raise', async () => {
     const s = inTown();
     const pc = archmage(s);
     expect(SPELLS[Spell.RAISE_DEAD]?.select).toBe(SpellSelect.DEAD);
@@ -224,14 +224,14 @@ describe('pc_can_cast_spell, for one spell', () => {
     expect(pcCanCastSpell(s, pc, Spell.RAISE_DEAD)).toBe(true);
   });
 
-  it('the special spells are not castable from the list', () => {
+  it('the special spells are not castable from the list', async () => {
     const s = inTown();
     const pc = archmage(s);
     expect(pcCanCastSpell(s, pc, Spell.NIRVANA)).toBe(false);
     expect(pcCanCastSpell(s, pc, Spell.NONE)).toBe(false);
   });
 
-  it('nothing is castable mid-conversation', () => {
+  it('nothing is castable mid-conversation', async () => {
     const s = inTown();
     const pc = archmage(s);
     s.mode = GameMode.TALKING;
@@ -240,14 +240,14 @@ describe('pc_can_cast_spell, for one spell', () => {
 });
 
 describe('pc_can_cast_spell, for a whole skill', () => {
-  it('says OK for a caster who can cast something', () => {
+  it('says OK for a caster who can cast something', async () => {
     const s = inTown();
     const pc = archmage(s);
     expect(pcCanCastType(s, pc, Skill.MAGE_SPELLS)).toBe(CastStatus.OK);
     expect(pcCanCastType(s, pc, Skill.PRIEST_SPELLS)).toBe(CastStatus.OK);
   });
 
-  it('an Anama priest may never cast a mage spell', () => {
+  it('an Anama priest may never cast a mage spell', async () => {
     const s = inTown();
     const pc = archmage(s);
     pc.traits[Trait.ANAMA] = true;
@@ -256,7 +256,7 @@ describe('pc_can_cast_spell, for a whole skill', () => {
     expect(pcCanCastType(s, pc, Skill.PRIEST_SPELLS)).toBe(CastStatus.OK);
   });
 
-  it('reports no skill, then no spell points', () => {
+  it('reports no skill, then no spell points', async () => {
     const s = inTown();
     const pc = archmage(s);
     pc.skills[Skill.MAGE_SPELLS] = 0;
@@ -266,7 +266,7 @@ describe('pc_can_cast_spell, for a whole skill', () => {
     expect(pcCanCastType(s, pc, Skill.MAGE_SPELLS)).toBe(CastStatus.NO_SP);
   });
 
-  it('an antimagic field stops casting in combat', () => {
+  it('an antimagic field stops casting in combat', async () => {
     const s = inTown();
     const pc = archmage(s);
     s.startCombat(s.univ.party.direction);
@@ -274,7 +274,7 @@ describe('pc_can_cast_spell, for a whole skill', () => {
     expect(pcCanCastType(s, pc, Skill.MAGE_SPELLS)).toBe(CastStatus.NO_ANTIMAGIC);
   });
 
-  it('reports being dumbfounded when that is what stops them', () => {
+  it('reports being dumbfounded when that is what stops them', async () => {
     const s = inTown();
     const pc = archmage(s);
     pc.status[Status.DUMB] = 8;
@@ -283,7 +283,7 @@ describe('pc_can_cast_spell, for a whole skill', () => {
 });
 
 describe('the party a new game starts with', () => {
-  it('knows the basic spells, so somebody can actually cast', () => {
+  it('knows the basic spells, so somebody can actually cast', async () => {
     // The regression this pins: the pregen party was created with *no* spells
     // known, so the spell picker reported "Nobody can cast a mage spell". The
     // C++ sets basic_spells in the cPlayer constructor, which every preset
@@ -301,7 +301,7 @@ describe('the party a new game starts with', () => {
     expect(priests.length).toBeGreaterThan(0);
   });
 
-  it('the starting caster has a non-empty spell list', () => {
+  it('the starting caster has a non-empty spell list', async () => {
     const s = inTown();
     const mage = s.univ.party.pcs.find(
       (pc) => pcCanCastType(s, pc, Skill.MAGE_SPELLS) === CastStatus.OK)!;
@@ -314,7 +314,7 @@ describe('the party a new game starts with', () => {
     }
   });
 
-  it('the last 32 spells still have to be learned', () => {
+  it('the last 32 spells still have to be learned', async () => {
     const s = inTown();
     const pc = s.univ.party.pcs[0]!;
     expect(pc.mageSpells[BASIC_SPELLS]).toBe(false);
@@ -323,7 +323,7 @@ describe('the party a new game starts with', () => {
 });
 
 describe('the castable list', () => {
-  it('offers only what the PC can actually cast right now', () => {
+  it('offers only what the PC can actually cast right now', async () => {
     const s = inTown();
     const pc = archmage(s);
     const town = castableSpells(s, pc, Skill.MAGE_SPELLS);
@@ -337,7 +337,7 @@ describe('the castable list', () => {
     expect(fight).not.toContain(Spell.IDENTIFY);
   });
 
-  it('is empty for a PC who knows nothing', () => {
+  it('is empty for a PC who knows nothing', async () => {
     const s = inTown();
     const pc = s.univ.party.pcs[0]!;
     pc.mageSpells.fill(false);

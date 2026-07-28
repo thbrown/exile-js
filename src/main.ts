@@ -22,9 +22,9 @@ import { CastDialog } from './dialogs/castDialog';
 import { GetItemsDialog } from './dialogs/getItemsDialog';
 import { placeSpellPattern } from './game/spellPatterns';
 import { GameMode, isCombat, isScrollable } from './game/modes';
-import { setBoomSink } from './game/booms';
+import { Boom, setBoomSink } from './game/booms';
 import { FocusEvent, animPending, setAnimWaiter, setFocusSink } from './game/anim';
-import { setMissileSink } from './game/missileAnim';
+import { Missile, setMissileSink } from './game/missileAnim';
 import { pickNextPc } from './game/combat';
 import { GameRng } from './core/rng';
 import { DialogHost } from './dialogs/dialog';
@@ -489,7 +489,7 @@ async function main(): Promise<void> {
     const { spell, caster, target } = dialog.choice;
     if (spell === Spell.NONE) { redraw(); return; }
     session.spellTarget = target;
-    if (inFight) combatCastSpell(session, spell);
+    if (inFight) await combatCastSpell(session, spell);
     else castSpell(session, caster, spell);
     setStatus();
     redraw();
@@ -719,7 +719,7 @@ async function main(): Promise<void> {
   };
 
   /** Act on a target space according to what the player asked for. */
-  const actOn = (target: { x: number; y: number }): void => {
+  const actOn = async (target: { x: number; y: number }): Promise<void> => {
     const what = pending;
     pending = null;
     if (what === 'talk') {
@@ -747,8 +747,8 @@ async function main(): Promise<void> {
     // spell collects squares instead, and fires itself once the last is picked.
     if (session.spellTargeting !== null) {
       const fancy = session.mode === GameMode.FANCY_TARGET;
-      if (fancy) placeTarget(session, target);
-      else doCombatCast(session, target);
+      if (fancy) await placeTarget(session, target);
+      else await doCombatCast(session, target);
       // The view snaps back to the caster once the spell goes off
       // (boe.actions.cpp:888) — but not while a multi-target spell is still
       // collecting squares, or scrolling would be undone between each pick.
@@ -761,7 +761,7 @@ async function main(): Promise<void> {
     // Checked before the missile, since the two modes never overlap and this
     // is the one the party is in outside combat.
     if (session.townTarget !== null) {
-      castTownSpell(session, target);
+      await castTownSpell(session, target);
       recentre();
       setStatus();
       redraw();
@@ -786,7 +786,7 @@ async function main(): Promise<void> {
       const self = isCombat(session.mode) ? univ.currentPc.combatPos
         : session.inTown ? univ.party.townLoc : univ.party.outLoc;
       if (locsEqual(target, self)) {
-        session.pause();
+        await session.pause();
         setStatus();
         redraw();
         return;
@@ -829,7 +829,7 @@ async function main(): Promise<void> {
       const from = session.mode === GameMode.COMBAT || session.missile !== null
         ? univ.currentPc.combatPos
         : session.inTown ? univ.party.townLoc : univ.party.outLoc;
-      actOn(shiftLoc(from, dir));
+      void actOn(shiftLoc(from, dir));
       setStatus();
       redraw();
     },
@@ -919,7 +919,7 @@ async function main(): Promise<void> {
           session.endCombat();
         } else if (btn.btn === ToolbarButton.WAIT) {
           // handle_stand_ready — give up the turn *on guard*, not just idle.
-          if (session.mode === GameMode.COMBAT) session.pause();
+          if (session.mode === GameMode.COMBAT) void session.pause();
         } else if (btn.btn === ToolbarButton.SHIELD) {
           // handle_parry — spend what's left of the turn on defence.
           if (session.mode === GameMode.COMBAT) session.parry();
@@ -969,9 +969,9 @@ async function main(): Promise<void> {
           const dx = Math.sign(cell.q - 4);
           const dy = Math.sign(cell.r - 4);
           if (dx === 0 && dy === 0) return;
-          actOn({ x: from.x + dx, y: from.y + dy });
+          void actOn({ x: from.x + dx, y: from.y + dy });
         } else {
-          actOn(clicked);
+          void actOn(clicked);
         }
         setStatus();
         redraw();
@@ -996,7 +996,7 @@ async function main(): Promise<void> {
       screen.hover = null;
       redraw();
     },
-    onKey: (key) => {
+    onKey: async (key) => {
       if (dialogs.handleKey(key)) return;
       // The map window's own key handler: Escape closes it, and it says so.
       if (screen.mapVisible && key === 'Escape') {
@@ -1061,7 +1061,7 @@ async function main(): Promise<void> {
         case 'w': case 'W':
         case ' ':
           // Wait: stand ready in combat, pause otherwise.
-          session.pause();
+          await session.pause();
           break;
         case 'd': case 'D':
           if (inCombat) session.parry();
@@ -1105,7 +1105,7 @@ async function main(): Promise<void> {
           break;
         case ' ':
           // start_fancy_spell_targeting's "(Hit space to cast.)".
-          if (session.mode === GameMode.FANCY_TARGET) castCollected(session);
+          if (session.mode === GameMode.FANCY_TARGET) await castCollected(session);
           break;
         case 'm': case 'M': case 'p': case 'P':
           // While a spell is in the air the same key cancels it, which is what
@@ -1216,10 +1216,21 @@ async function main(): Promise<void> {
   };
 
   setBoomSink((boom) => {
+    boomWatcher?.(boom);
     screen.booms.push(boom);
     startAnimLoop();
   });
+  /**
+   * Taps for a headless driver: a script can no longer read what flew or what
+   * exploded off `screen.missiles`/`screen.booms` after the fact, because the
+   * action it started now waits for those animations and the renderer has
+   * swept them up by the time it returns. `__watchAnim` lets it record them as
+   * they are raised instead. Null for both clears the tap.
+   */
+  let missileWatcher: ((m: Missile) => void) | null = null;
+  let boomWatcher: ((b: Boom) => void) | null = null;
   setMissileSink((missile) => {
+    missileWatcher?.(missile);
     screen.missiles.push(missile);
     startAnimLoop();
   });
@@ -1269,6 +1280,10 @@ async function main(): Promise<void> {
     __setLivingSound: (fn: ((which: number) => void) | null) =>
       setLivingSound(fn ?? playSound),
     __dialogs: dialogs,
+    __watchAnim: (onMissile: ((m: Missile) => void) | null, onBoom: ((b: Boom) => void) | null) => {
+      missileWatcher = onMissile;
+      boomWatcher = onBoom;
+    },
   });
 }
 

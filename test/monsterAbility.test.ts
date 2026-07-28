@@ -34,7 +34,7 @@ function byName(monsters: Monster[], name: string): Monster {
 }
 
 describe('getMonstAbilCategory', () => {
-  it('files each key under the arm of the union it selects', () => {
+  it('files each key under the arm of the union it selects', async () => {
     expect(abilityCategory(MonstAbil.MISSILE)).toBe(MonstAbilCat.MISSILE);
     expect(abilityCategory(MonstAbil.DAMAGE)).toBe(MonstAbilCat.GENERAL);
     expect(abilityCategory(MonstAbil.STATUS2)).toBe(MonstAbilCat.GENERAL);
@@ -48,7 +48,7 @@ describe('getMonstAbilCategory', () => {
 });
 
 describe('get_ap_cost', () => {
-  it('charges the heavier missiles 3 and the rest 2', () => {
+  it('charges the heavier missiles 3 and the rest 2', async () => {
     const a = defaultAbility();
     a.missile.type = MonstMissile.ARROW;
     expect(abilityApCost(MonstAbil.MISSILE, a)).toBe(3);
@@ -56,7 +56,7 @@ describe('get_ap_cost', () => {
     expect(abilityApCost(MonstAbil.MISSILE, a)).toBe(2);
   });
 
-  it('gives a touch ability -1, so it rides along with the melee attack', () => {
+  it('gives a touch ability -1, so it rides along with the melee attack', async () => {
     const a = defaultAbility();
     a.gen.type = MonstGen.TOUCH;
     expect(abilityApCost(MonstAbil.STATUS, a)).toBe(-1);
@@ -64,7 +64,7 @@ describe('get_ap_cost', () => {
     expect(abilityApCost(MonstAbil.STATUS, a)).toBe(3);
   });
 
-  it('reads a SPECIAL ability cost out of its second parameter', () => {
+  it('reads a SPECIAL ability cost out of its second parameter', async () => {
     const a = defaultAbility();
     a.special.extra2 = 5;
     expect(abilityApCost(MonstAbil.SPECIAL, a)).toBe(5);
@@ -110,7 +110,7 @@ describe('readMonstAbilFromXml', () => {
     expect(active).toEqual([MonstAbil.MISSILE]);
   });
 
-  it('defaults a radiate pattern to the 3x3 square', () => {
+  it('defaults a radiate pattern to the 3x3 square', async () => {
     expect(defaultAbility().radiate.pat).toBe(SpellPat.SQUARE);
   });
 

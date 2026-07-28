@@ -103,7 +103,7 @@ describe('run_a_missile', () => {
     expect(missiles).toEqual([]);
   });
 
-  it('with nothing listening it is a no-op', () => {
+  it('with nothing listening it is a no-op', async () => {
     setMissileSink(null);
     setLivingSound(null);
     expect(() => runAMissile({ x: 1, y: 1 }, { x: 4, y: 4 }, 2, 0, 12)).not.toThrow();
@@ -125,12 +125,12 @@ describe('get_missile_direction', () => {
     ['north-west', { x: 100, y: 100 }, 7],
   ];
   for (const [name, point, dir] of cases) {
-    it(`reads ${name} as column ${dir}`, () => {
+    it(`reads ${name} as column ${dir}`, async () => {
       expect(getMissileDirection(origin, point)).toBe(dir);
     });
   }
 
-  it('is translation-invariant, since it renormalises the origin', () => {
+  it('is translation-invariant, since it renormalises the origin', async () => {
     expect(getMissileDirection({ x: 500, y: 700 }, { x: 600, y: 800 }))
       .toBe(getMissileDirection({ x: 0, y: 0 }, { x: 100, y: 100 }));
   });
@@ -237,7 +237,7 @@ describe('monst_fire_missile dispatch', () => {
  * same *order* as a fast one, and that `1` is still the faithful timing.
  */
 describe('the combat pace knob', () => {
-  it('scales every animation length together, and 1 is the original', () => {
+  it('scales every animation length together, and 1 is the original', async () => {
     const original = combatPace();
     try {
       setCombatPace(1);
@@ -260,7 +260,7 @@ describe('the combat pace knob', () => {
     }
   });
 
-  it('books a missile for the paced flight time and remembers it', () => {
+  it('books a missile for the paced flight time and remembers it', async () => {
     const original = combatPace();
     try {
       animClear();
