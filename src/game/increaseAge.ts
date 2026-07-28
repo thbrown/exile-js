@@ -12,9 +12,8 @@
  * more frequent. `party.age % n === 0` is the test, so the *phase* matters as
  * well as the rate — don't "simplify" these into counters.
  *
- * Not ported here (each is another milestone): hunger and eating,
- * `special_increase_age`'s scenario timers, `push_things`, `dump_gold` and
- * `process_fields`.
+ * Not ported here (each is another milestone): `push_things`, `dump_gold` and
+ * the autosave that eating triggers.
  */
 
 import { DamageType } from '../data/monster';
@@ -23,7 +22,7 @@ import { hasAbilEquip } from '../universe/inventory';
 import { Player } from '../universe/player';
 import { MainStatus, PartyStatus, Race, Status, Trait } from '../universe/skills';
 import { Party } from '../universe/party';
-import { damagePc } from './damage';
+import { damagePc, hitParty } from './damage';
 import { GameMode } from './modes';
 import type { GameSession } from './session';
 
@@ -39,6 +38,20 @@ function partyMoveToZero(party: Party, which: PartyStatus): void {
   const v = party.partyStatus[which];
   if (v > 0) party.partyStatus[which] = v - 1;
   else if (v < 0) party.partyStatus[which] = v + 1;
+}
+
+/**
+ * take_food (boe.items.cpp:82) — eat `amount` rations and report how many
+ * there weren't. The larder is emptied rather than going negative.
+ */
+export function takeFood(party: Party, amount: number): number {
+  const shortfall = amount - party.food;
+  if (shortfall > 0) {
+    party.food = 0;
+    return shortfall;
+  }
+  party.food -= amount;
+  return 0;
 }
 
 function livePcs(session: GameSession): Player[] {
@@ -125,6 +138,32 @@ export async function increaseAgeEffects(session: GameSession): Promise<void> {
   const town = session.mode === GameMode.TOWN;
   if (!outdoors && !town) return;
   const age = party.age;
+
+  // --- Food ------------------------------------------------------------------
+  // "Food" (boe.actions.cpp:3467): every thousandth turn the party eats, one
+  // ration per living PC. `take_food` empties the larder and reports the
+  // shortfall; anyone it couldn't feed starves the *whole party* for
+  // `get_ran(3,1,6)`, which is the C++'s own broad brush — the damage isn't
+  // per hungry PC.
+  //
+  // The C++ runs this **before** poison, disease and acid, and this port keeps
+  // that order because all four consume the RNG. (The blocks that don't —
+  // the party's spell effects and the protections — sit at the end of this
+  // function rather than the start, which is a reordering that predates this
+  // and can't move the sequence.)
+  if (age % 1000 === 0) {
+    const mouths = party.pcs.filter((pc) => pc.mainStatus === MainStatus.ALIVE).length;
+    const shortfall = takeFood(party, mouths);
+    if (shortfall > 0) {
+      univ.addStringToBuf('Starving!');
+      session.sound?.play(66);
+      await hitParty(univ, univ.rng.getRan(3, 1, 6), DamageType.SPECIAL);
+    } else {
+      session.sound?.play(6);
+      univ.addStringToBuf('You eat.');
+      // TODO(M7): `try_auto_save("Eat")` — eating is the C++'s autosave point.
+    }
+  }
 
   // --- Poison, disease, acid ------------------------------------------------
   if (party.pcs.some((pc) => (pc.status[Status.POISON] ?? 0) > 0)) {

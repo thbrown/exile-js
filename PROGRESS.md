@@ -1590,7 +1590,8 @@ playthrough will hit it:
 2. ~~**The job-bank board**~~ — **done** (2026-07-28), see the entry below.
    What's left of the quest UI is the quest pane of the item window.
 3. ~~**Alchemy** (`A`)~~ — **done** (2026-07-28), see the entry below.
-4. **`increase_age`'s remaining upkeep**: hunger and the autosave.
+4. **`increase_age`'s remaining upkeep**: the autosave (needs M7's save
+   system). ~~Hunger~~ landed 2026-07-28 — see the entry below.
 5. **The dialogxml toolkit**, still M3's long-term item: `give_pc_info`'s
    character sheet, `story_dialog`'s pagination, `display_monst`, and the ~210
    remaining definitions.
@@ -2029,3 +2030,20 @@ playthrough will hit it:
     including the off-the-end read, the choice list's `can_make` marking, and
     `do_alchemy`'s five outcomes. `verify-screen.mjs` gained a step that mixes a
     Weak Healing Potion through both dialogs with real keypresses.
+
+- **Hunger (M6, 2026-07-28)**: `increaseAge.ts` gains the "Food" block
+  (boe.actions.cpp:3467) and `take_food` (boe.items.cpp:82). Every thousandth
+  turn the party eats one ration per **living** PC; if the larder is short,
+  everyone takes `get_ran(3,1,6)` as SPECIAL damage under a "Starving!" line,
+  and the food reserve the status bar has always shown finally means something.
+  - *Worth knowing*: the shortfall isn't per hungry PC — one missing ration
+    starves the **whole party** through `hit_party`, at one shared roll. That's
+    the C++'s own broad brush.
+  - Placed **before** poison, disease and acid, which is where the C++ has it;
+    all four consume the RNG, so the order is part of the sequence. The two
+    blocks this port already had out of order (the party's spell effects and
+    the protections, which sit at the end here and at the start there) consume
+    none, so they can't move it.
+  - `try_auto_save("Eat")` is the one thing left in `increase_age` — eating is
+    the C++'s autosave point, so it waits for M7's save system. Marked
+    TODO(M7) in place.

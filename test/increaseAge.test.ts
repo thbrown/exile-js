@@ -23,7 +23,9 @@ import {
 import {
   FocusEvent, animBook, animClear, animPending, focusOn, setFocusSink,
 } from '../src/game/anim';
-import { doPoison, handleAcid, handleDisease } from '../src/game/increaseAge';
+import {
+  doPoison, handleAcid, handleDisease, increaseAgeEffects, takeFood,
+} from '../src/game/increaseAge';
 import { GameSession } from '../src/game/session';
 import { PartyPreset } from '../src/universe/player';
 import { MainStatus, Status } from '../src/universe/skills';
@@ -133,6 +135,52 @@ describe('the per-turn upkeep', () => {
     }
     expect(s.univ.transcript).toContain('Poison:');
     expect(pc.curHealth).toBeLessThan(400);
+  });
+});
+
+describe('hunger', () => {
+  it('take_food empties the larder rather than going negative', () => {
+    const s = inTown();
+    const party = s.univ.party;
+    party.food = 10;
+    expect(takeFood(party, 4)).toBe(0);
+    expect(party.food).toBe(6);
+    // Short by one: the larder is emptied and the shortfall reported.
+    expect(takeFood(party, 7)).toBe(1);
+    expect(party.food).toBe(0);
+  });
+
+  it('eats one ration per living PC every thousandth turn', async () => {
+    const s = inTown();
+    const party = s.univ.party;
+    party.food = 100;
+    party.pcs[0]!.mainStatus = MainStatus.DEAD;
+    party.age = 1000;
+    await increaseAgeEffects(s);
+    // Five mouths left, not six — the dead don't eat.
+    expect(party.food).toBe(95);
+    expect(s.univ.transcript).toContain('You eat.');
+  });
+
+  it('does nothing on a turn that is not a multiple of 1000', async () => {
+    const s = inTown();
+    s.univ.party.food = 100;
+    s.univ.party.age = 1001;
+    await increaseAgeEffects(s);
+    expect(s.univ.party.food).toBe(100);
+  });
+
+  it('starves the whole party when the food runs out', async () => {
+    const s = inTown();
+    const party = s.univ.party;
+    party.food = 2; // enough for two of the six
+    party.age = 1000;
+    const before = party.pcs.map((pc) => pc.curHealth);
+    await increaseAgeEffects(s);
+    expect(party.food).toBe(0);
+    expect(s.univ.transcript).toContain('Starving!');
+    // hit_party, not per hungry PC: everyone takes the same roll.
+    expect(party.pcs.some((pc, i) => pc.curHealth < before[i]!)).toBe(true);
   });
 });
 
