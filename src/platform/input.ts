@@ -27,7 +27,7 @@ export const KEY_DIRECTIONS: Record<string, Direction> = {
 };
 
 export interface InputHandlers {
-  onMove(dir: Direction): void;
+  onMove(dir: Direction, key?: string): void;
   onClick(x: number, y: number): void;
   onKey(key: string, event: KeyboardEvent): void;
   /**
@@ -65,7 +65,7 @@ export class InputRouter {
     const dir = KEY_DIRECTIONS[ev.code] ?? KEY_DIRECTIONS[ev.key];
     if (dir !== undefined) {
       ev.preventDefault();
-      this.handlers.onMove(dir);
+      this.handlers.onMove(dir, ev.key);
       return;
     }
     this.handlers.onKey(ev.key, ev);

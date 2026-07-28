@@ -1592,9 +1592,11 @@ playthrough will hit it:
 3. ~~**Alchemy** (`A`)~~ — **done** (2026-07-28), see the entry below.
 4. **`increase_age`'s remaining upkeep**: the autosave (needs M7's save
    system). ~~Hunger~~ landed 2026-07-28 — see the entry below.
-5. **The dialogxml toolkit**, still M3's long-term item: `give_pc_info`'s
-   character sheet, `story_dialog`'s pagination, `display_monst`, and the ~210
-   remaining definitions.
+5. **The dialogxml toolkit** — the parser, the widget renderer and the first
+   converted call site (`pc-info.xml`) landed 2026-07-28; see the entry below.
+   What's left is converting more call sites: `story_dialog`'s pagination,
+   `display_monst`, `display_pc`'s spell lists, and the two dialogs the job
+   board and alchemy are still approximating with lists.
 6. ~~Odds and ends left over from M5~~ — **done** (2026-07-28), see the entry
    below. The one thing left in that area is `AFFECT_SOUL_CRYSTAL`, which needs
    the creature-context plumbing described there.
@@ -2111,3 +2113,54 @@ playthrough will hit it:
     against — and `SpecialCtx` has no creature target yet, only `curTarget` for
     PCs. That plumbing is the job, not the opcode.
   - Tests: `test/soulCrystal.test.ts` (16) covers all five areas.
+
+- **The dialogxml toolkit (M3's long-term item, 2026-07-28).** The game ships
+  **211 dialog definitions** in `data/dialogs`, and until now this port drew its
+  own approximations of them. Three files replace that:
+  - **`dialogs/dialogXml.ts`** parses one definition into a `DialogDef` —
+    `<text>`, `<button>`, `<pict>`, `<led>`, `<group>`, `<field>` and `<line>`,
+    with their rects, fonts, colours, frames and `def-key`s, and the `<br/>`
+    breaks inside a label. **All 211 parse**, pinned by a test that reads every
+    file in the directory. (`stack`/`page`/`pane`/`tilemap` are skipped: they
+    only appear in the scenario editor's dialogs, which this port doesn't run.)
+  - **`dialogs/xmlDialog.ts`** draws and runs one. It is a `ModalScreen`, so it
+    slots into the `DialogHost` the rest of the game already uses; the API is
+    written to read like the C++ call sites (`me["day"].setTextToNum(n)` →
+    `dlg.setNum('day', n)`, `me["take1"].hide()` → `dlg.hide('take1')`).
+    Buttons draw from their real sheets at `cButton::btnRects`' geometry, LEDs
+    from `cLed::ledRects`, and the pict kinds the player's dialogs use (dlog,
+    pc, monst, item, ter, talk, scen, status) from theirs.
+  - **`dialogs/dialogStore.ts`** is `ResMgr::dialogs`: definitions are
+    registered by name up front, because opening a dialog is a synchronous
+    lookup in the code that does it.
+  - **`pc-info.xml` is the first real call site**, replacing the transcript
+    stand-in: `give_pc_info` / `display_pc_info` (boe.infodlg.cpp:476/:360) with
+    all nineteen skills, the weight and health lines, both weapon blocks with
+    their to-hit and damage adjustments, and arrows that step through the
+    *living* party members without closing the sheet.
+  - *Gotcha, and it is load-bearing*: `cControl::relocateRelative`
+    (control.cpp:78) places a `neg`-positioned control's **top-left corner** at
+    the computed point — the C++ negates the offset and hands it to `relocate`,
+    which never allows for the control's own width or height. So a `neg`
+    control overlaps its anchor instead of sitting beside it. Kept, and pinned
+    by a test.
+  - *Gotcha*: `btnRects` are `{top, left, bottom, right}`, not x/y/w/h. The
+    tiny button's `{0,42,10,56}` means **x=42**, and reading it the other way
+    put it off the bottom of a 26px-tall sheet — caught by looking at the
+    screenshot, not by a test.
+  - *Gotcha*: a control positioned `neg` with **no anchor** is placed against
+    the *dialog's* edges, and that can only happen after the window has been
+    measured — `cDialog::recalcRect` (dialog.cpp:425) sizes the window to its
+    furthest control plus 6px, deliberately ignoring those controls, then
+    places them. `XmlDialog`'s constructor does the same two passes.
+  - *Gotcha*: `<group>` carries no `top`/`left` even though the schema marks
+    them required, so the rect parser has to tolerate their absence.
+  - **The arrow keys had to be re-routed.** `InputRouter` turns them into
+    movement before `onKey` is ever called, so a dialog whose buttons carry
+    `def-key='left'`/`'right'` — pc-info's do — never saw them. `onMove` now
+    offers them to an open dialog first.
+  - Tests: `test/dialogXml.test.ts` (20) covers parsing all 211, the four
+    relative-positioning modes, window sizing, click and key dispatch,
+    handlers that hold the dialog open, hidden controls, LED groups, and
+    pc-info itself. `verify-screen.mjs` opens the sheet through the real "?"
+    button, checks it filled, steps a PC with the arrow key and closes it.

@@ -8,7 +8,6 @@ import { useItem } from './game/itemUse';
 import type { SpecialHost } from './game/specials/context';
 import { Location, locsEqual, shiftLoc } from './core/location';
 import { SpellPat } from './data/pattern';
-import { statusName } from './data/statusIcons';
 import { SPELLS, Spell, spellName } from './data/spell';
 import { CastStatus, castableSpells, pcCanCastType } from './game/spellCast';
 import { castSpell } from './game/spellTown';
@@ -19,6 +18,8 @@ import {
 import { takeAp } from './game/combat';
 import { dispatcherMood, jobBoardOffers, openJobBank, takeJob } from './game/jobBank';
 import { alchemyChoices, makePotion } from './game/alchemy';
+import { loadDialogDefs } from './dialogs/dialogStore';
+import { pcInfoDialog } from './dialogs/pcInfoDialog';
 import { trappedMonsters } from './game/soulCrystal';
 import { castTownSpell, startTownTargeting } from './game/spellTarget';
 import { CastDialog } from './dialogs/castDialog';
@@ -88,13 +89,17 @@ async function main(): Promise<void> {
   // Shops name their stock out of the string resources while parsing, so these
   // have to be in place before the scenario loads.
   await loadStringTables(fetchText);
+  // The dialog definitions the player opens. The other ~150 belong to the
+  // scenario and character editors, which this port doesn't run.
+  await loadDialogDefs(fetchText, ['pc-info']);
   const scen = await loadScenario(new FetchSource(`/scenarios/${name}/`), opcodes);
 
   const store = new SheetStore();
   const sheets = [
     ...CHROME_SHEETS,
     'ter1', 'ter2', 'ter3', 'ter4', 'ter5', 'teranim',
-    'dlogbtnlg', 'dlogbtnmed', 'dlogbtnsm', 'dlogbtnled',
+    'dlogbtnlg', 'dlogbtnmed', 'dlogbtnsm', 'dlogbtnled', 'dlogbtnhelp',
+    'dlogbtntall', 'dlgbtnred', 'dlogpics',
   ];
   for (let i = 1; i <= 11; i++) sheets.push(`monst${i}`);
   await Promise.all(sheets.map((s) => store.load(s)));
@@ -527,32 +532,13 @@ async function main(): Promise<void> {
   };
 
   /**
-   * The Info button beside a PC. `give_pc_info` (boe.infodlg.cpp:476) opens
-   * pc-info.xml — a full character sheet with all nineteen skills, the spell
-   * lists and the traits — which needs the dialogxml toolkit. Until that lands
-   * this prints the same information into the transcript, statuses included,
-   * which is what you actually want to know mid-fight.
+   * The Info button beside a PC — `give_pc_info` (boe.infodlg.cpp:476), the
+   * real `pc-info.xml` character sheet, running on the dialogxml toolkit.
+   * The arrows step through the living party members without closing it.
    */
-  const printPcInfo = (which: number): void => {
-    const pc = univ.party.pcs[which];
-    if (!pc) return;
-    univ.addStringToBuf(`${pc.name}:`);
-    univ.addStringToBuf(`  Level ${pc.level}, ${pc.experience} experience.`);
-    univ.addStringToBuf(`  Health ${pc.curHealth}/${pc.maxHealth}, spell points ${pc.curSp}/${pc.maxSp}.`);
-    const skills: string[] = [];
-    for (let i = 0; i < NUM_SKILLS; i++) {
-      const value = pc.skills[i] ?? 0;
-      if (value > 0) skills.push(`${getStr('skills', 1 + i * 2)} ${value}`);
-    }
-    if (skills.length > 0) univ.addStringToBuf(`  ${skills.join(', ')}.`);
-    const effects: string[] = [];
-    for (let s = Status.POISONED_WEAPON; s <= Status.CHARM; s++) {
-      const name = statusName(s, pc.status[s] ?? 0);
-      if (name) effects.push(`${name} (${Math.abs(pc.status[s] ?? 0)})`);
-    }
-    univ.addStringToBuf(effects.length > 0
-      ? `  Affected by: ${effects.join(', ')}.`
-      : '  No effects on this PC.');
+  const showPcInfo = (which: number): void => {
+    if (dialogs.active) return;
+    void dialogs.runScreen(pcInfoDialog(ctx, store, univ, which)).then(() => redraw());
   };
 
   /** `print_cast_status` (boe.party.cpp) — why a PC can't cast, in words. */
@@ -957,7 +943,11 @@ async function main(): Promise<void> {
   };
 
   const router = new InputRouter(canvas, {
-    onMove: (dir) => {
+    onMove: (dir, key) => {
+      // A dialog gets first refusal on the arrows: pc-info.xml's left/right
+      // buttons carry `def-key='left'`/`'right'`, and the router turns those
+      // into movement before `onKey` ever sees them.
+      if (key !== undefined && dialogs.active && dialogs.handleKey(key)) return;
       if (dialogs.active || session.talk || session.shop || midAction()) return;
       const from = session.mode === GameMode.COMBAT || session.missile !== null
         ? univ.currentPc.combatPos
@@ -1000,9 +990,7 @@ async function main(): Promise<void> {
               session.tradePlaces(pcHit.index);
               screen.itemPage = univ.curPc;
             } else {
-              // TODO(M6): give_pc_info's full character sheet is a dialogxml
-              // screen (pc-info.xml); this is the transcript version of it.
-              printPcInfo(pcHit.index);
+              showPcInfo(pcHit.index);
             }
           }
           setStatus();

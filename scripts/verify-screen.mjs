@@ -552,6 +552,56 @@ const mixed = await page.evaluate(() => {
 });
 console.log('ALCHEMY:', JSON.stringify({ alchWho, alchList, mixed }));
 
+// 2e4. The PC info sheet (pc-info.xml) — the first dialog running on the real
+//      dialogxml definitions. Clicking the "?" beside a PC opens it; the
+//      arrows step through the party without closing it.
+const infoAt = await page.evaluate(() => {
+  const sc = window.__screen;
+  for (let y = 0; y < 430; y++)
+    for (let x = 0; x < 605; x++) {
+      const h = sc.pcRowHit(x, y);
+      if (h && h.index === 0 && h.part === 'info') return { x, y };
+    }
+  return null;
+});
+if (infoAt) {
+  const at = await page.evaluate(({ x, y }) => {
+    const canvas = document.querySelector('canvas');
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: r.left + (x + 0.5) * (r.width / canvas.width),
+      y: r.top + (y + 0.5) * (r.height / canvas.height),
+    };
+  }, infoAt);
+  await page.mouse.click(at.x, at.y);
+  await page.waitForTimeout(300);
+}
+const pcInfo = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  if (!d || !d.def) return null;
+  return {
+    name: d.getText('name'),
+    lvl: d.getText('lvl'),
+    hp: d.getText('hp'),
+    lbl1: d.getText('lbl1'),
+    str: d.getText('str'),
+    weapon: d.getText('weap1a'),
+    controls: d.def.controls.length,
+    size: { w: d.frame.right - d.frame.left, h: d.frame.bottom - d.frame.top },
+  };
+});
+await shot('01e4-pc-info');
+await press('ArrowRight');
+await page.waitForTimeout(200);
+const pcInfoNext = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  return d ? { name: d.getText('name'), stillOpen: true } : { stillOpen: false };
+});
+await press('Escape');
+await page.waitForTimeout(200);
+const pcInfoClosed = await page.evaluate(() => !window.__dialogs.active);
+console.log('PC INFO:', JSON.stringify({ at: infoAt, pcInfo, pcInfoNext, pcInfoClosed }));
+
 // 2d. Signs: looking at an adjacent sign opens a dialog with its text.
 const sign = await page.evaluate(async () => {
   const s = window.__session;
@@ -1721,6 +1771,12 @@ const ok =
   // three held-still sprites all draw.
   missileFired.launched.length === 1 &&
   missileFlight.drawn === 3 &&
+  // pc-info.xml: the real definition renders, fills from the PC, steps to the
+  // next party member without closing, and closes on Escape.
+  pcInfo !== null && pcInfo.controls > 50 && pcInfo.name.length > 0 &&
+  pcInfo.lbl1 === 'Strength' && pcInfo.weapon.length > 0 &&
+  pcInfoNext.stillOpen === true && pcInfoNext.name !== pcInfo.name &&
+  pcInfoClosed === true &&
   // Alchemy: the two dialogs come up, the recipe shows its difficulty, and
   // mixing spends the plant and leaves a three-dose potion in the pack.
   alchWho !== null && alchList !== null && alchList.rows.length === 1 &&
