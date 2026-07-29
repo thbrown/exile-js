@@ -73,7 +73,7 @@ Notes for M2 implementer:
 - Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
 - scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
-- `npm test` → 824 tests green (50 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
+- `npm test` → 833 tests green (51 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
 - `node scripts/verify-screen.mjs` (needs `npx vite --port 5199` running) drives the real UI headless and screenshots it. Playwright + chromium installed as devDependency.
 - Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
@@ -2293,3 +2293,71 @@ playthrough will hit it:
     `sight_obscurity >= 5`, so no spell puts a web on a solid wall — only on
     blocked-but-see-through terrain (a fence, a counter) or wherever the
     scenario preset one. Left alone.
+
+- **Two more from the twelfth round: the get-items screen and the trap on the
+  commander's things (2026-07-28).**
+  - **`get-items.xml` is the third real dialogxml call site.** The pick-up
+    screen was a hand-drawn approximation, and it showed: weights were bare
+    grey numbers, the detail line under each name was missing entirely, and the
+    PC buttons had no numerals. `GetItemsDialog` now runs `put_item_graphics`
+    (boe.items.cpp:363) against the real definition, so **"Weight: 3"** is
+    labelled, `interesting_string()` fills the second line of each row
+    ("Not identified.", "Damage: 1-6.", "Blocks 2-5 damage.", "Uses: 4."), and
+    the layout, fonts and colours come from the file rather than from guesses.
+    - `interesting_string` was already ported for the shop; only this screen
+      wasn't asking for it.
+    - **The title was wrong too.** `display_item` has three
+      (boe.items.cpp:548): "Looking in container:", "Getting all **nearby**
+      items:" and "Getting all adjacent items:". The port always said
+      "adjacent". `mass_get` decides — a hostile creature in sight narrows the
+      sweep — so `reachableItems` now returns it alongside the items.
+    - Two toolkit gaps came out of it: `<key/>` in a label (the PC buttons'
+      numerals) is `cControl::KEY_PLACEHOLDER`, filled in **when the control is
+      drawn** rather than when it is parsed, because the code may attach the
+      key later; and `cDialog::addLabelFor` (dialog.cpp:971), the synthesised
+      text control that puts the `*` beside whoever is picking things up. Both
+      are ported.
+    - *Worth knowing*: get-items.xml's keyboard hint really does begin with a
+      stray `=`. `dlogStringFilter` doesn't strip it and nothing else does, so
+      the original draws "=Keyboard:" too. Kept.
+  - **The trap on Commander Terrance's things.** `ONCE_TRAP` was unported: it
+    fell through to `reportUnsupported`, which printed the node's message as a
+    plain notice with an OK **and still set the one-shot flag**, so the trap
+    could never be tried and never came back. `game/trap.ts` ports `run_trap`
+    (boe.townspec.cpp:41) — all thirteen trap kinds and the disarming roll —
+    and the node now does what it should: a **Yes/No question**, then
+    "Trap! Who will disarm?", then the trap.
+    - *Gotcha*: the buttons are `{3, 2}` into `basic_buttons`, which is **No
+      first, Yes second**. Kept, and the port's own basic-trap fallback matches
+      basic-trap.xml, whose Yes/No are also in that order.
+    - *Gotcha*: saying No sets `set_sd = false`, which is exactly why the trap
+      is still there next time — the bug being fixed. So does backing out of
+      the who-disarms prompt.
+    - *Gotcha*: `run_trap` with pc 6 skips the disarm roll altogether and goes
+      straight to the effect; that is how a trap with nobody to disarm it
+      fires.
+    - The C++'s own note that TRAP_SLEEP_RAY actually *paralyses* is kept, and
+      pinned by a test.
+    - `TRAP_CUSTOM` hands the trap level to the chain through reserved pointer
+      15 and jumps, which is the arm that needs `queue_special`; that plumbing
+      was already there from the timers.
+    - **The host's `selectPc` gained the skill to highlight**, since
+      `select_pc` takes one and the disarm prompt wants Disarm Traps shown.
+      While there, the choice dialogs got `basic_buttons`' own keyboard
+      shortcuts — 'y' and 'n' most of all, which nothing had been attaching.
+  - *Gotcha found while testing*: the trap guards a **container**, so surviving
+    it opens the dresser behind it. That is `adj_town_look` running its special
+    first and its container branch second, and it is the sequence the fort was
+    written around.
+  - Tests: `test/trap.test.ts` (9) covers the disarm curve at both ends, the
+    pc-6 path, the paralysis ray, pointer 15, and both answers to the node.
+    `verify-screen.mjs` walks the real thing: it refuses the trap, checks the
+    flag stayed clear, looks again to prove it came back, disarms it, and
+    checks the container behind it opened — and the container step now also
+    asserts the labelled weight and the "Not identified." detail line.
+  - *Gotcha in the harness*: the encounter step's "Monster saw you!" hung on a
+    **single** d100 per turn, taken only while the creature is still IDLE, and
+    the town is hostile by then so it comes over and attacks either way. Any
+    change upstream that moves the RNG could flip it. It re-arms IDLE until the
+    notice actually lands now, so the assertion is about the message existing
+    rather than about one roll.

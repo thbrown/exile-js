@@ -23,6 +23,7 @@ import { loadDialogDefs } from './dialogs/dialogStore';
 import { pcInfoDialog } from './dialogs/pcInfoDialog';
 import { questInfoDialog } from './dialogs/questInfoDialog';
 import { ItemWinMode, QUEST_COMPLETED_OFFSET } from './game/itemWindow';
+import { BASIC_BUTTON_KEYS } from './game/specials/oneshot';
 import { specItemUseable } from './data/quest';
 import { trappedMonsters } from './game/soulCrystal';
 import { castTownSpell, startTownTargeting } from './game/spellTarget';
@@ -95,7 +96,7 @@ async function main(): Promise<void> {
   await loadStringTables(fetchText);
   // The dialog definitions the player opens. The other ~150 belong to the
   // scenario and character editors, which this port doesn't run.
-  await loadDialogDefs(fetchText, ['pc-info', 'quest-info']);
+  await loadDialogDefs(fetchText, ['pc-info', 'quest-info', 'get-items']);
   const scen = await loadScenario(new FetchSource(`/scenarios/${name}/`), opcodes);
 
   const store = new SheetStore();
@@ -290,12 +291,16 @@ async function main(): Promise<void> {
       const picked = await dialogs.runQueued({
         text: title ? `${title}\n\n${text}` : text,
         escapeButton: buttons[0] ?? 'okay',
-        buttons: buttons.map((label) => ({ name: label, label })),
+        // basic_buttons attaches a letter to several of these — 'y'/'n' most
+        // of all — and the choice dialogs are meant to answer to them.
+        buttons: buttons.map((label) => ({
+          name: label, label, key: BASIC_BUTTON_KEYS[label],
+        })),
       });
       return Math.max(0, buttons.indexOf(picked));
     },
     askText: (prompt) => askForText(prompt),
-    selectPc: (prompt) => selectPc('living', prompt),
+    selectPc: (prompt, highlight) => selectPc('living', prompt, highlight),
     startShop: (which, costAdj, shopName) =>
       session.startShopMode(which, costAdj, shopName)
       || session.startShopModeAnyPc(which, costAdj, shopName),
@@ -520,16 +525,17 @@ async function main(): Promise<void> {
     // sight on the floor.
     const inFight = isCombat(session.mode);
     const from = inFight ? univ.currentPc.combatPos : univ.party.townLoc;
-    const reachable = session.reachableItems(from);
+    const { items: reachable, massGet } = session.reachableItems(from);
     if (reachable.length === 0) {
       univ.addStringToBuf('Get: nothing here');
       redraw();
       return;
     }
     // show_get_items: one screen that stays up — pick who is carrying with the
-    // PC buttons, take as many things as you like, then Done.
-    await dialogs.runScreen(
-      new GetItemsDialog(ctx, store, session, reachable, 'Getting all adjacent items:'));
+    // PC buttons, take as many things as you like, then Done. The title says
+    // which sweep it was: a hostile creature in sight narrows it to adjacent.
+    await dialogs.runScreen(new GetItemsDialog(ctx, store, session, reachable,
+      massGet ? 'Getting all nearby items:' : 'Getting all adjacent items:'));
     if (inFight) {
       takeAp(univ, 4);
       session.afterCombatAction();

@@ -1298,10 +1298,14 @@ export class GameSession {
    * The items a "get" at `place` can reach — get_item (boe.items.cpp:258).
    * Adjacent items are always in reach; anything further (up to 4 spaces, in
    * sight) only if no hostile creature is watching.
+   *
+   * `massGet` comes back with them because it is also what titles the dialog:
+   * `display_item` says "Getting all **nearby** items:" when the sweep is on
+   * and "all adjacent items:" when a hostile creature has narrowed it.
    */
-  reachableItems(place: Location): Item[] {
+  reachableItems(place: Location): { items: Item[]; massGet: boolean } {
     const town = this.univ.town;
-    if (!town) return [];
+    if (!town) return { items: [], massGet: false };
     let massGet = true;
     for (const monst of town.monsters)
       if (
@@ -1325,7 +1329,7 @@ export class GameSession {
       if (item.value < 2) item.ident = true;
       found.push(item);
     }
-    return found;
+    return { items: found, massGet };
   }
 
   /**

@@ -462,7 +462,7 @@ const gotItem = await page.evaluate(async () => {
   if (!target) return { skipped: true };
   s.univ.party.townLoc = { ...target.itemLoc };
   s.center = { ...s.univ.party.townLoc };
-  const reachable = s.reachableItems(s.univ.party.townLoc);
+  const reachable = s.reachableItems(s.univ.party.townLoc).items;
   s.takeItem(target, 0);
   window.__redraw();
   return {
@@ -789,6 +789,9 @@ if (backToPack.mode !== 0 || backToPack.scrollMax !== 16) throw new Error('1 did
 // 2f. Searching a container. Fort Talrus's bookshelves and chests hold items
 //     marked "contained", which do_look never lists; adj_town_look is what
 //     opens them. Stand next to one and look at it.
+// These steps walk the party around the fort; put them back afterwards, since
+// the later steps place monsters relative to wherever the party is standing.
+const partyWas = await page.evaluate(() => ({ ...window.__session.univ.party.townLoc }));
 const container = await page.evaluate(() => {
   const s = window.__session;
   const town = s.univ.town;
@@ -802,6 +805,13 @@ const container = await page.evaluate(() => {
     s.center = { ...s.univ.party.townLoc };
     s.updateExplored(s.univ.party.townLoc);
     window.__redraw();
+    // Put an unidentified weapon in with it, so the detail line has something
+    // to say: put_item_graphics shows interesting_string() under each name.
+    town.items.push({
+      ...item, name: 'test blade', fullName: 'Test Blade', ident: false,
+      variety: 14, itemLevel: 6, bonus: 0, charges: 0, weight: 10,
+      itemLoc: { x: at.x, y: at.y }, contained: true, held: true, property: false,
+    });
     const inside = town.items.filter((i) => i.variety !== 0 && i.contained
       && i.itemLoc.x === at.x && i.itemLoc.y === at.y).map((i) => i.name);
     return { at: { ...at }, ter: town.record.terrain[at.x][at.y], inside };
@@ -814,9 +824,16 @@ await press('ArrowUp');
 await page.waitForTimeout(300);
 const searched = await page.evaluate(() => {
   const d = window.__dialogs.active;
+  if (!d) return { rows: null };
   return {
-    title: d && d.title ? d.title : null,
-    rows: d && d.items ? d.items.map((i) => i.name) : null,
+    title: d.dlg.getText('title'),
+    rows: d.items.map((i) => i.name),
+    // The three columns put_item_graphics fills for each row.
+    name1: d.dlg.getText('item1-name'),
+    detail1: d.dlg.getText('item1-detail'),
+    weight1: d.dlg.getText('item1-weight'),
+    detail2: d.dlg.getText('item2-detail'),
+    prompt: d.dlg.getText('prompt'),
     tail: window.__session.univ.transcript.slice(-3),
   };
 });
@@ -825,6 +842,12 @@ console.log('CONTAINER:', JSON.stringify({ container, searched }));
 if (!searched.rows) throw new Error('looking at a container did not open it');
 if (searched.rows.length !== container.inside.length)
   throw new Error(`container held ${container.inside.length} but showed ${searched.rows.length}`);
+if (searched.title !== 'Looking in container:') throw new Error('container title wrong');
+if (!/^Weight: \d+$/.test(searched.weight1)) throw new Error(`weight not labelled: ${searched.weight1}`);
+if (searched.detail2 !== 'Not identified.')
+  throw new Error(`unidentified item's detail line read "${searched.detail2}"`);
+if (!/carrying \d+ out of \d+\.$/.test(searched.prompt))
+  throw new Error(`prompt line wrong: ${searched.prompt}`);
 await press('Escape');
 await page.waitForTimeout(200);
 
@@ -840,6 +863,84 @@ await press('ArrowUp');
 await page.waitForTimeout(250);
 const emptySearch = await page.evaluate(() => window.__session.univ.transcript.slice(-1)[0]);
 console.log('SEARCH NOTHING:', JSON.stringify(emptySearch));
+
+// 2f2. A ONCE_TRAP node asks Yes/No, and walking away leaves it armed. Fort
+//      Talrus node 6 is the trap on Commander Terrance's belongings.
+const trapSetup = await page.evaluate(async () => {
+  const s = window.__session;
+  const town = s.univ.town;
+  const spot = town.record.specialLocs.find((l) => l.spec === 6);
+  if (!spot) return null;
+  const node = town.record.specials.get(6);
+  s.univ.party.townLoc = { x: spot.x, y: spot.y + 1 };
+  s.center = { ...s.univ.party.townLoc };
+  s.updateExplored(s.univ.party.townLoc);
+  window.__redraw();
+  return {
+    at: { x: spot.x, y: spot.y },
+    sd: [node.sd1, node.sd2],
+    sdBefore: s.univ.party.getSdf(node.sd1, node.sd2),
+  };
+});
+if (!trapSetup) throw new Error('Fort Talrus has no ONCE_TRAP node 6');
+await press('l');
+await press('ArrowUp');
+await page.waitForTimeout(300);
+const trapAsked = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  return d ? { buttons: d.spec.buttons.map((b) => b.label), text: d.spec.text.slice(0, 45) } : null;
+});
+// Say No: the one-shot flag stays unset so the trap is still there.
+await press('n');
+await page.waitForTimeout(250);
+const trapRefused = await page.evaluate(() => {
+  const s = window.__session;
+  const node = s.univ.town.record.specials.get(6);
+  return {
+    dialogGone: !window.__dialogs.active,
+    sd: s.univ.party.getSdf(node.sd1, node.sd2),
+  };
+});
+// Look again: it comes back.
+await press('l');
+await press('ArrowUp');
+await page.waitForTimeout(300);
+const trapAgain = await page.evaluate(() => !!window.__dialogs.active);
+// This time try to disarm it.
+await press('y');
+await page.waitForTimeout(300);
+const trapWho = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  return d ? { text: d.spec.text, rows: d.spec.rows.length } : null;
+});
+await press('1');
+await page.waitForTimeout(1500);
+const trapRan = await page.evaluate(() => {
+  const s = window.__session;
+  const node = s.univ.town.record.specials.get(6);
+  const d = window.__dialogs.active;
+  return {
+    // The trap guards a container, so surviving it opens what it was guarding.
+    opened: d && d.dlg ? d.dlg.getText('title') : null,
+    sd: s.univ.party.getSdf(node.sd1, node.sd2),
+    tail: s.univ.transcript.slice(-8),
+  };
+});
+await press('Escape');
+await page.waitForTimeout(200);
+console.log('TRAP:', JSON.stringify({ trapSetup, trapAsked, trapRefused, trapAgain, trapWho, trapRan }));
+if (!trapAsked) throw new Error('the trap node put up no dialog');
+if (trapAsked.buttons.join(',') !== 'No,Yes')
+  throw new Error(`trap buttons were ${trapAsked.buttons.join(',')}`);
+if (trapRefused.sd === 250) throw new Error('refusing the trap still marked it done');
+if (!trapAgain) throw new Error('the trap did not come back after refusing it');
+if (!trapWho || !trapWho.text.startsWith('Trap! Who will disarm?'))
+  throw new Error('disarming did not ask who');
+if (trapRan.opened !== 'Looking in container:')
+  throw new Error(`surviving the trap did not open what it guarded (${trapRan.opened})`);
+if (!trapRan.tail.some((l) => /disarm/i.test(l)))
+  throw new Error(`no disarm result in ${JSON.stringify(trapRan.tail)}`);
+if (trapRan.sd !== 250) throw new Error(`a sprung trap did not mark itself done (sd ${trapRan.sd})`);
 
 // 2g. Bash / Pick Lock / Use insist on plain town mode. Arming Bash twice
 //     cancels; arming it during a conversation is refused.
@@ -863,6 +964,12 @@ console.log('BASH GATE:', JSON.stringify(bashGate));
 if (!bashGate.armed.startsWith('Bash Door: Select')) throw new Error('b did not arm Bash Door');
 if (!bashGate.cancelled.includes('Cancelled')) throw new Error('b again did not cancel Bash Door');
 if (!bashGate.busy.includes('Finish what')) throw new Error('b was accepted mid-look');
+await page.evaluate((was) => {
+  const s = window.__session;
+  s.univ.party.townLoc = { ...was };
+  s.center = { ...was };
+  window.__redraw();
+}, partyWas);
 
 // 2d. Signs: looking at an adjacent sign opens a dialog with its text.
 const sign = await page.evaluate(async () => {
@@ -1332,6 +1439,12 @@ const encounter = await page.evaluate(async () => {
   let noticed = false;
   let hurt = 0;
   for (let i = 0; i < 40 && hurt === 0; i++) {
+    // The notice roll is one d100 per turn, and only while the creature is
+    // still IDLE — the town is already hostile by this point, so it will come
+    // over and attack either way and stop being IDLE the moment it does. Keep
+    // re-arming it until it has actually noticed, or the assertion below is
+    // riding on a single roll landing under 50.
+    if (!noticed) monst.active = 1;
     await s.moveTo({ x: univ.party.townLoc.x, y: univ.party.townLoc.y - 1 });
     await s.moveTo({ x: univ.party.townLoc.x, y: univ.party.townLoc.y + 1 });
     // The monsters' reply to those steps is queued, not immediate — it waits

@@ -230,7 +230,7 @@ describe('picking things up and putting them down', () => {
     const town = session.univ.town!;
     const target = town.items.find((i) => !i.contained)!;
     session.univ.party.townLoc = { ...target.itemLoc };
-    const reachable = session.reachableItems(session.univ.party.townLoc);
+    const { items: reachable } = session.reachableItems(session.univ.party.townLoc);
     expect(reachable).toContain(target);
 
     const before = town.items.length;

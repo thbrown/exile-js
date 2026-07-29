@@ -170,7 +170,7 @@ export class SpecialsEngine {
 
         switch (categoryOf(ctx.curSpec.type)) {
           case SpecCat.GENERAL: await generalSpec(this.univ, ctx, this); break;
-          case SpecCat.ONCE: await oneshotSpec(this.univ, ctx); break;
+          case SpecCat.ONCE: await oneshotSpec(this.univ, ctx, this); break;
           case SpecCat.AFFECT: await affectSpec(this.univ, ctx); break;
           case SpecCat.IF_THEN: await ifThenSpec(this.univ, ctx); break;
           case SpecCat.TOWN: await townSpec(this.univ, ctx); break;

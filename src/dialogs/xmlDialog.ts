@@ -22,8 +22,8 @@ import { terrainGraphic } from '../render/terrainPics';
 import { drawString, drawStringCentre, measureString, wrapLines } from '../render/text';
 import { tilePattern } from '../render/tiling';
 import {
-  ButtonControl, ButtonType, DialogControl, DialogDef, FontSpec, LedControl,
-  LedState, PictControl, PictType, TextControl,
+  ButtonControl, ButtonType, DialogControl, DialogDef, FontSpec, KEY_PLACEHOLDER,
+  LedControl, LedState, PictControl, PictType, TextControl,
 } from './dialogXml';
 import { ModalScreen } from './dialog';
 
@@ -135,6 +135,11 @@ export class XmlDialog implements ModalScreen {
   private picType = new Map<string, PictType>();
   private colour = new Map<string, string>();
   private handlers = new Map<string, (dlg: XmlDialog) => DialogAction>();
+  /** Keys attached at runtime; `def-key` in the definition is separate. */
+  private keys = new Map<string, string>();
+  /** `cDialog::addLabelFor` — a text control synthesised beside another. */
+  private labels = new Map<string, { text: string; bold: boolean }>();
+  private labelPos = new Map<string, { where: 'left' | 'right' | 'above' | 'below'; offset: number }>();
   /** The control the pointer is holding down, drawn pressed. */
   private pressed: string | null = null;
 
@@ -270,6 +275,30 @@ export class XmlDialog implements ModalScreen {
    * `attachClickHandler`. Without one, clicking a control closes the dialog and
    * hands its name back — which is what the majority of the game's buttons do.
    */
+  /**
+   * `me[id].attachKey({...})` — a shortcut the *code* attaches rather than the
+   * definition. get-items.xml's eight rows get 'a'-'h' this way.
+   */
+  attachKey(name: string, key: string): this {
+    this.keys.set(name, key.toLowerCase());
+    return this;
+  }
+
+  /**
+   * `cDialog::addLabelFor` (dialog.cpp:971) — a small text label placed against
+   * one edge of a control. `offset` is doubled, as the C++ doubles it, and the
+   * label inherits the control's colour except that a button on a dark
+   * background takes the default text colour instead.
+   */
+  setLabel(
+    name: string, text: string, where: 'left' | 'right' | 'above' | 'below' = 'left',
+    offset = 7, bold = false,
+  ): this {
+    this.labels.set(name, { text, bold });
+    this.labelPos.set(name, { where, offset });
+    return this;
+  }
+
   attachHandler(name: string, fn: (dlg: XmlDialog) => DialogAction): this {
     this.handlers.set(name, fn);
     return this;
@@ -293,6 +322,8 @@ export class XmlDialog implements ModalScreen {
     if (!wanted) return null;
     for (const control of this.clickable()) {
       if (control.defKey === wanted) return this.activate(control.name);
+      if (control.name && this.keys.get(control.name) === wanted)
+        return this.activate(control.name);
     }
     return null;
   }
@@ -382,7 +413,50 @@ export class XmlDialog implements ModalScreen {
         case 'line': this.drawLine(control); break;
         default: break;
       }
+      if (control.name && this.labels.has(control.name)) this.drawLabel(control);
     }
+  }
+
+  /**
+   * `cButton::draw` (button.cpp:88) — the `<key/>` placeholder in a label is
+   * replaced with the control's shortcut when it is drawn, not when it is
+   * parsed, because the code may attach the key afterwards.
+   */
+  private fillKey(control: DialogControl, label: string): string {
+    if (!label.includes(KEY_PLACEHOLDER)) return label;
+    const key = (control.name ? this.keys.get(control.name) : undefined) ?? control.defKey ?? '';
+    return label.split(KEY_PLACEHOLDER).join(key);
+  }
+
+  /** The label `addLabelFor` places beside a control. */
+  private drawLabel(control: DialogControl): void {
+    const label = this.labels.get(control.name)!;
+    if (!label.text) return;
+    const { where, offset } = this.labelPos.get(control.name)
+      ?? { where: 'left' as const, offset: 7 };
+    const b = this.screenRect(control);
+    let rect: UiRect;
+    switch (where) {
+      case 'right': rect = { ...b, left: b.right, right: b.right + 2 * offset }; break;
+      case 'above': rect = { ...b, bottom: b.top, top: b.top - 2 * offset }; break;
+      case 'below': rect = { ...b, top: b.bottom, bottom: b.bottom + 2 * offset }; break;
+      case 'left':
+      default: rect = { ...b, right: b.left, left: b.left - 2 * offset }; break;
+    }
+    // The label is grown to at least 14px tall and nudged down otherwise, as
+    // addLabelFor does before it places the control.
+    const h = rect.bottom - rect.top;
+    if (h < 14) {
+      const expand = Math.trunc((14 - h) / 2) + 1;
+      rect = { ...rect, top: rect.top - expand, bottom: rect.bottom + expand };
+    } else {
+      const by = Math.trunc(h / 6);
+      rect = { ...rect, top: rect.top + by, bottom: rect.bottom + by };
+    }
+    drawString(this.ctx, rect, label.text, {
+      size: 12, font: label.bold ? 'bold' : 'plain',
+      colour: this.colour.get(control.name) ?? DEF_TEXT,
+    });
   }
 
   private style(font: FontSpec, name: string): { font: 'plain' | 'bold' | 'dungeon' | 'maidenword'; size: number; colour: string } {
@@ -416,7 +490,7 @@ export class XmlDialog implements ModalScreen {
     const rect = this.screenRect(control);
     if (control.framed) this.drawFrame(rect);
     const style = this.style(control.font, control.name);
-    const text = this.getText(control.name) || control.text;
+    const text = this.fillKey(control, this.getText(control.name) || control.text);
     if (!text) return;
     // A message wraps inside its own rect, which is what gives the multi-line
     // blocks in the game's dialogs their shape.
@@ -457,8 +531,8 @@ export class XmlDialog implements ModalScreen {
       this.ctx.fillStyle = Colours.GREY;
       this.ctx.fillRect(rect.left, rect.top, width(rect), height(rect));
     }
-    const label = this.getText(control.name)
-      || (control.type === 'done' ? DONE_LABEL : control.label);
+    const label = this.fillKey(control, this.getText(control.name)
+      || (control.type === 'done' ? DONE_LABEL : control.label));
     if (!label) return;
     // The face text is black and centred, at 12pt unless the button says
     // otherwise (a tiny button is 9, a push button 10).

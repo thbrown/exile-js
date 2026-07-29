@@ -174,11 +174,15 @@ function parseBase(el: Element): Base {
 }
 
 /**
- * A `<text>`/`<button>` body: text nodes with `<br/>` breaks between them. The
- * C++'s `<key ref=…/>` element inlines another control's shortcut into the
- * label; it is read as its ref so the caller can substitute, since nothing in
- * the player's dialogs relies on the substitution itself.
+ * A `<text>`/`<button>` body: text nodes with `<br/>` breaks between them.
+ * `<key ref=…/>` inlines another control's shortcut; a bare `<key/>` means the
+ * control's own, which is only known once the code has attached it, so it is
+ * left as a placeholder for the drawing pass to fill in.
  */
+
+/** cControl::KEY_PLACEHOLDER (control.hpp:123) — stands in for the shortcut. */
+export const KEY_PLACEHOLDER = '\u0007';
+
 function readLabel(el: Element): string {
   let out = '';
   for (let i = 0; i < el.childNodes.length; i++) {
@@ -187,7 +191,10 @@ function readLabel(el: Element): string {
     else if (node.nodeType === 1) {
       const child = node as Element;
       if (tag(child) === 'br') out += '\n';
-      else if (tag(child) === 'key') out += attr(child, 'ref') ?? '';
+      // `<key/>` stands for the control's own shortcut, filled in at draw
+      // time — `cControl::KEY_PLACEHOLDER` (control.hpp:123) is a literal BEL
+      // in the label for exactly this, and the same character is used here.
+      else if (tag(child) === 'key') out += attr(child, 'ref') ?? KEY_PLACEHOLDER;
     }
   }
   // The files indent their markup, so a label spans lines with leading tabs.

@@ -9,6 +9,7 @@
 import { Location } from '../../core/location';
 import { SpecType, SpecialNode } from '../../data/special';
 import type { GameSession } from '../session';
+import type { Skill } from '../../universe/skills';
 
 /** eSpecCtx (special.hpp:135) — what caused this chain to run. */
 export enum SpecCtx {
@@ -67,7 +68,12 @@ export interface SpecialHost {
   /** get_text_response — a typed answer, for IF_TEXT_RESPONSE. */
   askText(prompt: string): Promise<string>;
   /** select_pc, for the nodes that need a specific party member. */
-  selectPc(prompt: string): Promise<number>;
+  /**
+   * `select_pc(ONLY_LIVING, prompt, skill)`. `highlight` is the skill the
+   * dialog shows and marks the best value of — the disarm roll picks a PC by
+   * Disarm Traps, for instance.
+   */
+  selectPc(prompt: string, highlight?: Skill): Promise<number>;
   /** start_shop_mode, for ENTER_SHOP. */
   startShop(which: number, costAdj: number, name: string): boolean;
   /** start_talk_mode, for START_TALK. */

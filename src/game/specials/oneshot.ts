@@ -12,9 +12,12 @@ import { SpecType } from '../../data/special';
 import { Universe } from '../../universe/universe';
 import { GiveStatus, giveItem } from '../../universe/inventory';
 import { MainStatus } from '../../universe/skills';
-import { SpecialCtx } from './context';
-import { handleMessage } from './vm';
+import { SpecCtxType, SpecialCtx } from './context';
+import { SpecialsEngine, handleMessage } from './vm';
 import { reportUnsupported } from './general';
+import { isCombat } from '../modes';
+import { Skill } from '../../universe/skills';
+import { TrapType, runTrap } from '../trap';
 
 /** The sentinel meaning "this one-shot has fired". */
 export const ONCE_DONE = 250;
@@ -30,6 +33,16 @@ export const BASIC_BUTTONS = [
   'Train', 'Heal Party', 'Bash Door', 'Pick Lock', 'Record', 'Climb', 'Restore', 'Restart',
   'Create', 'Choose', 'Go Back',
 ];
+
+/**
+ * The keyboard shortcuts `basic_buttons` attaches to the ones that have them
+ * (basicbtns.cpp:18). Done and OK take Enter and Cancel takes Escape, both of
+ * which the generic dialog already handles, so only the letters are listed.
+ */
+export const BASIC_BUTTON_KEYS: Record<string, string> = {
+  Yes: 'y', No: 'n', Keep: 'k', Get: 'g',
+  '1': '1', '2': '2', '3': '3', '4': '4', '5': '5', '6': '6',
+};
 
 function buttonLabel(index: number): string {
   return BASIC_BUTTONS[index] ?? 'OK';
@@ -65,7 +78,9 @@ function forcedGive(univ: Universe, itemIndex: number): boolean {
   return false;
 }
 
-export async function oneshotSpec(univ: Universe, ctx: SpecialCtx): Promise<void> {
+export async function oneshotSpec(
+  univ: Universe, ctx: SpecialCtx, engine: SpecialsEngine,
+): Promise<void> {
   const spec = ctx.curSpec;
   const { party } = univ;
   let checkMess = true;
@@ -187,10 +202,55 @@ export async function oneshotSpec(univ: Universe, ctx: SpecialCtx): Promise<void
       break;
 
     case SpecType.ONCE_OUT_ENCOUNTER:
-    case SpecType.ONCE_TRAP:
-      // TODO(M5): outdoor encounters and traps need combat.
+      // TODO(M5): place_outd_wand_monst for one of the four special encounters.
       reportUnsupported(univ, spec.type);
       break;
+
+    case SpecType.ONCE_TRAP: {
+      checkMess = false;
+      // "You've found a trap. Do you want to try to disarm it?" — a *choice*,
+      // not a notice, and note the buttons are No first, Yes second.
+      let refused: boolean;
+      if (spec.m1 >= 0 || spec.m2 >= 0) {
+        const strs = messageRun(univ, ctx, spec.m1);
+        if (spec.m2 >= 0) strs.push(...messageRun(univ, ctx, spec.m2));
+        refused = await ctx.host.choice(
+          strs, [buttonLabel(3), buttonLabel(2)], '', spec.pic, spec.pictype) === 0;
+      } else {
+        // basic-trap.xml: the stock question, with its own picture (dlog 27)
+        // and Yes/No the other way round from the custom-message branch.
+        refused = await ctx.host.choice(
+          ["You think you've found a trap.\nDo you try to disarm it?"],
+          ['No', 'Yes'], '', 27, 0) === 0;
+      }
+      if (refused) {
+        // Walking away leaves the one-shot flag unset, so the trap is still
+        // there next time. This is what made the node fire only once.
+        setSd = false;
+        ctx.nextSpec = -1;
+        ctx.retA = 1;
+        break;
+      }
+      let who = univ.curPc;
+      if (!isCombat(ctx.session.mode)) {
+        who = await ctx.host.selectPc('Trap! Who will disarm?', Skill.DISARM_TRAPS);
+        if (who < 0 || who >= 6) {
+          ctx.retA = 1;
+          setSd = false;
+          break;
+        }
+      }
+      const disarmed = await runTrap(ctx.session, who, spec.ex1a as TrapType, spec.ex1b, spec.ex2a);
+      // A custom trap that went off hands over to the scenario's own chain.
+      if (!disarmed && spec.ex1a === TrapType.CUSTOM) {
+        if (spec.jumpto >= 0)
+          engine.queueSpecial(ctx.whichMode, ctx.curSpecType, spec.jumpto,
+            { x: party.getPtr(10), y: party.getPtr(11) });
+        ctx.nextSpec = spec.ex2b;
+        ctx.nextSpecType = SpecCtxType.SCEN;
+      }
+      break;
+    }
 
     default:
       reportUnsupported(univ, spec.type);
