@@ -286,8 +286,13 @@ describe('pc-info, the first converted call site', () => {
     expect(dlg.getText('hp')).toBe(`${pc.curHealth} out of ${pc.maxHealth}.`);
     expect(dlg.getText('str')).toBe(String(pc.skills[0]));
     expect(dlg.getText('weight')).toContain('is carrying');
-    // Nothing equipped, so both weapon blocks say so.
-    expect(dlg.getText('weap1a')).toBe('No weapon.');
+    // `finish_create` gives a human PC a Bronze Knife (bonus 1) and equips it,
+    // so the first weapon block is filled in. The stray percent sign in front
+    // of the number is the C++'s (boe.infodlg.cpp:428).
+    expect(dlg.getText('weap1a')).toBe('Bonus to hit: +%5');
+    expect(dlg.getText('weap1b')).toBe('Damage: (1-4) + 2');
+    // The buckler in slot 1 is armour, so the second weapon block stays empty.
+    expect(dlg.getText('weap2a')).toBe('No weapon.');
   });
 
   it('steps through the living party members without closing', () => {

@@ -7,7 +7,7 @@
 
 import { Direction, Location, loc, percent } from '../core/location';
 import { GameRng } from '../core/rng';
-import { Item, ItemAbil, defaultItem } from '../data/item';
+import { Item, ItemAbil, ItemPreset, defaultItem, presetItem } from '../data/item';
 import { getProtLevel, hasAbilEquip } from './inventory';
 import { Living, SpellNote, livingSound, printResult } from './living';
 import { Party } from './party';
@@ -419,6 +419,74 @@ export class Player extends Living {
     this.status[Status.DISEASE] = 0;
     if ((this.status[Status.DUMB] ?? 0) > 0) this.status[Status.DUMB] = 0;
     this.status[Status.MARTYRS_SHIELD] = 8;
+  }
+
+  /**
+   * `cPlayer::finish_create` (pc.cpp:947) — the step that turns a PC who has
+   * picked a race and spent their points into one who can walk into a dungeon.
+   * It hands out the starting gear, applies the racial stat bonuses and pays
+   * the spellcaster's bonus spell points.
+   *
+   * The C++ runs it from two places: `create_pc` when a PC joins a party
+   * that's already playing, and `start_new_game`'s "everyone gets a weapon"
+   * loop (boe.actions.cpp:3789) once party building is over — which is why
+   * `cPlayer(PARTY_DEFAULT, slot)` itself leaves the pack empty. Building the
+   * preset party is *not* enough; this has to run over it.
+   */
+  finishCreate(): void {
+    switch (this.race) {
+      case Race.HUMAN:
+        this.items[0] = presetItem(ItemPreset.KNIFE);
+        this.items[1] = presetItem(ItemPreset.BUCKLER);
+        break;
+      case Race.NEPHIL:
+        this.items[0] = presetItem(ItemPreset.BOW);
+        this.items[1] = presetItem(ItemPreset.ARROW);
+        break;
+      case Race.SLITH:
+        this.items[0] = presetItem(ItemPreset.POLEARM);
+        this.items[1] = presetItem(ItemPreset.HELM);
+        break;
+      case Race.VAHNATAI:
+        this.items[0] = presetItem(ItemPreset.ROBE);
+        this.items[1] = presetItem(ItemPreset.RAZORDISK);
+        break;
+      default:
+        // Unreachable for a PC: only the Create PC node makes other races,
+        // and it doesn't come through here.
+        break;
+    }
+    // Both slots are equipped outright, whatever they are — note that means a
+    // nephil walks in with their arrows equipped, which is what a bow wants.
+    this.equip[0] = true;
+    this.equip[1] = true;
+
+    if (this.race === Race.NEPHIL) {
+      this.skills[Skill.DEXTERITY] = (this.skills[Skill.DEXTERITY] ?? 0) + 2;
+    }
+    if (this.race === Race.SLITH) {
+      this.skills[Skill.STRENGTH] = (this.skills[Skill.STRENGTH] ?? 0) + 2;
+      this.skills[Skill.INTELLIGENCE] = (this.skills[Skill.INTELLIGENCE] ?? 0) + 1;
+    }
+    if (this.race === Race.VAHNATAI) {
+      this.skills[Skill.INTELLIGENCE] = (this.skills[Skill.INTELLIGENCE] ?? 0) + 2;
+      // The vahnatai signature spells, if they can cast at all.
+      if ((this.skills[Skill.MAGE_SPELLS] ?? 0) >= 4) {
+        this.mageSpells[34] = true;
+        this.mageSpells[35] = true;
+      }
+    }
+
+    this.maxSp += (this.skills[Skill.MAGE_SPELLS] ?? 0) * 3
+      + (this.skills[Skill.PRIEST_SPELLS] ?? 0) * 3;
+    this.curSp = this.maxSp;
+
+    // An Anama who trained in mage spells gets those points back — but only
+    // here, so they keep the bonus spell points the training just bought.
+    if (this.traits[Trait.ANAMA] && (this.skills[Skill.MAGE_SPELLS] ?? 0) > 0) {
+      this.skillPts += 6 * (this.skills[Skill.MAGE_SPELLS] ?? 0);
+      this.skills[Skill.MAGE_SPELLS] = 0;
+    }
   }
 
   /** cPlayer::void_sanctuary (pc.cpp:122) — and it tells you. */

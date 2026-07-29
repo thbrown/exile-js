@@ -209,6 +209,16 @@ export class GameSession {
    * when the party walks out.
    */
   startNewGame(): void {
+    // "Everyone gets a weapon" (boe.actions.cpp:3789). In the C++ this is the
+    // tail of `start_new_game`, which runs once party building is over and
+    // before a scenario is even chosen — the `cPlayer(PARTY_DEFAULT, slot)`
+    // constructor deliberately leaves the pack empty, so without this the
+    // pregens walk in barehanded, three of them short their bonus spell
+    // points and the slith and nephil short their racial stat bonuses. This
+    // port has no party editor, so `startNewGame` is where the two steps meet.
+    for (const pc of this.univ.party.pcs) {
+      if (pc.mainStatus === MainStatus.ALIVE) pc.finishCreate();
+    }
     this.univ.addStringToBuf(`Welcome to ${this.univ.scenario.title}.`);
     // The forced square is the point of entry_dir 9: without it the party
     // lands on whichever town entrance `startLocs` happens to list first,

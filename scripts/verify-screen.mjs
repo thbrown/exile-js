@@ -127,9 +127,19 @@ const start = await page.evaluate(async () => {
     place: s.locationName(),
     monsters: s.univ.town?.monsters.filter((m) => m.isAlive).length,
     party: s.univ.party.pcs.map((p) => `${p.name}:${p.curHealth}/${p.maxHealth}`),
+    // finish_create's racial starting gear, both slots equipped.
+    gear: s.univ.party.pcs.map(
+      (p) => `${p.items[0].name}${p.equip[0] ? '*' : ''}/${p.items[1].name}${p.equip[1] ? '*' : ''}`),
+    sp: s.univ.party.pcs.map((p) => p.maxSp),
   };
 });
 console.log('START:', JSON.stringify(start));
+if (start.gear[0] !== 'Knife*/Buckler*' || start.gear[1] !== 'Spear*/Helm*'
+  || start.gear[2] !== 'Bow*/Arrows*')
+  throw new Error(`the party started without its gear: ${start.gear.join(' ')}`);
+// The three casters' bonus spell points: three per level of either skill.
+if (start.sp[3] !== 29 || start.sp[5] !== 30)
+  throw new Error(`bonus spell points missing: ${start.sp.join(',')}`);
 
 // 2b. Talk to a townsperson: the talk screen replaces the left column, the
 //     reply's keywords are clickable, and Done returns to town mode.

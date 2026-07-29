@@ -36,6 +36,12 @@ beforeAll(async () => {
 function inTown(): GameSession {
   const s = new GameSession(new Universe(scen, new GameRng(), PartyPreset.DEFAULT));
   s.startNewGame();
+  // These tests place items in known slots, so they start from an empty pack.
+  // `finish_create` fills slots 0 and 1 with the PC's racial starting gear.
+  for (const pc of s.univ.party.pcs) {
+    pc.items = pc.items.map(() => defaultItem());
+    pc.equip.fill(false);
+  }
   return s;
 }
 

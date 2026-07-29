@@ -2431,3 +2431,39 @@ playthrough will hit it:
   - Tests: `test/trap.test.ts` gained two — that the prompt is m1 alone, and
     that setting m2 adds exactly one more string. `verify-screen.mjs`'s trap
     step now fails if the dialog text reaches "leave the scenario".
+
+- **The party walked in barehanded: `finish_create` (2026-07-28).** Reported
+  from play-testing, and correct — the pregens had no gear, three of the six
+  were short their bonus spell points and the slith and nephil were short their
+  racial stat bonuses. The cause is easy to miss: `cPlayer(PARTY_DEFAULT, slot)`
+  ends with an explicit `std::fill(items.begin(), items.end(), cItem())`, so the
+  preset really does leave the pack empty. The gear comes from
+  `cPlayer::finish_create` (pc.cpp:947), which `start_new_game` runs over the
+  whole party afterwards under a comment reading "everyone gets a weapon"
+  (boe.actions.cpp:3789). This port had ported the constructor and not the
+  loop.
+  - `data/item.ts` gains `ItemPreset` and `presetItem` — the `cItem(eItemPreset)`
+    constructor (item.cpp:233) in full, all fourteen. `shop.ts`'s hand-rolled
+    `spellItem` was the only preset the port had.
+  - `Player.finishCreate` hands out the gear by race — human knife + buckler,
+    nephil bow + arrows, slith spear + helm, vahnatai robes + razordisks — with
+    **both slots equipped outright**, applies the racial stat bonuses (+2 DEX
+    nephil, +2 STR/+1 INT slith, +2 INT vahnatai and the two vahnatai signature
+    spells at mage 4), pays three spell points per level of either casting
+    skill, and refunds an Anama's mage training *after* those points are
+    counted.
+  - This port has no party editor, so the loop lives at the top of
+    `GameSession.startNewGame`. In the C++ it is one step earlier — before a
+    scenario is even chosen — which is why `create_pc` skips it during startup
+    and does it itself for a PC joining a party that's already playing.
+  - **This moves the RNG stream for everything downstream**: `total_encumbrance`
+    rolls once per equipped item, so an armed party rolls differently from a
+    bare one from the first combat turn onward. `verify-screen` passes with a
+    completely different fingerprint, which is expected and not a regression.
+    Four test fixtures now empty the packs on purpose — `inventory`, `itemUse`
+    and `missiles` place items in known slots, and `missiles` also needed the
+    *other five* PCs stripped to keep its rolls.
+  - Tests: `test/session.test.ts` covers all three races' gear, the stat
+    bonuses and the spell-point maths, and pins that the constructor alone
+    still leaves the pack empty. `verify-screen.mjs`'s start step now fails if
+    the party is unarmed or the casters' pools are unbumped.

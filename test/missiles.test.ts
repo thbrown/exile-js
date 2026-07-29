@@ -35,6 +35,13 @@ beforeAll(async () => {
 function inTown(): GameSession {
   const s = new GameSession(new Universe(scen, new GameRng(), PartyPreset.DEFAULT));
   s.startNewGame();
+  // `armWith` controls PC 0's pack, but the other five would still be carrying
+  // the gear `finish_create` hands out — and `total_encumbrance` rolls once per
+  // equipped item, so leaving it on shifts the RNG stream these tests read.
+  for (const pc of s.univ.party.pcs) {
+    pc.items = pc.items.map(() => defaultItem());
+    pc.equip.fill(false);
+  }
   return s;
 }
 

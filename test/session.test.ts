@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { Direction } from '../src/core/location';
 import { GameRng } from '../src/core/rng';
 import { FieldType } from '../src/data/fields';
+import { ItemType } from '../src/data/item';
 import { SECTOR_SIZE } from '../src/data/outdoors';
 import { Scenario } from '../src/data/scenario';
 import { SpecType, emptySpecialNode } from '../src/data/special';
@@ -17,7 +18,7 @@ import { buildOpcodeTable } from '../src/fileio/specialParse';
 import { OUT_HALF_DIM } from '../src/universe/curOut';
 import { TOWN_NUM_OUTDOORS } from '../src/universe/party';
 import { PartyPreset } from '../src/universe/player';
-import { MainStatus, Status } from '../src/universe/skills';
+import { MainStatus, Race, Skill, Status, Trait } from '../src/universe/skills';
 import { Universe } from '../src/universe/universe';
 
 const opcodes = buildOpcodeTable(
@@ -55,6 +56,43 @@ describe('party setup', () => {
     expect(univ.party.gold).toBe(200);
     expect(univ.party.food).toBe(100);
     expect(univ.party.calcDay()).toBe(1);
+  });
+
+  it('arms the party in finish_create, which the preset ctor leaves undone', async () => {
+    // `cPlayer(PARTY_DEFAULT, slot)` explicitly empties the pack; the gear
+    // comes from `finish_create`, which start_new_game runs over the whole
+    // party (boe.actions.cpp:3789). So the constructor alone leaves them bare.
+    const bare = newSession();
+    expect(bare.univ.party.pcs[0]!.items[0]!.variety).toBe(ItemType.NO_ITEM);
+
+    const s = newSession();
+    s.startNewGame();
+    const [jenneke, thissa, frrrrrr, adrianna] = s.univ.party.pcs;
+    // Human: knife and buckler, both equipped.
+    expect(jenneke!.race).toBe(Race.HUMAN);
+    expect(jenneke!.items[0]!.name).toBe('Knife');
+    expect(jenneke!.items[1]!.name).toBe('Buckler');
+    expect(jenneke!.equip[0]).toBe(true);
+    expect(jenneke!.equip[1]).toBe(true);
+    // Slith: spear and helm, +2 strength and +1 intelligence.
+    expect(thissa!.race).toBe(Race.SLITH);
+    expect(thissa!.items[0]!.name).toBe('Spear');
+    expect(thissa!.items[1]!.name).toBe('Helm');
+    expect(thissa!.skills[Skill.STRENGTH]).toBe(10);
+    expect(thissa!.skills[Skill.INTELLIGENCE]).toBe(3);
+    // Nephil: bow and arrows, +2 dexterity.
+    expect(frrrrrr!.race).toBe(Race.NEPHIL);
+    expect(frrrrrr!.items[0]!.name).toBe('Bow');
+    expect(frrrrrr!.items[1]!.name).toBe('Arrows');
+    expect(frrrrrr!.items[1]!.charges).toBe(12);
+    expect(frrrrrr!.skills[Skill.DEXTERITY]).toBe(8);
+    // Three spell points per level of either casting skill, on top of the
+    // preset's own pool — Adrianna's 20 plus three mage levels.
+    expect(adrianna!.skills[Skill.MAGE_SPELLS]).toBe(3);
+    expect(adrianna!.maxSp).toBe(29);
+    expect(adrianna!.curSp).toBe(29);
+    // Nobody in the pregen party is Anama, so nothing is refunded.
+    expect(s.univ.party.pcs.some((pc) => pc.traits[Trait.ANAMA])).toBe(false);
   });
 
   it('places the outdoor window on the scenario start sector', async () => {

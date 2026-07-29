@@ -5,7 +5,7 @@
  */
 
 import { SPELLS, Spell, SpellWhen } from './spell';
-import { PartyStatus, Status } from '../universe/skills';
+import { PartyStatus, Skill, Status } from '../universe/skills';
 
 export enum ItemType {
   NO_ITEM = 0,
@@ -201,6 +201,151 @@ export function defaultItem(): Item {
     rechargeable: false,
     desc: '',
   };
+}
+
+/**
+ * `eItemPreset` (item.hpp:27) and the `cItem(eItemPreset)` constructor
+ * (item.cpp:233) — the handful of items the game builds in code rather than
+ * reading from a scenario. `finish_create` uses the first eight; the shop
+ * builds ITEM_SPELL and ITEM_POTION.
+ */
+export enum ItemPreset {
+  KNIFE, BUCKLER, BOW, ARROW, POLEARM, HELM, ROBE, RAZORDISK,
+  FOOD, SPELL, POTION, DEBUG_HEAVY, SPECIAL, SHOP,
+}
+
+export function presetItem(preset: ItemPreset): Item {
+  const it = defaultItem();
+  switch (preset) {
+    case ItemPreset.KNIFE:
+      it.variety = ItemType.ONE_HANDED;
+      it.itemLevel = 4;
+      it.bonus = 1;
+      it.weapType = Skill.EDGED_WEAPONS;
+      it.graphicNum = 55;
+      it.value = 2;
+      it.weight = 7;
+      it.fullName = 'Bronze Knife';
+      it.name = 'Knife';
+      it.ident = true;
+      break;
+    case ItemPreset.BUCKLER:
+      it.variety = ItemType.SHIELD;
+      it.itemLevel = 1;
+      it.awkward = 1;
+      it.graphicNum = 75;
+      it.value = 2;
+      it.weight = 20;
+      it.fullName = 'Crude Buckler';
+      it.name = 'Buckler';
+      it.ident = true;
+      break;
+    case ItemPreset.BOW:
+      it.variety = ItemType.BOW;
+      it.weapType = Skill.ARCHERY;
+      it.graphicNum = 10;
+      it.value = 15;
+      it.weight = 20;
+      it.fullName = 'Cavewood Bow';
+      it.name = 'Bow';
+      it.ident = true;
+      break;
+    case ItemPreset.ARROW:
+      it.variety = ItemType.ARROW;
+      it.itemLevel = 12;
+      it.charges = 12;
+      it.graphicNum = 57;
+      it.typeFlag = 6;
+      it.missile = 3;
+      it.value = 1;
+      it.weight = 1;
+      it.fullName = 'Arrows';
+      it.name = 'Arrows';
+      it.ident = true;
+      break;
+    case ItemPreset.POLEARM:
+      it.variety = ItemType.TWO_HANDED;
+      it.itemLevel = 9;
+      it.weapType = Skill.POLE_WEAPONS;
+      it.graphicNum = 4;
+      it.value = 10;
+      it.weight = 20;
+      it.fullName = 'Stone Spear';
+      it.name = 'Spear';
+      it.ident = true;
+      break;
+    case ItemPreset.HELM:
+      it.variety = ItemType.HELM;
+      it.itemLevel = 1;
+      it.graphicNum = 76;
+      it.value = 6;
+      it.weight = 15;
+      it.fullName = 'Leather Helm';
+      it.name = 'Helm';
+      it.ident = true;
+      break;
+    case ItemPreset.ROBE:
+      it.variety = ItemType.ARMOR;
+      it.itemLevel = 2;
+      it.graphicNum = 18;
+      it.value = 8;
+      it.weight = 10;
+      it.fullName = 'Vahnatai Robes';
+      it.name = 'Robes';
+      it.ident = true;
+      break;
+    case ItemPreset.RAZORDISK:
+      it.variety = ItemType.THROWN_MISSILE;
+      it.itemLevel = 9;
+      it.bonus = 1;
+      it.charges = 8;
+      it.weapType = Skill.THROWN_MISSILES;
+      it.graphicNum = 59;
+      it.typeFlag = 9;
+      it.missile = 7;
+      it.value = 10;
+      it.weight = 1;
+      it.fullName = 'Iron Razordisks';
+      it.name = 'Razordisks';
+      it.ident = true;
+      break;
+    case ItemPreset.FOOD:
+      it.variety = ItemType.FOOD;
+      it.graphicNum = 72;
+      it.fullName = 'Food';
+      it.name = 'Food';
+      break;
+    case ItemPreset.SPELL:
+      it.variety = ItemType.NON_USE_OBJECT;
+      it.graphicNum = 63;
+      break;
+    case ItemPreset.POTION:
+      it.variety = ItemType.POTION;
+      it.charges = 1;
+      it.graphicNum = 60;
+      it.weight = 8;
+      it.fullName = 'Potion';
+      it.name = 'Potion';
+      it.magic = true;
+      break;
+    case ItemPreset.DEBUG_HEAVY:
+      it.variety = ItemType.NON_USE_OBJECT;
+      it.fullName = it.name = 'Debug heavy item';
+      it.ident = true;
+      it.weight = 300;
+      break;
+    case ItemPreset.SPECIAL:
+      // Falls through to SHOP in the C++, so it gets the blank graphic too.
+      it.itemLevel = -1;
+      it.fullName = 'Call Special Node';
+      it.graphicNum = 105;
+      break;
+    case ItemPreset.SHOP:
+      it.graphicNum = 105; // the blank graphic
+      break;
+  }
+  it.maxCharges = it.charges;
+  return it;
 }
 
 // min_defense_bonus / max_defense_bonus (item.cpp:110).

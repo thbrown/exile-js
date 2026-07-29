@@ -41,6 +41,13 @@ function newSession(): GameSession {
   const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
   const session = new GameSession(univ);
   session.startNewGame();
+  // These tests are about the pack's mechanics, so they start from an empty
+  // one. `finish_create` gives every PC their racial starting gear in slots 0
+  // and 1, which would shift every index and weight below.
+  for (const pc of univ.party.pcs) {
+    pc.items = pc.items.map(() => defaultItem());
+    pc.equip.fill(false);
+  }
   return session;
 }
 
