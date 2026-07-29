@@ -6,6 +6,7 @@
 import { animAt, animSchedule, combatPace, setCombatPace } from './game/anim';
 import { useItem } from './game/itemUse';
 import type { SpecialHost } from './game/specials/context';
+import { SpecCtx, SpecCtxType } from './game/specials/context';
 import { Location, locsEqual, shiftLoc } from './core/location';
 import { SpellPat } from './data/pattern';
 import { SPELLS, Spell, spellName } from './data/spell';
@@ -20,6 +21,9 @@ import { dispatcherMood, jobBoardOffers, openJobBank, takeJob } from './game/job
 import { alchemyChoices, makePotion } from './game/alchemy';
 import { loadDialogDefs } from './dialogs/dialogStore';
 import { pcInfoDialog } from './dialogs/pcInfoDialog';
+import { questInfoDialog } from './dialogs/questInfoDialog';
+import { ItemWinMode, QUEST_COMPLETED_OFFSET } from './game/itemWindow';
+import { specItemUseable } from './data/quest';
 import { trappedMonsters } from './game/soulCrystal';
 import { castTownSpell, startTownTargeting } from './game/spellTarget';
 import { CastDialog } from './dialogs/castDialog';
@@ -91,7 +95,7 @@ async function main(): Promise<void> {
   await loadStringTables(fetchText);
   // The dialog definitions the player opens. The other ~150 belong to the
   // scenario and character editors, which this port doesn't run.
-  await loadDialogDefs(fetchText, ['pc-info']);
+  await loadDialogDefs(fetchText, ['pc-info', 'quest-info']);
   const scen = await loadScenario(new FetchSource(`/scenarios/${name}/`), opcodes);
 
   const store = new SheetStore();
@@ -138,6 +142,9 @@ async function main(): Promise<void> {
   univ.transcriptClock = animAt;
   session.startNewGame();
   const screen = new Screen(ctx, store);
+  // `set_stat_window(ITEM_WIN_PC1)` from create_pc_graphics (boe.party.cpp:226)
+  // — the panel's list and scroll limit are set before it is first drawn.
+  screen.itemWindow.setStatWindowForPc(univ, 0);
 
   const redraw = (): void => {
     screen.draw(session);
@@ -609,11 +616,56 @@ async function main(): Promise<void> {
     redraw();
   };
 
+  /**
+   * A row on the Special Items or Quests page — `show_item_info` (boe.actions
+   * .cpp:1528) and the `use_spec_item` the Drop slot carries.
+   */
+  const handleSpecialPageClick = async (
+    row: number, part: 'name' | 'use' | 'info',
+  ): Promise<void> => {
+    const win = screen.itemWindow;
+    const entry = win.specItemArray[row];
+    if (entry === undefined) return;
+    if (win.mode === ItemWinMode.QUESTS) {
+      // Whatever its status, the quest's own number is the low four digits.
+      const which = entry % QUEST_COMPLETED_OFFSET;
+      if (univ.scenario.quests[which])
+        await dialogs.runScreen(questInfoDialog(ctx, store, univ, which));
+      redraw();
+      return;
+    }
+    const spec = univ.scenario.specialItems[entry];
+    if (!spec) return;
+    if (part === 'use') {
+      // use_spec_item (boe.specials.cpp:576) — the item is a hook, not a thing
+      // in a pack, so all it does is run its node.
+      if (specItemUseable(spec) && !isCombat(session.mode))
+        await session.runSpecial(
+          SpecCtx.USE_SPEC_ITEM, SpecCtxType.SCEN, spec.special, univ.party.getLoc());
+    } else {
+      // put_spec_item_info's cStrDlog. TODO(M6): it draws the scenario's intro
+      // picture beside the text, which needs custom scenario graphics.
+      sound.play(57);
+      await dialogs.run({
+        title: spec.name,
+        text: spec.descr,
+        escapeButton: 'okay',
+        buttons: [{ name: 'okay', label: 'OK' }],
+      });
+    }
+    redraw();
+  };
+
   /** A click on an inventory row: equip/unequip, give, drop, describe, or sell. */
   const handleInventoryClick = async (
     row: number,
     part: 'name' | 'use' | 'give' | 'drop' | 'info' | 'spec',
   ): Promise<void> => {
+    if (!session.itemShop && screen.itemWindow.mode >= ItemWinMode.SPECIAL) {
+      if (part === 'name' || part === 'use' || part === 'info')
+        await handleSpecialPageClick(row, part);
+      return;
+    }
     const pc = univ.party.pcs[screen.itemPage];
     const item = pc?.items[row];
     if (!pc || !item || item.variety === 0) return;
@@ -981,14 +1033,14 @@ async function main(): Promise<void> {
           if (!aliveOnly || pc.mainStatus === MainStatus.ALIVE) {
             if (pcHit.part === 'name') {
               session.switchPc(pcHit.index);
-              screen.itemPage = univ.curPc;
+              screen.itemWindow.setStatWindowForPc(univ, univ.curPc);
             } else if (pcHit.part === 'hp') {
               session.printPcHp(pcHit.index);
             } else if (pcHit.part === 'sp') {
               session.printPcSp(pcHit.index);
             } else if (pcHit.part === 'trade') {
               session.tradePlaces(pcHit.index);
-              screen.itemPage = univ.curPc;
+              screen.itemWindow.setStatWindowForPc(univ, univ.curPc);
             } else {
               showPcInfo(pcHit.index);
             }
@@ -1002,6 +1054,35 @@ async function main(): Promise<void> {
         const hit = screen.shopScreen.hit(session.shop, x, y);
         if (hit) handleShopHit(hit);
         return;
+      }
+      // The item scrollbar is its own control on the main window, so it is
+      // asked before the panel underneath it.
+      if (!session.itemShop && screen.itemSbar.handleClick(x, y)) {
+        sound.play(Snd.BUTTON);
+        screen.itemWindow.scroll = screen.itemSbar.getPosition();
+        redraw();
+        return;
+      }
+      // The page buttons along the bottom of the item panel: six PCs, Special
+      // Items, Quests and Help (handle_action, boe.actions.cpp:1784).
+      if (!session.itemShop) {
+        const bottom = screen.itemBottomHit(x, y);
+        if (bottom !== null) {
+          sound.play(Snd.BUTTON);
+          if (bottom === 6) screen.itemWindow.setStatWindow(univ, ItemWinMode.SPECIAL);
+          else if (bottom === 7) screen.itemWindow.setStatWindow(univ, ItemWinMode.QUESTS);
+          else if (bottom === 8) {
+            // TODO(M6): show_dialog_action("help-inventory"), one of the help
+            // dialogs the toolkit can now draw but nothing opens yet.
+            univ.addStringToBuf('(The inventory help dialog is still to come)');
+          } else {
+            univ.curPc = bottom;
+            screen.itemWindow.setStatWindowForPc(univ, bottom);
+          }
+          setStatus();
+          redraw();
+          return;
+        }
       }
       // The inventory panel stays live during a conversation — that's how the
       // sell and identify services work, so it gets first refusal.
@@ -1260,11 +1341,17 @@ async function main(): Promise<void> {
         case 'A':
           void doAlchemyFlow();
           break;
+        case '9': // Special items
+          screen.itemWindow.setStatWindow(univ, ItemWinMode.SPECIAL);
+          break;
+        case '0': // Jobs/quests
+          screen.itemWindow.setStatWindow(univ, ItemWinMode.QUESTS);
+          break;
         default:
           if (key >= '1' && key <= '6') {
             // Switch which PC's inventory page is showing.
-            screen.itemPage = Number(key) - 1;
-            univ.curPc = screen.itemPage;
+            univ.curPc = Number(key) - 1;
+            screen.itemWindow.setStatWindowForPc(univ, univ.curPc);
           }
           break;
       }

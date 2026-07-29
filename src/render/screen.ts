@@ -24,10 +24,13 @@ import {
   BOE_HEIGHT,
   BOE_WIDTH,
   BTN_SRC_RECTS,
+  ITEM_BOTTOM_BUTTONS,
+  ITEM_BOTTOM_ICONS,
   ITEM_BTN_ICONS,
   ITEM_PANEL,
   ITEM_ROWS,
   ITEM_ROWS_SHOP,
+  ITEM_SBAR_RECT,
   SPEC_BTN_ICONS,
   FIGHT_BUTTONS,
   OUT_BUTTONS,
@@ -55,6 +58,11 @@ import {
   width,
 } from './layout';
 import { ITEM_SHOP_TITLES, specIcon, specPrice } from '../game/itemShop';
+import {
+  ItemWinMode, ItemWindow, LINES_IN_ITEM_WIN, QUEST_COMPLETED_OFFSET, QUEST_FAILED_OFFSET,
+} from '../game/itemWindow';
+import { specItemUseable } from '../data/quest';
+import { Scrollbar } from './scrollbar';
 import {
   FieldSprite, SFX_SPRITES, SOLID_SPRITES, SPECIAL_SPOT_SPRITE, TRANSIENT_SPRITES,
 } from './fieldPics';
@@ -92,6 +100,7 @@ export const CHROME_SHEETS = [
   'missiles',
   'staticons',
   'vehicle',
+  'dlogscrollwh',
   ...MAP_SHEETS,
 ];
 
@@ -1074,6 +1083,13 @@ export class Screen {
     const { univ } = session;
     this.erasePanel(panel, { top: 17, left: 2, bottom: 98, right: 269 });
 
+    // put_pc_screen's tail (boe.text.cpp:206): "sometimes this gets called when
+    // a character is slain" — if the dead PC's own page is up, move it on. The
+    // C++ does this from the drawing code too.
+    if (univ.curPc < 6 && univ.currentPc.mainStatus !== MainStatus.ALIVE
+      && this.itemWindow.mode === univ.curPc)
+      this.itemWindow.setStatWindowForPc(univ, univ.curPc);
+
     const at = (rect: UiRect): UiRect => ({
       top: panel.top + rect.top,
       left: panel.left + rect.left,
@@ -1203,17 +1219,16 @@ export class Screen {
   // --------------------------------------------------------------- inventory
 
   /**
-   * put_item_screen (boe.text.cpp:213) — the eight visible inventory rows for
-   * whichever PC's page is showing, with equipped items italicised and coloured
-   * by kind.
-   *
-   * TODO(M3): the bottom row of page buttons, and scrolling past the first
-   * eight slots.
+   * put_item_screen (boe.text.cpp:213) — the item panel. Normally the eight
+   * visible rows of one PC's pack, with equipped items italicised and coloured
+   * by kind; the Special Items and Quests pages replace the list with their
+   * own.
    */
   private drawInventory(session: GameSession): void {
     const panel = WIN_RECTS.inven;
     this.erasePanel(panel, ITEM_PANEL.erase);
     const pc = session.univ.party.pcs[this.itemPage] ?? session.univ.currentPc;
+    const win = this.itemWindow;
 
     const at = (rect: UiRect): UiRect => ({
       top: panel.top + rect.top,
@@ -1224,23 +1239,41 @@ export class Screen {
 
     // In a shop service mode the panel is a prompt, not a list of your things.
     const service = session.itemShop;
-    const title = service ? ITEM_SHOP_TITLES[service.mode] : `${pc.name} inventory:`;
+    let title = service ? ITEM_SHOP_TITLES[service.mode] : `${pc.name} inventory:`;
+    if (!service && win.mode === ItemWinMode.SPECIAL) title = 'Special items:';
+    if (!service && win.mode === ItemWinMode.QUESTS) title = 'Quests/Jobs:';
     drawStringEllipsis(this.ctx, at(ITEM_PANEL.title), title, {
       font: 'bold',
       size: 10,
       colour: Colours.YELLOW,
     });
 
+    // The scrollbar is a control on the main window, not part of the panel, so
+    // it keeps the C++'s absolute rect. `set_stat_window` owns its maximum.
+    this.itemSbar.setMaximum(win.scrollMax);
+    this.itemSbar.setPosition(win.scroll);
+
     const btnSheet = this.store.get('invenbtns');
+    if (!service && win.mode >= ItemWinMode.SPECIAL) {
+      this.drawSpecialPage(session, at, btnSheet);
+      this.drawItemBottomButtons(session, at);
+      this.itemSbar.draw(this.ctx, this.store);
+      return;
+    }
+
     const rows = service ? ITEM_ROWS_SHOP : ITEM_ROWS;
+    // `item_offset` — which slot the top row is showing. A pack holds 24 and
+    // the panel shows eight, so the scrollbar reaches the other two thirds.
+    const offset = service ? 0 : win.scroll;
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]!;
-      const item = pc.items[i];
+      const iNum = i + offset;
+      const item = pc.items[iNum];
       // The slot number is always shown, so empty slots read as empty.
-      drawString(this.ctx, at(row.name), `${i + 1}.`, { size: 12, colour: Colours.BLACK });
+      drawString(this.ctx, at(row.name), `${iNum + 1}.`, { size: 12, colour: Colours.BLACK });
       if (!item || item.variety === ItemType.NO_ITEM) continue;
 
-      const equipped = pc.equip[i] === true;
+      const equipped = pc.equip[iNum] === true;
       let colour: string = Colours.BLACK;
       if (equipped) {
         if (item.variety === ItemType.ONE_HANDED || item.variety === ItemType.TWO_HANDED)
@@ -1286,7 +1319,7 @@ export class Screen {
         if (service) {
           // The spec button replaces the row's usual buttons, and only appears
           // on items the service applies to (place_item_button, :410).
-          const price = specPrice(service, pc, i);
+          const price = specPrice(service, pc, iNum);
           if (price !== null) {
             const src = SPEC_BTN_ICONS[specIcon(service.mode)];
             const dest = at(row.spec);
@@ -1310,10 +1343,157 @@ export class Screen {
         }
       }
     }
+    if (!service) {
+      this.drawItemBottomButtons(session, at);
+      this.itemSbar.draw(this.ctx, this.store);
+    }
   }
 
-  /** Which PC's inventory page is showing. */
-  itemPage = 0;
+  /**
+   * put_item_screen's ITEM_WIN_SPECIAL and ITEM_WIN_QUESTS branches
+   * (boe.text.cpp:270 and :288) — a plain list of names with an Info button.
+   */
+  private drawSpecialPage(
+    session: GameSession,
+    at: (rect: UiRect) => UiRect,
+    btnSheet: CanvasImageSource | undefined,
+  ): void {
+    const win = this.itemWindow;
+    const scen = session.univ.scenario;
+    const icon = (src: UiRect, dest: UiRect): void => {
+      if (!btnSheet) return;
+      this.ctx.drawImage(
+        btnSheet, src.left, src.top, width(src), height(src),
+        dest.left, dest.top, width(src), height(src),
+      );
+    };
+
+    for (let i = 0; i < LINES_IN_ITEM_WIN; i++) {
+      const iNum = i + win.scroll;
+      const entry = win.specItemArray[iNum];
+      if (entry === undefined) continue;
+      const row = ITEM_ROWS[i]!;
+      const nameRect = at(row.name);
+
+      if (win.mode === ItemWinMode.SPECIAL) {
+        const spec = scen.specialItems[entry];
+        if (!spec) continue;
+        drawStringEllipsis(this.ctx, nameRect, spec.name,
+          { font: 'bold', size: 12, colour: Colours.BLACK });
+        icon(ITEM_BTN_ICONS.info, at(row.info));
+        // A useable special item gets its Use button where Drop would be, so
+        // there's no gap between Use and Info. Not in a fight.
+        if (specItemUseable(spec) && !isCombat(session.mode))
+          icon(ITEM_BTN_ICONS.use, at(row.drop));
+      } else {
+        const which = entry % QUEST_COMPLETED_OFFSET;
+        const quest = scen.quests[which];
+        if (!quest) continue;
+        const failed = Math.floor(entry / QUEST_COMPLETED_OFFSET) === 2;
+        const style = {
+          font: 'bold', size: 12, colour: failed ? Colours.RED : Colours.BLACK,
+        } as const;
+        drawStringEllipsis(this.ctx, nameRect, quest.name, style);
+        // A finished quest is struck through in green, across its own width.
+        if (Math.floor(entry / QUEST_COMPLETED_OFFSET) === 1) {
+          const y = Math.floor((nameRect.top + nameRect.bottom) / 2);
+          this.ctx.save();
+          this.ctx.strokeStyle = Colours.GREEN;
+          this.ctx.lineWidth = 1;
+          this.ctx.beginPath();
+          this.ctx.moveTo(nameRect.left, y + 0.5);
+          this.ctx.lineTo(nameRect.left + measureString(this.ctx, quest.name, style), y + 0.5);
+          this.ctx.stroke();
+          this.ctx.restore();
+        }
+        icon(ITEM_BTN_ICONS.info, at(row.info));
+      }
+    }
+  }
+
+  /**
+   * place_item_bottom_buttons (boe.text.cpp:499) — the six PC portraits, the
+   * Special Items and Quests tabs and the help button along the bottom of the
+   * panel. A dead PC's button isn't drawn and isn't live; the Quests tab isn't
+   * drawn at all in a scenario with no quests.
+   */
+  private drawItemBottomButtons(session: GameSession, at: (rect: UiRect) => UiRect): void {
+    const sheet = this.store.get('invenbtns');
+    if (!sheet) return;
+    const blit = (img: CanvasImageSource, src: UiRect, dest: UiRect): void => {
+      this.ctx.drawImage(
+        img, src.left, src.top, width(src), height(src),
+        dest.left, dest.top, width(dest), height(dest),
+      );
+    };
+
+    this.itemBottomActive = [false, false, false, false, false, false, true, false, true];
+    for (let i = 0; i < 6; i++) {
+      const pc = session.univ.party.pcs[i];
+      if (!pc || pc.mainStatus !== MainStatus.ALIVE) continue;
+      this.itemBottomActive[i] = true;
+      const dest = at(ITEM_BOTTOM_BUTTONS[i]!);
+      blit(sheet, ITEM_BOTTOM_ICONS.pcFrame, dest);
+
+      const g = pcGraphic(pc.whichGraphic, Direction.N);
+      const face = g ? this.store.get(g.sheetName) : undefined;
+      const inner = {
+        top: dest.top + 2, left: dest.left + 2, bottom: dest.bottom - 2, right: dest.right - 2,
+      };
+      if (g && face) {
+        this.ctx.drawImage(
+          face, g.rect.left, g.rect.top, g.rect.width, g.rect.height,
+          inner.left, inner.top, width(inner), height(inner),
+        );
+      }
+      // The numeral sits to the left of the portrait; "6" is nudged an extra
+      // pixel down because it has an ascender in this font.
+      const numeral = String(i + 1);
+      const style = { font: 'bold', size: 10, colour: Colours.YELLOW } as const;
+      const w = measureString(this.ctx, numeral, style);
+      drawString(this.ctx, {
+        top: inner.top + (i === 5 ? 3 : 2),
+        left: inner.left - w - 5,
+        bottom: inner.bottom,
+        right: inner.right,
+      }, numeral, style);
+    }
+
+    blit(sheet, ITEM_BOTTOM_ICONS.special, at(ITEM_BOTTOM_BUTTONS[6]!));
+    if (session.univ.scenario.quests.length > 0) {
+      this.itemBottomActive[7] = true;
+      blit(sheet, ITEM_BOTTOM_ICONS.quests, at(ITEM_BOTTOM_BUTTONS[7]!));
+    }
+    blit(sheet, ITEM_BOTTOM_ICONS.help, at(ITEM_BOTTOM_BUTTONS[8]!));
+  }
+
+  /** Which page is showing, and where its list is scrolled to. */
+  readonly itemWindow = new ItemWindow();
+
+  /** item_sbar — the item panel's scrollbar. */
+  readonly itemSbar = new Scrollbar(ITEM_SBAR_RECT);
+
+  /** item_bottom_button_active, filled in as the buttons are drawn. */
+  itemBottomActive: boolean[] = [false, false, false, false, false, false, true, false, true];
+
+  /** Which PC's pack the panel is showing. */
+  get itemPage(): number {
+    return this.itemWindow.pcPage;
+  }
+
+  /** Which bottom button a click landed on, or null. */
+  itemBottomHit(x: number, y: number): number | null {
+    const panel = WIN_RECTS.inven;
+    const lx = x - panel.left;
+    const ly = y - panel.top;
+    for (let i = 0; i < ITEM_BOTTOM_BUTTONS.length; i++) {
+      const rect = ITEM_BOTTOM_BUTTONS[i]!;
+      if (this.itemBottomActive[i]
+        && lx >= rect.left && lx < rect.right && ly >= rect.top && ly < rect.bottom)
+        return i;
+    }
+    return null;
+  }
 
   /** The inventory row and part a click landed on, if any. */
   inventoryHit(
@@ -1323,19 +1503,29 @@ export class Screen {
     const lx = x - panel.left;
     const ly = y - panel.top;
     const rows = service ? ITEM_ROWS_SHOP : ITEM_ROWS;
+    // `item_hit = item_sbar->getPosition() + i` (boe.actions.cpp:1811) — the row
+    // clicked is an offset into the list, not the list itself. A shop service
+    // never scrolls.
+    const offset = service ? 0 : this.itemWindow.scroll;
+    const special = !service && this.itemWindow.mode >= ItemWinMode.SPECIAL;
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]!;
       const inside = (rect: UiRect): boolean =>
         lx >= rect.left && lx < rect.right && ly >= rect.top && ly < rect.bottom;
       if (service) {
         if (inside(row.spec)) return { row: i, part: 'spec' };
+      } else if (special) {
+        // Only the two buttons these pages draw are live, and Use sits in the
+        // Drop slot — so a click there is a Use, not a Drop.
+        if (inside(row.drop)) return { row: i + offset, part: 'use' };
+        if (inside(row.info)) return { row: i + offset, part: 'info' };
       } else {
-        if (inside(row.use)) return { row: i, part: 'use' };
-        if (inside(row.give)) return { row: i, part: 'give' };
-        if (inside(row.drop)) return { row: i, part: 'drop' };
-        if (inside(row.info)) return { row: i, part: 'info' };
+        if (inside(row.use)) return { row: i + offset, part: 'use' };
+        if (inside(row.give)) return { row: i + offset, part: 'give' };
+        if (inside(row.drop)) return { row: i + offset, part: 'drop' };
+        if (inside(row.info)) return { row: i + offset, part: 'info' };
       }
-      if (inside(row.name) || inside(row.icon)) return { row: i, part: 'name' };
+      if (inside(row.name) || inside(row.icon)) return { row: i + offset, part: 'name' };
     }
     return null;
   }

@@ -185,6 +185,19 @@ describe('running a dialog', () => {
     expect(dlg.frame.left).toBe(Math.round((605 - 116) / 2));
   });
 
+  it('a button with no size of its own still counts as its artwork', async () => {
+    // quest-info.xml's Done carries only a top and a left. Measured as a
+    // zero-height control the window closed above it and the button hung out
+    // of the bottom of the panel.
+    const def = readDialogDef(await parseXmlDoc(
+      "<dialog><button name='done' type='done' top='208' left='251'/></dialog>"));
+    const dlg = new XmlDialog(fakeCtx(), new SheetStore(), def);
+    expect(dlg.frame.bottom - dlg.frame.top).toBe(208 + 23 + 6);
+    expect(dlg.frame.right - dlg.frame.left).toBe(251 + 63 + 6);
+    const rect = dlg.screenRect(def.byName.get('done')!);
+    expect(rect.bottom).toBeLessThanOrEqual(dlg.frame.bottom);
+  });
+
   it('closes on a button with no handler, and stays open for one with', async () => {
     const def = readDialogDef(await parseXmlDoc(
       "<dialog escbtn='cancel'>"

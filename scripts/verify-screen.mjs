@@ -212,7 +212,7 @@ const sellReady = await page.evaluate(async () => {
   s.startItemShop('sell-any', 0, 0, 0);
   // The first PC has the axe bought above; make sure it isn't equipped.
   s.univ.party.pcs[0].equip.fill(false);
-  window.__screen.itemPage = 0;
+  window.__screen.itemWindow.setStatWindowForPc(window.__session.univ, 0);
   window.__redraw();
   return {
     mode: s.itemShop?.mode,
@@ -460,7 +460,7 @@ const usedItem = await page.evaluate(async () => {
   };
   pc.equip[0] = false;
   pc.curHealth = 1;
-  sc.itemPage = 3;
+  sc.itemWindow.setStatWindowForPc(s.univ, 3);
   s.univ.curPc = 3;
   window.__redraw();
 
@@ -521,7 +521,7 @@ await page.evaluate(() => {
     ident: true, rechargeable: false, weight: 1, desc: '',
   };
   pc.equip[0] = false;
-  window.__screen.itemPage = 0;
+  window.__screen.itemWindow.setStatWindowForPc(window.__session.univ, 0);
   s.univ.curPc = 0;
   window.__redraw();
 });
@@ -601,6 +601,160 @@ await press('Escape');
 await page.waitForTimeout(200);
 const pcInfoClosed = await page.evaluate(() => !window.__dialogs.active);
 console.log('PC INFO:', JSON.stringify({ at: infoAt, pcInfo, pcInfoNext, pcInfoClosed }));
+
+// 2e5. The item window's other two pages. Give the party a couple of the
+//      scenario's special items and a quest of our own, then open each page
+//      with its key, read a row's Info and check the row hit-testing follows
+//      the scrollbar.
+const specPage = await page.evaluate(() => {
+  const s = window.__session;
+  const sc = window.__screen;
+  // Eleven special items in valleydy, so the list overflows the eight rows.
+  for (let i = 0; i < s.univ.scenario.specialItems.length; i++) s.univ.party.specItems.add(i);
+  // One useable item, so the Use button appears where Drop normally goes.
+  s.univ.scenario.specialItems[0].flags = 1;
+  window.__redraw();
+  return { carried: s.univ.party.specItems.size, page: sc.itemWindow.mode };
+});
+await press('9');
+await page.waitForTimeout(200);
+const specOpen = await page.evaluate(() => {
+  const sc = window.__screen;
+  const names = sc.itemWindow.specItemArray.map(
+    (i) => window.__session.univ.scenario.specialItems[i].name,
+  );
+  return {
+    mode: sc.itemWindow.mode,
+    listed: sc.itemWindow.specItemArray.length,
+    scrollMax: sc.itemWindow.scrollMax,
+    first: names[0],
+    second: names[1],
+  };
+});
+await shot('01e5-special-items');
+// Scroll down one line with the scrollbar's bottom arrow, then check row 0 now
+// reports the second entry.
+const scrolled = await page.evaluate(() => {
+  const sc = window.__screen;
+  const bar = sc.itemSbar;
+  const at = { x: bar.frame.left + 8, y: bar.frame.bottom - 8 };
+  const canvas = document.querySelector('canvas');
+  const r = canvas.getBoundingClientRect();
+  return {
+    at,
+    page: {
+      x: r.left + (at.x + 0.5) * (r.width / canvas.width),
+      y: r.top + (at.y + 0.5) * (r.height / canvas.height),
+    },
+  };
+});
+await page.mouse.click(scrolled.page.x, scrolled.page.y);
+await page.waitForTimeout(200);
+const afterScroll = await page.evaluate(() => {
+  const sc = window.__screen;
+  // The top row's rect now answers with the second entry in the list.
+  let topRow = null;
+  for (let y = 0; y < 430 && topRow === null; y++)
+    for (let x = 0; x < 605; x++) {
+      const h = sc.inventoryHit(x, y);
+      if (h && h.part === 'name') { topRow = h.row; break; }
+    }
+  return { scroll: sc.itemWindow.scroll, topRow };
+});
+// Info on the top row opens put_spec_item_info's description.
+const infoRowAt = await page.evaluate(() => {
+  const sc = window.__screen;
+  for (let y = 0; y < 430; y++)
+    for (let x = 0; x < 605; x++) {
+      const h = sc.inventoryHit(x, y);
+      if (h && h.part === 'info') {
+        const canvas = document.querySelector('canvas');
+        const r = canvas.getBoundingClientRect();
+        return {
+          row: h.row,
+          x: r.left + (x + 0.5) * (r.width / canvas.width),
+          y: r.top + (y + 0.5) * (r.height / canvas.height),
+        };
+      }
+    }
+  return null;
+});
+await page.mouse.click(infoRowAt.x, infoRowAt.y);
+await page.waitForTimeout(250);
+const specInfo = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  return d ? { title: d.spec.title, text: d.spec.text.slice(0, 40) } : null;
+});
+await press('Escape');
+await page.waitForTimeout(200);
+
+// The Quests page: valleydy ships none, so the test supplies one and takes it.
+await page.evaluate(() => {
+  const s = window.__session;
+  s.univ.scenario.quests.push({
+    deadlineIsRelative: true, autoStart: false, deadline: 30, event: -1,
+    xp: 0, gold: 250, bank1: -1, bank2: -1,
+    name: 'Verify quest', descr: 'Prove the quests page works.',
+  });
+  s.univ.party.activeQuests.set(s.univ.scenario.quests.length - 1,
+    { status: 1, start: 1, source: -1 });
+  window.__redraw();
+});
+await press('0');
+await page.waitForTimeout(200);
+const questPage = await page.evaluate(() => ({
+  mode: window.__screen.itemWindow.mode,
+  listed: window.__screen.itemWindow.specItemArray.slice(),
+}));
+await shot('01e6-quests');
+const questInfoAt = await page.evaluate(() => {
+  const sc = window.__screen;
+  for (let y = 0; y < 430; y++)
+    for (let x = 0; x < 605; x++) {
+      const h = sc.inventoryHit(x, y);
+      if (h && h.part === 'info' && h.row === 0) {
+        const canvas = document.querySelector('canvas');
+        const r = canvas.getBoundingClientRect();
+        return {
+          x: r.left + (x + 0.5) * (r.width / canvas.width),
+          y: r.top + (y + 0.5) * (r.height / canvas.height),
+        };
+      }
+    }
+  return null;
+});
+await page.mouse.click(questInfoAt.x, questInfoAt.y);
+await page.waitForTimeout(250);
+const questInfo = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  return d && d.def
+    ? { name: d.getText('name'), chop: d.getText('chop'), pay: d.getText('pay') }
+    : null;
+});
+await shot('01e7-quest-info');
+await press('Escape');
+await page.waitForTimeout(200);
+// Back to a PC's own page, and check the pack scrolls past the eighth slot.
+await press('1');
+await page.waitForTimeout(150);
+const backToPack = await page.evaluate(() => ({
+  mode: window.__screen.itemWindow.mode,
+  scrollMax: window.__screen.itemWindow.scrollMax,
+}));
+console.log('ITEM PAGES:', JSON.stringify({
+  specPage, specOpen, afterScroll, specInfo, questPage, questInfo, backToPack,
+}));
+if (specOpen.mode !== 6) throw new Error('9 did not open the special items page');
+if (specOpen.listed !== specPage.carried) throw new Error('the special items page listed the wrong number');
+if (specOpen.scrollMax !== specPage.carried - 8) throw new Error('the special items scrollbar has the wrong range');
+if (afterScroll.scroll !== 1) throw new Error('the scrollbar arrow did not scroll the page');
+if (afterScroll.topRow !== 1) throw new Error('a scrolled page still reports the first row');
+// The page is scrolled by one, so the top row's Info is the *second* item.
+if (!specInfo || specInfo.title !== specOpen.second) throw new Error('Info showed the wrong special item');
+if (questPage.mode !== 7) throw new Error('0 did not open the quests page');
+if (!questInfo || questInfo.name !== 'Verify quest') throw new Error('quest-info.xml did not fill');
+if (questInfo.chop !== 'Day 31') throw new Error(`relative deadline read as ${questInfo.chop}`);
+if (backToPack.mode !== 0 || backToPack.scrollMax !== 16) throw new Error('1 did not go back to the pack page');
 
 // 2d. Signs: looking at an adjacent sign opens a dialog with its text.
 const sign = await page.evaluate(async () => {

@@ -10,7 +10,8 @@
   arrows/keypad move, **f** fight (and end a fight), **e** end combat,
   **w**/Space wait — stand ready in combat, **d** parry, **x** hold the turn on
   one PC, **t** talk, **l** look, **u** use, **b** bash, **g** get, **r** rest,
-  **1-6** whose pack shows, **a** the automap, **A** alchemy (in town),
+  **1-6** whose pack shows, **9** the special items and **0** the quests,
+  **a** the automap, **A** alchemy (in town),
   **m**/**p** spells, **s** shoot (in combat: arms the
   missile, then click a square; **s** or Escape cancels). Keys for things not
   built yet say which milestone they're
@@ -32,7 +33,7 @@
 
 ## Current state
 
-**M2 done bar the replay driver, M3 nearly done, M4 and M5 complete, M6 begun (2026-07-27): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: enchanting (needs M5's enchantment table), job banks (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; projectiles fly across the screen; and `place_spell_pattern` works, so exploding weapons blast, monsters lay fields and a protective circle raises four rings of wall. **M5 is closed**: monster spellcasting, the 147-spell list, `process_fields` and the real casting dialog all landed 2026-07-26. **M6 has started**: quests, job banks, special items and the town/scenario/party timers work as of 2026-07-27, so a scripted deadline can expire and a timed node can fire — **items can be Used**: the USE button on an inventory row drinks the potion, fires the wand and reads the book — and **boats and horses work**: walk onto one to board it, dry land to leave it, Space to dismount or re-board, and `CHANGE_HORSE_OWNER`/`CHANGE_BOAT_OWNER` hand one to the party — and **the job board works**: a JOB_BANK conversation node opens it, and a quest taken there (or handed over by a RECEIVE_QUEST node) runs on the timers that were already ported.
+**M2 done bar the replay driver, M3 nearly done, M4 and M5 complete, M6 begun (2026-07-27): full 605×430 UI on the real Universe/GameSession architecture. A new game starts in the scenario's start town with the pregen party; you can walk the world with line-of-sight fog, lighting, terrain trim, roads, floor items and step sounds, talk to townspeople, open and bash doors, look at things and read signs, **pick up, equip, give and drop items**, and **buy, sell, identify, recharge, train and stay the night**. Remaining M2: the replay driver. Scenario scripting runs: walking onto a scripted square, looking at one, entering or leaving a town, or using a lever fires its chain, and Fort Talrus's own messages, its Rest prompt and its walk-through-a-wall node all work. Remaining M3: enchanting (needs M5's enchantment table), job banks (M6), and the full dialogxml toolkit. Remaining M4: the opcodes that need combat, fields, timers or quests — each one says so in the transcript rather than failing silently. **Combat is playable**: the SWORD button (or **C**) starts a fight, the party spreads out as six figures with action points, and you can swing, move, swap places, kill things and earn experience. Monsters notice you, walk over and hit back, in town mode as well as in combat — so Fort Talrus's eight Giant Rats will come for you from the moment a new game starts. The `uAbility` port landed 2026-07-26, so monster abilities are real data now; monsters shoot, breathe, summon aid and land their touch attacks; the party can shoot back with **S**; projectiles fly across the screen; and `place_spell_pattern` works, so exploding weapons blast, monsters lay fields and a protective circle raises four rings of wall. **M5 is closed**: monster spellcasting, the 147-spell list, `process_fields` and the real casting dialog all landed 2026-07-26. **M6 has started**: quests, job banks, special items and the town/scenario/party timers work as of 2026-07-27, so a scripted deadline can expire and a timed node can fire — **items can be Used**: the USE button on an inventory row drinks the potion, fires the wand and reads the book — and **boats and horses work**: walk onto one to board it, dry land to leave it, Space to dismount or re-board, and `CHANGE_HORSE_OWNER`/`CHANGE_BOAT_OWNER` hand one to the party — and **the job board works**: a JOB_BANK conversation node opens it, and a quest taken there (or handed over by a RECEIVE_QUEST node) runs on the timers that were already ported — and **the item panel has all three of its pages**: the tabs along its bottom (or 9 and 0) show the party's special items and its quests, and the scrollbar beside them finally reaches the other sixteen slots of a pack.
 
 M2 landed so far:
 - Town/talk/town-map parsers (`townXml.ts`, data in `town.ts`/`talking.ts`) — all 21 valleydy towns + all scenarios load.
@@ -71,7 +72,7 @@ Notes for M2 implementer:
 - Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
 - scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
-- `npm test` → 474 tests green (34 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
+- `npm test` → 812 tests green (49 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
 - `node scripts/verify-screen.mjs` (needs `npx vite --port 5199` running) drives the real UI headless and screenshots it. Playwright + chromium installed as devDependency.
 - Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
@@ -2164,3 +2165,54 @@ playthrough will hit it:
     handlers that hold the dialog open, hidden controls, LED groups, and
     pc-info itself. `verify-screen.mjs` opens the sheet through the real "?"
     button, checks it filled, steps a PC with the arrow key and closes it.
+
+- **The item window's other two pages (M6, 2026-07-28)**: the panel on the
+  middle right has three kinds of page, and until now this port drew one of
+  them. `game/itemWindow.ts` ports `eItemWinMode`, `set_stat_window`
+  (boe.text.cpp:564) and the `spec_item_array` it builds; `render/scrollbar.ts`
+  ports `cScrollbar`; `put_item_screen`'s two other branches and
+  `place_item_bottom_buttons` (:499) land in `render/screen.ts`. **The bottom
+  row of the item panel is real now** — six portraits, a Spec tab, a Jobs tab
+  and the help button — and **9** and **0** (or those tabs) open the Special
+  Items and Quests pages. A special item's Info opens `put_spec_item_info`'s
+  description, a useable one grows a Use button that runs its
+  `USE_SPEC_ITEM` node, and a quest's Info opens **`quest-info.xml`**, the
+  second call site on the dialogxml toolkit.
+  - **A PC's own pack scrolls now too.** The scrollbar was the missing piece:
+    a pack holds 24 items, the panel shows eight, and only the first eight had
+    ever been reachable. `item_sbar` is drawn at its own absolute rect
+    (boe.main.cpp:71) because it is a control on the main window rather than
+    part of the panel, and `item_hit = item_sbar->getPosition() + i`
+    (boe.actions.cpp:1811) is why `Screen.inventoryHit` now returns an index
+    into the list rather than a row on screen.
+  - *Gotcha*: the Use button on a special item is placed **where Drop would
+    go**, "so there's no gap between Use and Info" — so a click in the Drop
+    slot on that page is a Use, and `handleClick` has to know which page it is
+    looking at. It is also hidden in combat.
+  - *Gotcha*: `set_stat_window` asked for a **dead** PC's page quietly gives
+    the first living one instead, and `put_pc_screen` re-runs that test from
+    inside the *drawing* code ("sometimes this gets called when a character is
+    slain"). Both kept where the C++ has them.
+  - *Gotcha*: the Jobs tab isn't drawn at all in a scenario with no quests,
+    which is every scenario bundled here — so it only appears once something
+    puts one in the list. The Spec tab is always drawn.
+  - *Gotcha*: a quest's status rides in its `spec_item_array` entry as
+    `+10000` completed, `+20000` failed, read back with `/ 10000`. A completed
+    quest is struck through in green across the width of its own name; a
+    failed one is drawn in red.
+  - Not ported with it: dragging the scrollbar's thumb (the C++ runs its own
+    event loop inside `handleClick` to do it; the arrows and the track work),
+    the mouse wheel (`InputRouter` has no wheel event yet), and
+    `show_dialog_action("help-inventory")` behind the "?" button.
+  - **A dialogxml sizing bug went with it**: `cDialog::recalcRect` measures the
+    window against controls whose frames the *parser* has already sized, and
+    this port kept the definition as read — so a button carrying only a `top`
+    and a `left`, which is exactly what quest-info's Done does, measured as
+    nothing and the window closed above it. `controlSize` now answers the
+    question in the one place both the measuring pass and the hit test ask.
+  - Tests: `test/itemWindow.test.ts` (14) covers the three pages, the dead-PC
+    substitution, the quest status tags and the scrollbar's clamping, stepping
+    and paging. `verify-screen.mjs` gained a step that opens both pages with
+    their keys, scrolls the special items with the real scrollbar arrow,
+    checks the row under the pointer follows the scroll, and reads a quest
+    through `quest-info.xml`.

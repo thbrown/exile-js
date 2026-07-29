@@ -168,6 +168,30 @@ export const ITEM_BTN_ICONS = {
 } as const;
 
 /**
+ * item_screen_button_rects (boe.actions.cpp:62) — the page buttons along the
+ * bottom of the item panel: one per PC, then Special Items, Quests and Help.
+ * Panel-relative, like the row rects.
+ */
+export const ITEM_BOTTOM_BUTTONS: UiRect[] = [
+  r(125, 10, 141, 28), r(125, 40, 141, 58), r(125, 68, 141, 86),
+  r(125, 98, 141, 116), r(125, 126, 141, 144), r(125, 156, 141, 174),
+  r(126, 176, 141, 211), // Special Items
+  r(126, 213, 141, 248), // Quests
+  r(127, 251, 140, 267), // Help
+];
+
+/** Their artwork in invenbtns.png — place_item_bottom_buttons (boe.text.cpp:499). */
+export const ITEM_BOTTOM_ICONS = {
+  pcFrame: r(30, 60, 46, 78),
+  special: r(0, 60, 15, 95),
+  quests: r(15, 60, 30, 95),
+  help: r(46, 60, 59, 76),
+} as const;
+
+/** item_sbar_rect (boe.main.cpp:71) — absolute, beside the item rows. */
+export const ITEM_SBAR_RECT = r(148, 560, 255, 576);
+
+/**
  * `draw_one_pointing_arrow` (boe.graphics.cpp:1601) — the little arrows around
  * the terrain view that scroll it while you're aiming. `dir` is
  * 0 down, 1 left, 2 right, 3 up, 4 down-left, 5 up-left, 6 up-right,

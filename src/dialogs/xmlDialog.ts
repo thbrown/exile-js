@@ -81,6 +81,38 @@ const COLOURS: Record<string, string> = {
 const FRAME_DARK = 'rgb(48,48,48)';
 const FRAME_LIGHT = 'rgb(224,224,224)';
 
+/**
+ * How big a control actually is. The C++ settles this when the definition is
+ * parsed — `cButton::setBtnType` and `cLed` write their art's size into the
+ * control's frame — so by the time `recalcRect` measures the window the sizes
+ * are there. This port keeps the definition as read and answers the question
+ * here instead, which means *both* the measuring pass and the hit test have to
+ * ask; a button given only a `top`/`left` (quest-info's Done) sized as nothing
+ * otherwise, and the window closed above it.
+ *
+ * A pict is the exception: it draws at its picture's natural size, which can
+ * change at runtime with `setPictType`, so it is left as written.
+ */
+function controlSize(control: DialogControl): { w: number; h: number } {
+  let w = width(control.rect);
+  let h = height(control.rect);
+  if (control.kind === 'button') {
+    const art = BUTTON_ART[control.type];
+    // A button is exactly its art, except the labelled kinds, which the
+    // definition may stretch wider.
+    w = Math.max(w, art.w);
+    h = Math.max(h, art.h);
+    if (control.type !== 'large' && control.type !== 'regular' && control.type !== 'done') {
+      w = art.w;
+      h = art.h;
+    }
+  } else if (control.kind === 'led') {
+    w = Math.max(w, LED_W);
+    h = Math.max(h, LED_H);
+  }
+  return { w, h };
+}
+
 /** What a handler tells the runner to do once it has run. */
 export type DialogAction = 'stay' | 'close';
 
@@ -120,8 +152,9 @@ export class XmlDialog implements ModalScreen {
     let bottom = 0;
     for (const c of def.controls) {
       if (this.negX(c) || this.negY(c)) continue;
-      right = Math.max(right, c.rect.right);
-      bottom = Math.max(bottom, c.rect.bottom);
+      const { w, h } = controlSize(c);
+      right = Math.max(right, c.rect.left + w);
+      bottom = Math.max(bottom, c.rect.top + h);
     }
     right += 6;
     bottom += 6;
@@ -305,22 +338,7 @@ export class XmlDialog implements ModalScreen {
   /** A control's rect in screen coordinates (its own is dialog-relative). */
   screenRect(control: DialogControl): UiRect {
     const { rect } = control;
-    let w = width(rect);
-    let h = height(rect);
-    if (control.kind === 'button') {
-      const art = BUTTON_ART[control.type];
-      // `recalcRect`: a button is exactly its art, except the labelled kinds
-      // (which may be stretched wider by the definition).
-      w = Math.max(w, art.w);
-      h = Math.max(h, art.h);
-      if (control.type !== 'large' && control.type !== 'regular' && control.type !== 'done') {
-        w = art.w;
-        h = art.h;
-      }
-    } else if (control.kind === 'led') {
-      w = Math.max(w, LED_W);
-      h = Math.max(h, LED_H);
-    }
+    const { w, h } = controlSize(control);
     return {
       left: this.frame.left + rect.left,
       top: this.frame.top + rect.top,
