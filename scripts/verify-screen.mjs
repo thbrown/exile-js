@@ -333,27 +333,39 @@ await page.evaluate(async () => {
 await page.waitForTimeout(250);
 const board = await page.evaluate(() => {
   const d = window.__dialogs.active;
-  return d ? { text: d.spec.text, rows: d.spec.rows.map((r) => r.label) } : null;
+  if (!d || !d.def) return null;
+  const g = (n) => { try { return d.getText(n); } catch (e) { return null; } };
+  return { day: g('day'), job1: g('job1'), job2: g('job2'), feedback: g('feedback'),
+    take1: d.isVisible('take1'), take2: d.isVisible('take2') };
 });
 await shot('01b4a-job-board');
-await press('1'); // Take the job
-await page.waitForTimeout(250);
 const tookJob = await page.evaluate(() => {
   const s = window.__session;
-  const job = s.univ.party.activeQuests.get(window.__jobQuest);
   const d = window.__dialogs.active;
+  const c = d.def.controls.find((x) => x.name === 'take1');
+  const r = d.screenRect(c);
+  d.onClick((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+  const job = s.univ.party.activeQuests.get(window.__jobQuest);
+  const g = (n) => { try { return d.getText(n); } catch (e) { return null; } };
   return {
     status: job ? job.status : null,
     start: job ? job.start : null,
     // The board's own feedback line changes to "Job accepted.". The offer
     // itself stays: with no spare to swap in, the C++ leaves the slot alone
     // despite its own "otherwise, clear space" comment.
-    prompt: d ? d.spec.text.split('\n').at(-1) : null,
-    rows: d ? d.spec.rows.length : null,
+    feedback: g('feedback'),
+    job1: g('job1'),
+    take1: d.isVisible('take1'),
   };
 });
 console.log('JOB BOARD:', JSON.stringify({ board, tookJob }));
-await press('d'); // Done
+if (!board) throw new Error('the job board did not open job-board.xml');
+if (!board.take1 || board.take2) throw new Error('the wrong Take buttons were drawn');
+if (!board.job1.includes('It wandered off.')) throw new Error(`job1 read ${board.job1}`);
+if (board.feedback !== 'Dispatcher is neutral towards you.')
+  throw new Error(`the mood line read ${board.feedback}`);
+if (tookJob.feedback !== 'Job accepted.') throw new Error('Take did not acknowledge');
+await press('Escape'); // Done
 await page.waitForTimeout(250);
 await page.evaluate(() => {
   window.__session.univ.scenario.quests.length = window.__jobQuest;
@@ -726,10 +738,25 @@ await press('1'); // PC 1 mixes
 await page.waitForTimeout(250);
 const alchList = await page.evaluate(() => {
   const d = window.__dialogs.active;
-  return d ? { rows: d.spec.rows.map((r) => r.label), text: d.spec.text } : null;
+  if (!d || !d.def) return null;
+  const g = (n) => { try { return d.getText(n); } catch (e) { return null; } };
+  // pick-potion.xml hides the button of a recipe the PC can't make yet but
+  // still writes its label; an unknown recipe gets neither.
+  const shown = [];
+  for (let i = 1; i <= 20; i++) if (d.isVisible(`potion${i}`)) shown.push(i);
+  return { mixer: g('mixer'), label1: g('label1'), label2: g('label2'), shown };
 });
 await shot('01e3-alchemy');
-await press('1'); // the only recipe on the list
+if (!alchList) throw new Error('alchemy did not open pick-potion.xml');
+if (!alchList.mixer.startsWith('Jenneke (skill '))
+  throw new Error(`the mixer line read ${alchList.mixer}`);
+// The step grants recipe 1 (Weak Healing Potion), which is `potion2` — the
+// buttons are indexed by eAlchemy, not by what this PC happens to know.
+if (JSON.stringify(alchList.shown) !== '[2]')
+  throw new Error(`buttons shown: ${alchList.shown.join(',')}`);
+if (!alchList.label2.startsWith('Weak Healing Potion ('))
+  throw new Error(`label2 read ${alchList.label2}`);
+await press('2'); // the only recipe with a button
 await page.waitForTimeout(300);
 const mixed = await page.evaluate(() => {
   const pc = window.__session.univ.party.pcs[0];
@@ -2366,14 +2393,13 @@ const ok =
   pcInfoClosed === true &&
   // Alchemy: the two dialogs come up, the recipe shows its difficulty, and
   // mixing spends the plant and leaves a three-dose potion in the pack.
-  alchWho !== null && alchList !== null && alchList.rows.length === 1 &&
-  alchList.rows[0].includes('(1)') &&
+  alchWho !== null && alchList !== null &&
   mixed.potion !== null && mixed.potion.charges === 3 && mixed.potion.abil === 76 &&
   mixed.plantGone === true && mixed.dialogGone === true &&
   // The job board offers the quest with its pay, and taking it starts the
   // quest (status 1 = STARTED) and clears the slot, there being no spare.
-  board !== null && board.rows.length === 1 && board.rows[0].includes('250 gold') &&
-  tookJob.status === 1 && tookJob.rows === 1 && tookJob.prompt === 'Job accepted.' &&
+  board !== null && board.job1.includes('250 gold') &&
+  tookJob.status === 1 && tookJob.take1 === true && tookJob.feedback === 'Job accepted.' &&
   // place_spell_pattern: the protective circle raises all four of its rings.
   (pattern.skipped !== undefined || (pattern.counts.forceWall > 0
     && pattern.counts.ice > 0 && pattern.counts.blades > 0

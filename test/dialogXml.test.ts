@@ -22,6 +22,11 @@ import {
 import { Item, ItemAbil, ItemPreset, ItemUse, presetItem } from '../src/data/item';
 import { monsterInfoDialog, putMonstInfo } from '../src/dialogs/monsterInfoDialog';
 import { storyDialog } from '../src/dialogs/storyDialog';
+import { jobBoardDialog } from '../src/dialogs/jobBoardDialog';
+import { pickPotionDialog, potionSlot } from '../src/dialogs/pickPotionDialog';
+import { alchemyChoices } from '../src/game/alchemy';
+import { QuestStatus } from '../src/data/quest';
+import { Skill } from '../src/universe/skills';
 import { DamageType, Monster, defaultMonster } from '../src/data/monster';
 import { FieldType } from '../src/data/fields';
 import {
@@ -658,5 +663,67 @@ describe('story_dialog, the paginated node', () => {
     // anything that isn't Back, so Next on the last page dismisses it.
     expect(dlg.onClick(...centreOf(dlg, 'right'))).toBe(null);
     expect(dlg.onClick(...centreOf(dlg, 'right'))).toBe('right');
+  });
+});
+
+describe('job-board and pick-potion', () => {
+  beforeAll(async () => {
+    for (const name of ['job-board', 'pick-potion']) {
+      if (!hasDialogDef(name)) await addDialogDef(name, readDialog(name));
+    }
+  });
+
+  it('fills the four slots and hides the Take of an empty one', () => {
+    const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
+    univ.scenario.quests.push({
+      deadlineIsRelative: true, autoStart: false, deadline: 30, event: -1,
+      xp: 100, gold: 250, bank1: 0, bank2: -1,
+      name: 'Find the cow', descr: 'It wandered off.',
+    });
+    const which = univ.scenario.quests.length - 1;
+    const bank = univ.party.jobBank(0);
+    bank.jobs = [which, -1, -1, -1, -1, -1];
+    bank.inited = true;
+
+    const dlg = jobBoardDialog(fakeCtx(), new SheetStore(), univ, bank, 0);
+    expect(dlg.getText('day')).toBe('1');
+    expect(dlg.getText('job1')).toBe('It wandered off. Must be completed in 30 days. Pay is 250 gold.');
+    expect(dlg.isVisible('take1')).toBe(true);
+    expect(dlg.getText('job2')).toBe('');
+    expect(dlg.isVisible('take2')).toBe(false);
+    expect(dlg.getText('feedback')).toBe('Dispatcher is neutral towards you.');
+
+    dlg.onClick(...centreOf(dlg, 'take1'));
+    expect(univ.party.activeQuests.get(which)?.status).toBe(QuestStatus.STARTED);
+    expect(dlg.getText('feedback')).toBe('Job accepted.');
+    // No spare to swap in, so the offer stays — the C++'s "otherwise, clear
+    // space" comment has no matching branch.
+    expect(dlg.isVisible('take1')).toBe(true);
+
+    univ.scenario.quests.length = which;
+  });
+
+  it('shows a button only for a recipe this PC can actually make', () => {
+    const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
+    const pc = univ.party.pcs[0]!;
+    // Recipe 0 is easy, recipe 19 is the hardest there is.
+    univ.party.alchemy[0] = true;
+    univ.party.alchemy[19] = true;
+    pc.skills[Skill.ALCHEMY] = 1;
+    const dlg = pickPotionDialog(fakeCtx(), new SheetStore(), pc, alchemyChoices(univ, 0));
+    expect(dlg.getText('mixer')).toBe(`${pc.name} (skill 1)`);
+    expect(dlg.isVisible('potion1')).toBe(true);
+    // Known but out of reach: the label is written, the button is not shown.
+    expect(dlg.getText('label20')).not.toBe('');
+    expect(dlg.isVisible('potion20')).toBe(false);
+    // Never learned: neither.
+    expect(dlg.getText('label5')).toBe('');
+    expect(dlg.isVisible('potion5')).toBe(false);
+  });
+
+  it('maps a button name back to its eAlchemy', () => {
+    expect(potionSlot('potion1')).toBe(0);
+    expect(potionSlot('potion20')).toBe(19);
+    expect(potionSlot('cancel')).toBe(-1);
   });
 });

@@ -17,7 +17,7 @@ import {
   cancelSpellTargeting, castCollected, doCombatCast, placeTarget,
 } from './game/spellCombatTarget';
 import { takeAp } from './game/combat';
-import { dispatcherMood, jobBoardOffers, openJobBank, takeJob } from './game/jobBank';
+import { openJobBank } from './game/jobBank';
 import { alchemyChoices, makePotion } from './game/alchemy';
 import { loadDialogDefs } from './dialogs/dialogStore';
 import { pcInfoDialog } from './dialogs/pcInfoDialog';
@@ -25,6 +25,8 @@ import { itemInfoDialog } from './dialogs/itemInfoDialog';
 import { STR_DIALOG_DEFS, pictTypeOf, strDialog } from './dialogs/strDialog';
 import { storyDialog } from './dialogs/storyDialog';
 import { monsterInfoDialog } from './dialogs/monsterInfoDialog';
+import { jobBoardDialog } from './dialogs/jobBoardDialog';
+import { pickPotionDialog, potionSlot } from './dialogs/pickPotionDialog';
 import { questInfoDialog } from './dialogs/questInfoDialog';
 import { ItemWinMode, QUEST_COMPLETED_OFFSET } from './game/itemWindow';
 import { BASIC_BUTTON_KEYS } from './game/specials/oneshot';
@@ -100,7 +102,8 @@ async function main(): Promise<void> {
   // The dialog definitions the player opens. The other ~150 belong to the
   // scenario and character editors, which this port doesn't run.
   await loadDialogDefs(fetchText,
-    ['pc-info', 'quest-info', 'get-items', 'item-info', 'many-str', 'monster-info', ...STR_DIALOG_DEFS]);
+    ['pc-info', 'quest-info', 'get-items', 'item-info', 'many-str', 'monster-info', 'job-board', 'pick-potion',
+     ...STR_DIALOG_DEFS]);
   const scen = await loadScenario(new FetchSource(`/scenarios/${name}/`), opcodes);
 
   const store = new SheetStore();
@@ -442,44 +445,16 @@ async function main(): Promise<void> {
   };
 
   /**
-   * The job board (`show_job_bank`, boe.dlgutil.cpp:794). Four offers, a Take
-   * beside each, and the dispatcher's mood along the bottom; taking one starts
-   * the quest and refills the slot from the board's spares.
-   *
-   * TODO(M3): job-board.xml is a picture, a title and four framed blocks with
-   * their own buttons. This is the same rules as a list, pending the dialogxml
-   * toolkit.
+   * The job board (`show_job_bank`, boe.dlgutil.cpp:794), on the real
+   * `job-board.xml`. Four offers, a Take beside each, and the dispatcher's
+   * mood along the bottom; taking one starts the quest and refills the slot
+   * from the board's spares.
    */
   session.onJobBank = (which, title, personality) => {
     if (dialogs.active) return;
-    void (async () => {
-      const bank = openJobBank(univ, which);
-      let prompt = dispatcherMood(bank.anger);
-      for (;;) {
-        const offers = jobBoardOffers(univ, bank);
-        const picked = await dialogs.run({
-          text: `${title || 'THE JOB BOARD:'}\n`
-            + `Current day: ${univ.party.calcDay()}\n`
-            + (offers.length > 0 ? 'Pick a job to take it.' : 'Nothing is on offer.')
-            + `\n${prompt}`,
-          rows: offers.map((offer, i) => ({
-            name: String(offer.slot),
-            key: String(i + 1),
-            label: offer.text,
-          })),
-          escapeButton: 'done',
-          buttons: [{ name: 'done', label: 'Done', key: 'd' }],
-        });
-        if (picked === 'done') break;
-        const slot = Number(picked);
-        if (!Number.isInteger(slot)) break;
-        const quest = univ.scenario.quests[bank.jobs[slot]!];
-        takeJob(univ, bank, slot, personality);
-        prompt = 'Job accepted.';
-        if (quest) univ.addStringToBuf(`  You take the job: ${quest.name}`);
-      }
-      redraw();
-    })();
+    const bank = openJobBank(univ, which);
+    void dialogs.runScreen(jobBoardDialog(ctx, store, univ, bank, personality))
+      .then(() => redraw());
   };
 
   /**
@@ -509,10 +484,7 @@ async function main(): Promise<void> {
    * Alchemy — `handle_alchemy` (boe.actions.cpp:1224) and the two dialogs
    * `do_alchemy` (boe.party.cpp:2284) runs: who mixes, then what. Mixing is a
    * town-only activity, and the mode gates below are the C++'s own wording.
-   *
-   * TODO(M3): pick-potion.xml is a grid of twenty labelled buttons with the
-   * mixer's name and skill along the top. This is the same rules as a list,
-   * pending the dialogxml toolkit.
+   * The potion picker is the real `pick-potion.xml`.
    */
   const doAlchemyFlow = async (): Promise<void> => {
     if (dialogs.active) return;
@@ -535,21 +507,9 @@ async function main(): Promise<void> {
     }
     const pc = univ.party.pcs[who]!;
     const choices = alchemyChoices(univ, who);
-    const picked = await dialogs.run({
-      text: `${pc.name} (skill ${pc.skill(Skill.ALCHEMY)})\nWhich potion?`,
-      rows: choices.map((choice, i) => ({
-        name: String(choice.which),
-        key: i < 9 ? String(i + 1) : undefined,
-        label: `${choice.name} (${choice.difficulty})`,
-        // A recipe above this PC's skill still shows, greyed — the C++ hides
-        // its button and leaves the label for the same reason.
-        disabled: !choice.canMake,
-      })),
-      escapeButton: 'cancel',
-      buttons: [{ name: 'cancel', label: 'Cancel', key: 'c' }],
-    });
-    const which = Number(picked);
-    if (Number.isInteger(which) && choices.some((c) => c.which === which && c.canMake))
+    const picked = await dialogs.runScreen(pickPotionDialog(ctx, store, pc, choices));
+    const which = potionSlot(picked);
+    if (which >= 0 && choices.some((c) => c.which === which && c.canMake))
       makePotion(session, who, which, (n) => sound.play(n));
     setStatus();
     redraw();

@@ -1597,10 +1597,9 @@ playthrough will hit it:
 5. **The dialogxml toolkit** — the parser, the widget renderer and the first
    converted call site (`pc-info.xml`) landed 2026-07-28; see the entry below.
    Since then: `quest-info`, `get-items`, `item-info`, the eight `cStrDlog`
-   layouts, `monster-info` and `many-str`. What's left is `display_pc`'s spell
-   lists, `cThreeChoice` (which builds its controls at runtime rather than
-   from a definition), and the two dialogs the job board and alchemy are still
-   approximating with lists.
+   layouts, `monster-info`, `many-str`, `job-board` and `pick-potion`. What's
+   left is `display_pc`'s spell lists and `cThreeChoice`, which builds its
+   controls at runtime rather than from a definition.
 6. ~~Odds and ends left over from M5~~ — **done** (2026-07-28), see the entry
    below. The one thing left in that area is `AFFECT_SOUL_CRYSTAL`, which needs
    the creature-context plumbing described there.
@@ -2574,3 +2573,30 @@ playthrough will hit it:
     `test/specials.test.ts` pins that STORY_DIALOG passes a title and a range;
     `test/spellTarget.test.ts` pins that Scry Monster reaches the host.
     `verify-screen.mjs` opens both dialogs for real and turns a page.
+
+- **The job board and the potion picker, on their real definitions
+  (2026-07-29).** The last two screens this port was approximating with a list
+  of rows. Both had their *rules* factored out already (`game/jobBank.ts`,
+  `game/alchemy.ts`), so this is only the screen.
+  - **`job-board.xml`** (`dialogs/jobBoardDialog.ts`): the day along the top,
+    four offers down the page each with its own Take, and the dispatcher's mood
+    in the `feedback` field. Taking one rewrites the page in place.
+    - *The two mismatches in the C++ this port has to choose between*:
+      `show_job_bank` asks the resource manager for a dialog called
+      **`job-bank`** while the file that ships is `job-board.xml`, and it writes
+      its mood line into a control called **`prompt`** where that file's field
+      is `feedback`. Neither name exists, so the upstream WASM build's job board
+      cannot open at all. This port uses the file and the names that exist.
+    - *Gotcha kept*: the mood line becomes "Job accepted." and stays that way,
+      so a board you've taken a job from no longer tells you its mood.
+  - **`pick-potion.xml`** (`dialogs/pickPotionDialog.ts`): twenty numbered
+    buttons in two columns, the mixer's name and alchemy skill along the top.
+    - *Gotcha worth keeping*: `alch_choice` hides every button first, then
+      walks the twenty recipes — an **unknown** one is skipped before its label
+      is written, so it stays blank, but a **known but too hard** one gets its
+      label and keeps its button hidden. A labelled row with no button is the
+      whole hint the screen gives about what more training would buy you.
+    - The buttons are indexed by `eAlchemy`, not by what the PC knows, so the
+      one recipe valleydy's test party has is `potion2`, not `potion1`.
+  - Tests: 3 more in `test/dialogXml.test.ts`; `verify-screen.mjs`'s job-board
+    and alchemy steps now read the real controls and click a real Take.
