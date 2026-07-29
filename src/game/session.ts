@@ -10,7 +10,7 @@
  */
 
 import { QuestStatus } from '../data/quest';
-import { Direction, Location, dist, loc, locsEqual, shiftLoc } from '../core/location';
+import { Direction, Location, dist, loc, locsEqual, minmax, shiftLoc } from '../core/location';
 import { SIGHT_BLOCKED, canSee } from '../core/sight';
 import { Item, ItemAbil, ItemType, defaultItem } from '../data/item';
 import { MonstTime } from '../data/monster';
@@ -210,6 +210,11 @@ export class GameSession {
    */
   startNewGame(): void {
     this.univ.addStringToBuf(`Welcome to ${this.univ.scenario.title}.`);
+    // The forced square is the point of entry_dir 9: without it the party
+    // lands on whichever town entrance `startLocs` happens to list first,
+    // which for valleydy is the north gate rather than the guest quarters
+    // the scenario opens in (boe.party.cpp:211).
+    this.forceTownEntry(this.univ.scenario.startTown, this.univ.scenario.townStart);
     this.startTownMode(this.univ.scenario.startTown, FORCED_ENTRY);
     // put_party_in_scen runs the scenario's on-init node last (boe.party.cpp:238).
     void this.runSpecial(
@@ -1967,6 +1972,35 @@ export class GameSession {
 
   forceTownEntry(townNum: number, where: Location): void {
     this.forcedTownLoc = { ...where };
+  }
+
+  /**
+   * `position_party` (boe.fileio.cpp:218) — put the party down somewhere else
+   * on the world map entirely: sector (outX, outY), square (pcX, pcY) inside
+   * it. This is a *scripted* teleport, not a step, so it slides the whole 96x96
+   * window rather than nudging it, forgets every wandering group in flight, and
+   * reloads the explored flags from the sectors it lands on.
+   *
+   * Returns false if the destination is out of bounds, which is the C++'s
+   * `showError` arm — the party doesn't move.
+   */
+  positionParty(outX: number, outY: number, pcX: number, pcY: number): boolean {
+    const { scenario } = this.univ;
+    if (
+      pcX !== minmax(0, 47, pcX) || pcY !== minmax(0, 47, pcY)
+      || outX !== minmax(0, scenario.outWidth - 1, outX)
+      || outY !== minmax(0, scenario.outHeight - 1, outY)
+    ) {
+      this.univ.addStringToBuf(
+        'The scenario has tried to place you in an out of bounds outdoor location.');
+      return false;
+    }
+    this.univ.out.positionParty(outX, outY, pcX, pcY);
+    if (this.isOutdoors) {
+      this.center = { ...this.univ.party.outLoc };
+      this.updateExplored(this.univ.party.outLoc);
+    }
+    return true;
   }
 
   /**

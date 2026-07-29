@@ -1587,8 +1587,8 @@ the entry above). What M6 still owes, roughly in the order the valleydy
 playthrough will hit it:
 
 1. ~~**Party ops**: boats and horses~~ — **done** (2026-07-27), see the entry
-   below. `force_town_enter` + `position_party` (a scripted teleport landing
-   the party on a specific town square) are still open.
+   below. ~~`force_town_enter` + `position_party`~~ — **done** (2026-07-28),
+   see the entry at the bottom.
 2. ~~**The job-bank board**~~ — **done** (2026-07-28), see the entry below.
    What's left of the quest UI is the quest pane of the item window.
 3. ~~**Alchemy** (`A`)~~ — **done** (2026-07-28), see the entry below.
@@ -2361,3 +2361,53 @@ playthrough will hit it:
     change upstream that moves the RNG could flip it. It re-arms IDLE until the
     notice actually lands now, so the assertion is about the message existing
     rather than about one roll.
+
+- **Teleports across the world map: `position_party`, and the start square a
+  new game had never used (2026-07-28).** `GameSession.positionParty` ports
+  `position_party` (boe.fileio.cpp:218) and `CurOut.positionParty` the window
+  half under it: a *scripted* jump slides the whole 96×96 block rather than
+  nudging it, so it saves the explored flags of the sectors it is leaving,
+  forgets every wandering group in flight and reloads the flags of the sectors
+  it lands on. Three things came out of it.
+  - **`TOWN_RELOCATE` was implemented as a town teleport, and it isn't one.**
+    Despite the name and the opcode group it sits in, the C++ arm is
+    `position_party(ex1a, ex1b, ex2a, ex2b)` (boe.specials.cpp:4109) — ex1a/ex1b
+    are an outdoor *sector* and ex2a/ex2b a square inside it. The port was
+    moving the party to `(ex1a, ex1b)` in the current town instead. It fires
+    while the party is standing in a town: what it changes is where they come
+    out.
+  - **`build_outdoors` ends in `add_outdoor_maps`** (boe.fileio.cpp:270) and
+    this port's `build()` didn't. Every `shift_universe_*` goes through it, so
+    ground walked once went black again the moment the window slid off it and
+    back — the sector remembered the map and nothing ever read it. One line.
+  - **The wandering groups ride the window.** `shift_universe_left` and its
+    three siblings move `out_c[i].m_loc` by a half-window and drop anything
+    that would land outside; that was missing entirely, so a group stayed at
+    its old window coordinate — 48 squares away from where it had been.
+  - **Word of Recall works** (boe.party.cpp:1010). The order in the C++ is
+    worth keeping: the party is put *into* the start town first and
+    `position_party` then rewrites the outdoor position underneath them, so
+    walking back out lands them at the scenario's outdoor start rather than
+    wherever they cast it. It also refuses in a boat and on a horse, and clears
+    everyone's forcecage.
+  - *Gotcha in the file format, not in this port*: `<outdoor-start>` is read
+    into `out_sec_start` (the **sector**) and `<sector-start>` into `out_start`
+    (the square inside it) — the two tag names are the wrong way round
+    (fileio_scen.cpp:907). `Scenario.outdoorStart`/`sectorStart` keep the C++'s
+    meanings and now say so.
+  - **A new game had been starting on the wrong square all along.**
+    `put_party_in_scen` calls `force_town_enter(which_town_start, where_start)`
+    before `start_town_mode(…, 9)` (boe.party.cpp:211); `startNewGame` passed
+    entry direction 9 without ever setting the forced location, so the fallback
+    ran and the party appeared on whichever town entrance `startLocs` listed
+    first. For valleydy that was the north gate (21,4) instead of the bed in
+    the guest quarters (7,8) the scenario opens on. Fixed — the game now opens
+    where Valley of Dying Things means it to.
+    - Three test fixtures walked the party from that entrance and had to be
+      told to step out of the bedroom first, which is a two-square room:
+      `increaseAge`, `pcPanel` and `spellCombat`.
+  - Tests: `test/positionParty.test.ts` (10) covers the move, the bounds
+    refusal, the forgotten groups, the explored flags in both directions, the
+    window shift, TOWN_RELOCATE's real meaning and both halves of Word of
+    Recall. `verify-screen.mjs` gained a step that casts it for real at the end
+    of the outdoor run and checks all four coordinates and the spell points.

@@ -28,7 +28,14 @@ export interface Scenario {
   /** Whether monster health scales with the party's total level. */
   adjustDiff: boolean;
   townStart: { x: number; y: number };
+  /**
+   * `out_sec_start` — the *sector* the party starts in. The XML tag it is read
+   * from is `<outdoor-start>`, and `<sector-start>` holds the square within it
+   * (fileio_scen.cpp:907): the two names are the wrong way round in the format,
+   * and both this port and the C++ read them as written.
+   */
   outdoorStart: { x: number; y: number };
+  /** `out_start` — the 0..47 square inside `outdoorStart`'s sector. */
   sectorStart: { x: number; y: number };
   terTypes: Terrain[];
   scenItems: Item[];

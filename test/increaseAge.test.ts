@@ -54,6 +54,13 @@ beforeAll(async () => {
 function inTown(): GameSession {
   const s = new GameSession(new Universe(scen, new GameRng(), PartyPreset.DEFAULT));
   s.startNewGame();
+  // A new game starts on the bed in Fort Talrus's guest quarters, which is
+  // where `where_start` puts the party — a two-square room they can't walk
+  // around in. Step them out to the town's own entrance square, which is what
+  // these tests were written against.
+  s.univ.party.townLoc = { ...s.univ.town!.record.startLocs[0]! };
+  s.center = { ...s.univ.party.townLoc };
+  s.updateExplored(s.univ.party.townLoc);
   return s;
 }
 

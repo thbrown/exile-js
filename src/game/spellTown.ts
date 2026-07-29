@@ -664,15 +664,38 @@ export function doPriestSpell(
         storeItemSpellLevel);
       break;
 
-    case Spell.WORD_RECALL:
-      // TODO(M6): force_town_enter + position_party — moving the party to the
-      // scenario's start point, which needs the town-entry plumbing.
+    case Spell.WORD_RECALL: {
       if (!session.isOutdoors) {
         univ.addStringToBuf('  Can only cast outdoors.');
         return;
       }
-      univ.addStringToBuf('  Word of Recall is not in yet.');
+      if (univ.party.inBoat >= 0) {
+        univ.addStringToBuf('  Not while in boat.');
+        return;
+      }
+      if (univ.party.inHorse >= 0) {
+        univ.addStringToBuf('  Not while on horseback.');
+        return;
+      }
+      spendSp(pc, spellNum, freebie);
+      for (const member of univ.party.pcs) member.status[Status.FORCECAGE] = 0;
+      univ.addStringToBuf('  You are moved... ');
+      // The order is the C++'s (boe.party.cpp:1029) and it matters: the party
+      // is put *into* the start town first, and `position_party` then rewrites
+      // the outdoor position underneath it — so walking back out of that town
+      // lands them at the scenario's outdoor start rather than wherever they
+      // cast this from.
+      const { startTown, townStart, sectorStart, outdoorStart } = univ.scenario;
+      session.forceTownEntry(startTown, townStart);
+      session.startTownMode(startTown, 9);
+      // The two field names are swapped in the file format, not here:
+      // `<outdoor-start>` is read into `out_sec_start` (the sector) and
+      // `<sector-start>` into `out_start` (the square). See scenario.ts.
+      session.positionParty(outdoorStart.x, outdoorStart.y, sectorStart.x, sectorStart.y);
+      session.center = { ...townStart };
+      univ.party.townLoc = { ...townStart };
       break;
+    }
 
     default:
       univ.addStringToBuf(

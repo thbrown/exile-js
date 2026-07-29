@@ -1592,6 +1592,9 @@ async function main(): Promise<void> {
     // The protective circle, for the verifier's place_spell_pattern check.
     __placePattern: (at: Location) =>
       placeSpellPattern(session, SpellPat.PROT, at, { whoHit: univ.curPc }),
+    // Casts a spell without the picker, for spells the verifier wants to reach
+    // directly (Word of Recall, whose whole effect is where the party ends up).
+    __castSpell: (pcNum: number, spell: Spell) => castSpell(session, pcNum, spell),
     // Arms a town-targeting spell, so the verifier can drive the click path.
     __startTownTargeting: (spell: Spell) => startTownTargeting(session, spell, univ.curPc),
     // Lets the headless verifier watch which sound files actually get played.

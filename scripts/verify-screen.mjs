@@ -2054,6 +2054,40 @@ const encounterEnd = await page.evaluate(() => {
 });
 console.log('OUTDOOR ENCOUNTER END:', JSON.stringify(encounterEnd));
 
+// Word of Recall — `position_party` and `force_town_enter` together. Cast it
+// from wherever the outdoor wandering ended up, and the party should be
+// standing in the scenario's start town with a fresh outdoor position under
+// them for when they walk back out.
+const recall = await page.evaluate(() => {
+  const s = window.__session;
+  const univ = window.__univ;
+  if (s.mode !== 0) return { skipped: 'not outdoors', mode: s.mode };
+  const from = { corner: { ...univ.party.outdoorCorner }, loc: { ...univ.party.outLoc } };
+  // A wandering group in flight, to check the teleport forgets it.
+  univ.party.outC[0].exists = true;
+  univ.party.pcs[1].curSp = 40;
+  window.__castSpell(1, 160 /* eSpell::WORD_RECALL */);
+  window.__redraw();
+  return {
+    from,
+    inTown: univ.party.townNum !== 200,
+    town: univ.town ? univ.town.record.name : null,
+    townNum: univ.party.townNum,
+    startTown: univ.scenario.startTown,
+    townLoc: { ...univ.party.townLoc },
+    wantTownLoc: { ...univ.scenario.townStart },
+    corner: { ...univ.party.outdoorCorner },
+    wantCorner: { ...univ.scenario.outdoorStart },
+    outLoc: { ...univ.party.outLoc },
+    wantOutLoc: { ...univ.scenario.sectorStart },
+    groupsLeft: univ.party.outC.filter((g) => g.exists).length,
+    sp: univ.party.pcs[1].curSp,
+    tail: univ.transcript.slice(-2),
+  };
+});
+console.log('WORD OF RECALL:', JSON.stringify(recall));
+await shot('02i-word-of-recall');
+
 console.log('ERRORS:', errors.length ? errors.join(' | ') : 'none');
 await browser.close();
 
@@ -2077,6 +2111,14 @@ const ok =
     encounterEnd.refused === false &&
     encounterEnd.ended === true &&
     encounterEnd.mode === 0)) &&
+  (recall.skipped !== undefined || (
+    recall.inTown === true &&
+    recall.townNum === recall.startTown &&
+    JSON.stringify(recall.townLoc) === JSON.stringify(recall.wantTownLoc) &&
+    JSON.stringify(recall.corner) === JSON.stringify(recall.wantCorner) &&
+    JSON.stringify(recall.outLoc) === JSON.stringify(recall.wantOutLoc) &&
+    recall.groupsLeft === 0 &&
+    recall.sp === 10)) &&
   missileAimed.armed === true &&
   missileAimed.mode === 11 &&
   missileFired.armed === false &&

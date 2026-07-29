@@ -81,9 +81,13 @@ export async function townSpec(univ: Universe, ctx: SpecialCtx): Promise<void> {
       break;
 
     case SpecType.TOWN_RELOCATE:
-      // position_party — same idea, without the teleport flash.
-      teleportParty(univ, ctx, at);
-      ctx.redraw = true;
+      // Not a town move at all, despite the name and the group it sits in:
+      // it is `position_party(ex1a, ex1b, ex2a, ex2b)` (boe.specials.cpp:4109),
+      // which moves the party across the *outdoor* map — ex1a/ex1b are the
+      // sector, ex2a/ex2b the square inside it. Nothing is redrawn and no
+      // message is checked, because the party is standing in a town when this
+      // runs; what it changes is where they come out.
+      ctx.session.positionParty(spec.ex1a, spec.ex1b, spec.ex2a, spec.ex2b);
       break;
 
     case SpecType.TOWN_SET_CENTER:

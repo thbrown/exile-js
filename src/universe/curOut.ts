@@ -85,6 +85,12 @@ export class CurOut {
           ? se.terrain[i]![j]!
           : base.terrain[SECTOR_SIZE - 1]![SECTOR_SIZE - 1]!;
       }
+
+    // build_outdoors ends with add_outdoor_maps (boe.fileio.cpp:270), which is
+    // what restores the remembered explored flags of a sector the window has
+    // just slid onto. Without it, ground walked once went black again the
+    // moment the window moved off it and back.
+    this.addMaps();
   }
 
   private shiftExplored(dx: number, dy: number): void {
@@ -112,6 +118,43 @@ export class CurOut {
       y: this.party.outLoc.y - dy * OUT_HALF_DIM,
     };
     this.shiftExplored(-dx, -dy);
+
+    // The wandering groups ride the window with the party. A group that would
+    // land outside it is dropped — the C++ makes that test against the *old*
+    // coordinate and before the move, so on a leftward shift anything past the
+    // halfway line is forgotten and everything else slides right by 48.
+    for (const group of this.party.outC) {
+      if (dx === -1 && group.mLoc.x > OUT_HALF_DIM) group.exists = false;
+      if (dx === 1 && group.mLoc.x < OUT_HALF_DIM) group.exists = false;
+      if (dy === -1 && group.mLoc.y > OUT_HALF_DIM) group.exists = false;
+      if (dy === 1 && group.mLoc.y < OUT_HALF_DIM) group.exists = false;
+      if (!group.exists) continue;
+      group.mLoc = {
+        x: group.mLoc.x - dx * OUT_HALF_DIM,
+        y: group.mLoc.y - dy * OUT_HALF_DIM,
+      };
+    }
+
+    this.build();
+  }
+
+  /**
+   * The window half of `position_party` (boe.fileio.cpp:218) — drop the party
+   * at sector (outX, outY), square (pcX, pcY) within it. The bounds check and
+   * the transcript message are the caller's (`GameSession.positionParty`).
+   *
+   * Note the party always lands in the window's *top-left* sector: `out_loc`
+   * is set to the sector-local coordinate, so the `> 47` tests that derive
+   * `i_w_c` are both false.
+   */
+  positionParty(outX: number, outY: number, pcX: number, pcY: number): void {
+    this.saveMaps();
+    this.party.outLoc = { x: pcX, y: pcY };
+    this.party.locInSec = this.party.globalToLocal(this.party.outLoc);
+    this.party.outdoorCorner = { x: outX, y: outY };
+    this.party.iwc = { x: this.party.outLoc.x > 47 ? 1 : 0, y: this.party.outLoc.y > 47 ? 1 : 0 };
+    for (const group of this.party.outC) group.exists = false;
+    for (const row of this.explored) row.fill(0);
     this.build();
   }
 
