@@ -79,10 +79,40 @@ const map = await page.evaluate(() => {
   return { visible: window.__screen.mapVisible, colours: seen.size };
 });
 await shot('01a-map-town');
+// The map window is draggable: press anywhere on it, move, release. It clamps
+// so at least 50px stays on the canvas and the title never leaves the top.
+const canvasPoint = async (x, y) => page.evaluate(({ x, y }) => {
+  const c = document.querySelector('canvas');
+  const r = c.getBoundingClientRect();
+  return { x: r.left + (x + 0.5) * (r.width / c.width), y: r.top + (y + 0.5) * (r.height / c.height) };
+}, { x, y });
+const grab = await canvasPoint(60, 70);
+await page.mouse.move(grab.x, grab.y);
+await page.mouse.down();
+const to = await canvasPoint(160, 150);
+await page.mouse.move(to.x, to.y, { steps: 4 });
+const dragged = await page.evaluate(() => ({ ...window.__screen.mapScreen.pos }));
+await page.mouse.up();
+// Now shove it hard off the top-left and check the clamp catches it.
+await page.mouse.move(to.x, to.y);
+await page.mouse.down();
+const far = await canvasPoint(0, 0);
+await page.mouse.move(far.x - 600, far.y - 600, { steps: 4 });
+const clamped = await page.evaluate(() => ({
+  ...window.__screen.mapScreen.pos, dragging: window.__screen.mapScreen.dragging,
+}));
+await page.mouse.up();
+const released = await page.evaluate(() => window.__screen.mapScreen.dragging);
+await page.evaluate(() => { window.__screen.mapScreen.pos = { x: 52, y: 62 }; window.__redraw(); });
 await press('Escape');
 await page.waitForTimeout(150);
 const mapClosed = await page.evaluate(() => window.__screen.mapVisible);
-console.log('MAP:', JSON.stringify(map), 'closed:', mapClosed);
+console.log('MAP:', JSON.stringify(map), 'closed:', mapClosed,
+  'drag:', JSON.stringify({ dragged, clamped, released }));
+if (dragged.x !== 152 || dragged.y !== 142) throw new Error(`map did not follow the pointer: ${JSON.stringify(dragged)}`);
+if (clamped.y !== 0) throw new Error('the map window went above the top of the canvas');
+if (clamped.x !== -296 + 50) throw new Error(`the map window slid too far left: ${clamped.x}`);
+if (released) throw new Error('releasing the mouse did not end the drag');
 
 // 2. A new game starts inside the start town with the pregen party.
 const start = await page.evaluate(async () => {
@@ -755,6 +785,84 @@ if (questPage.mode !== 7) throw new Error('0 did not open the quests page');
 if (!questInfo || questInfo.name !== 'Verify quest') throw new Error('quest-info.xml did not fill');
 if (questInfo.chop !== 'Day 31') throw new Error(`relative deadline read as ${questInfo.chop}`);
 if (backToPack.mode !== 0 || backToPack.scrollMax !== 16) throw new Error('1 did not go back to the pack page');
+
+// 2f. Searching a container. Fort Talrus's bookshelves and chests hold items
+//     marked "contained", which do_look never lists; adj_town_look is what
+//     opens them. Stand next to one and look at it.
+const container = await page.evaluate(() => {
+  const s = window.__session;
+  const town = s.univ.town;
+  // A square that is a container and has something inside it.
+  for (const item of town.items) {
+    if (item.variety === 0 || !item.contained) continue;
+    const at = item.itemLoc;
+    if (!s.isContainer(at)) continue;
+    // Stand directly below it, and make sure the square is explored and lit.
+    s.univ.party.townLoc = { x: at.x, y: at.y + 1 };
+    s.center = { ...s.univ.party.townLoc };
+    s.updateExplored(s.univ.party.townLoc);
+    window.__redraw();
+    const inside = town.items.filter((i) => i.variety !== 0 && i.contained
+      && i.itemLoc.x === at.x && i.itemLoc.y === at.y).map((i) => i.name);
+    return { at: { ...at }, ter: town.record.terrain[at.x][at.y], inside };
+  }
+  return null;
+});
+if (!container) throw new Error('no container with contents found in Fort Talrus');
+await press('l');
+await press('ArrowUp');
+await page.waitForTimeout(300);
+const searched = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  return {
+    title: d && d.title ? d.title : null,
+    rows: d && d.items ? d.items.map((i) => i.name) : null,
+    tail: window.__session.univ.transcript.slice(-3),
+  };
+});
+await shot('01d0-container');
+console.log('CONTAINER:', JSON.stringify({ container, searched }));
+if (!searched.rows) throw new Error('looking at a container did not open it');
+if (searched.rows.length !== container.inside.length)
+  throw new Error(`container held ${container.inside.length} but showed ${searched.rows.length}`);
+await press('Escape');
+await page.waitForTimeout(200);
+
+// Searching a plain square says so instead.
+await page.evaluate(() => {
+  const s = window.__session;
+  s.univ.party.townLoc = { x: 21, y: 4 };
+  s.center = { ...s.univ.party.townLoc };
+  window.__redraw();
+});
+await press('l');
+await press('ArrowUp');
+await page.waitForTimeout(250);
+const emptySearch = await page.evaluate(() => window.__session.univ.transcript.slice(-1)[0]);
+console.log('SEARCH NOTHING:', JSON.stringify(emptySearch));
+
+// 2g. Bash / Pick Lock / Use insist on plain town mode. Arming Bash twice
+//     cancels; arming it during a conversation is refused.
+await press('b');
+await page.waitForTimeout(120);
+const bashArmed = await page.evaluate(() => window.__session.univ.transcript.slice(-1)[0]);
+await press('b');
+await page.waitForTimeout(120);
+const bashCancelled = await page.evaluate(() => window.__session.univ.transcript.slice(-1)[0]);
+// And with something else in progress it refuses. Look mode is the cheapest
+// non-town mode to get into.
+await press('l');
+await page.waitForTimeout(120);
+await press('b');
+await page.waitForTimeout(120);
+const bashBusy = await page.evaluate(() => window.__session.univ.transcript.slice(-1)[0]);
+await press('Escape');
+await page.waitForTimeout(120);
+const bashGate = { armed: bashArmed, cancelled: bashCancelled, busy: bashBusy };
+console.log('BASH GATE:', JSON.stringify(bashGate));
+if (!bashGate.armed.startsWith('Bash Door: Select')) throw new Error('b did not arm Bash Door');
+if (!bashGate.cancelled.includes('Cancelled')) throw new Error('b again did not cancel Bash Door');
+if (!bashGate.busy.includes('Finish what')) throw new Error('b was accepted mid-look');
 
 // 2d. Signs: looking at an adjacent sign opens a dialog with its text.
 const sign = await page.evaluate(async () => {

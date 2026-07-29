@@ -71,3 +71,35 @@ export function tilePattern(
       ctx.drawImage(pixpats, src.left, src.top, pw, ph, x, y, pw, ph);
   ctx.restore();
 }
+
+/**
+ * `bw_pats` (gfx/tiling.cpp:104) — six 8x8 dither patterns in a row across
+ * bwpats.png, sparse to dense. Only the mask over unexplored ground uses them.
+ */
+export const BW_PAT_W = 8;
+
+export function bwPatRect(index: number): UiRect {
+  const left = 8 * index;
+  return { top: 0, left, bottom: 8, right: left + 8 };
+}
+
+/** `tileImage` with one of the black-and-white patterns rather than a bg. */
+export function tileBwPattern(
+  ctx: CanvasRenderingContext2D,
+  bwpats: CanvasImageSource,
+  index: number,
+  dest: UiRect,
+): void {
+  const src = bwPatRect(index);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(dest.left, dest.top, dest.right - dest.left, dest.bottom - dest.top);
+  ctx.clip();
+  // The pattern is aligned to the destination origin, as tileImage aligns it.
+  const startX = dest.left - (dest.left % BW_PAT_W);
+  const startY = dest.top - (dest.top % BW_PAT_W);
+  for (let y = startY; y < dest.bottom; y += BW_PAT_W)
+    for (let x = startX; x < dest.right; x += BW_PAT_W)
+      ctx.drawImage(bwpats, src.left, src.top, BW_PAT_W, BW_PAT_W, x, y, BW_PAT_W, BW_PAT_W);
+  ctx.restore();
+}

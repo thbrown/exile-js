@@ -7,7 +7,7 @@ import { animAt, animSchedule, combatPace, setCombatPace } from './game/anim';
 import { useItem } from './game/itemUse';
 import type { SpecialHost } from './game/specials/context';
 import { SpecCtx, SpecCtxType } from './game/specials/context';
-import { Location, locsEqual, shiftLoc } from './core/location';
+import { Location, dist, locsEqual, shiftLoc } from './core/location';
 import { SpellPat } from './data/pattern';
 import { SPELLS, Spell, spellName } from './data/spell';
 import { CastStatus, castableSpells, pcCanCastType } from './game/spellCast';
@@ -29,7 +29,7 @@ import { castTownSpell, startTownTargeting } from './game/spellTarget';
 import { CastDialog } from './dialogs/castDialog';
 import { GetItemsDialog } from './dialogs/getItemsDialog';
 import { placeSpellPattern } from './game/spellPatterns';
-import { GameMode, isCombat, isScrollable } from './game/modes';
+import { GameMode, isCombat, isOut, isScrollable } from './game/modes';
 import { Boom, setBoomSink } from './game/booms';
 import { FocusEvent, animPending, setAnimWaiter, setFocusSink } from './game/anim';
 import { Missile, setMissileSink } from './game/missileAnim';
@@ -46,7 +46,7 @@ import { InputRouter } from './platform/input';
 import { Snd, SoundPlayer } from './platform/sound';
 import { setLivingSound } from './universe/living';
 import { BOE_HEIGHT, BOE_WIDTH, ToolbarButton } from './render/layout';
-import { MAP_WINDOW } from './render/mapScreen';
+
 import { CHROME_SHEETS, Screen } from './render/screen';
 import { ShopHit, shopItemInfo } from './render/shopScreen';
 import { SheetStore } from './render/sheets';
@@ -721,7 +721,53 @@ async function main(): Promise<void> {
   canvas.addEventListener('mousedown', wakeSound, { once: true });
 
   /** What the next direction or view click should do instead of moving. */
-  let pending: 'talk' | 'look' | 'use' | 'bash' | null = null;
+  let pending: 'talk' | 'look' | 'use' | 'bash' | 'pick' | null = null;
+
+  /**
+   * `handle_use_space_select` / `handle_bash_pick_select` (boe.actions.cpp:930
+   * and :959) — arm Use, Bash Door or Pick Lock, or cancel it if it is already
+   * armed.
+   *
+   * All three insist on **MODE_TOWN exactly**, not merely "in a town": with a
+   * conversation, a shop, a look or a spell in progress the answer is "Finish
+   * what you're doing first." This port's `pending` flag stands in for the
+   * MODE_USE_TOWN / MODE_BASH_TOWN / MODE_PICK_TOWN modes, so an armed action
+   * of the same kind counts as being in that mode.
+   */
+  const beginTalk = (): void => {
+    // `handle_begin_talk` (boe.actions.cpp:504) says nothing at all outside
+    // MODE_TOWN — unlike Use and Bash, which explain themselves.
+    if (session.mode !== GameMode.TOWN && pending !== 'talk') return;
+    if (pending === 'talk') {
+      pending = null;
+      univ.addStringToBuf('  Cancelled.');
+      return;
+    }
+    pending = 'talk';
+    univ.addStringToBuf('Talk: Select someone.');
+  };
+
+  const selectSpace = (what: 'use' | 'bash' | 'pick'): void => {
+    const label = what === 'use' ? 'Use' : what === 'bash' ? 'Bash Door' : 'Pick Lock';
+    if (session.mode !== GameMode.TOWN && pending !== what) {
+      if (isCombat(session.mode)) univ.addStringToBuf(`${label}: not in combat.`);
+      else if (isOut(session.mode)) univ.addStringToBuf(`${label}: not outdoors`);
+      else univ.addStringToBuf(`${label}: Finish what you're doing first.`);
+      return;
+    }
+    if (pending === what) {
+      pending = null;
+      univ.addStringToBuf('  Cancelled.');
+      return;
+    }
+    pending = what;
+    if (what === 'use') {
+      univ.addStringToBuf('Use: Select a space or item.');
+      univ.addStringToBuf('  (Hit button again to cancel.)');
+    } else {
+      univ.addStringToBuf(`${label}: Select a space.`);
+    }
+  };
 
   const setStatus = (): void => {
     if (session.shop)
@@ -733,6 +779,8 @@ async function main(): Promise<void> {
         'Look: click a space (the border arrows scroll the view). L or Esc cancels.';
     else if (pending === 'use') status.textContent = 'Use what? (pick a direction)';
     else if (pending === 'bash') status.textContent = 'Bash which door? (pick a direction)';
+    else if (pending === 'pick')
+      status.textContent = 'Pick which lock? (pick a direction)';
     else if (session.missile !== null)
       status.textContent =
         'Aim: click a square (or pick a direction). S or Esc cancels.';
@@ -822,13 +870,32 @@ async function main(): Promise<void> {
     recentre();
   };
 
-  /** Look at a space: describe it, and read an adjacent sign if there is one. */
-  const lookAt = (target: { x: number; y: number }): void => {
+  /**
+   * Look at a space: describe it (`do_look`), then search it
+   * (`adj_town_look`), then read an adjacent sign if there is one — the three
+   * steps `handle_look` runs in that order (boe.actions.cpp:697).
+   */
+  const lookAt = async (target: { x: number; y: number }): Promise<void> => {
     const ter = session.lookAt(target);
     if (ter < 0) return;
+    // Searching an adjacent square in town: runs its special, and opens it if
+    // it turns out to be a container with something inside.
+    if (session.inTown || isCombat(session.mode)) {
+      if (dist(univ.party.townLoc, target) <= 1) {
+        const contents = await session.adjTownLook(target);
+        redraw();
+        if (contents && contents.length > 0 && !dialogs.active) {
+          await dialogs.runScreen(
+            new GetItemsDialog(ctx, store, session, contents, 'Looking in container:'));
+          setStatus();
+          redraw();
+          return;
+        }
+      }
+    }
     const sign = session.signAt(target);
     if (sign === null || dialogs.active) return;
-    void dialogs.run({
+    await dialogs.run({
       text: sign,
       terPic: scen.terTypes[ter]?.picture,
       escapeButton: 'okay',
@@ -898,17 +965,36 @@ async function main(): Promise<void> {
       return;
     }
     if (what === 'look') {
-      lookAt(target);
+      void lookAt(target);
       // Looking is done unless the modifier keys held it open; this port has
       // no quick-look modifier, so every look ends the mode.
       endLook();
       return;
     }
-    if (what === 'bash') {
-      // handle_bash_pick_select: pick a square, then who does the bashing.
+    if (what === 'bash' || what === 'pick') {
+      // handle_bash_pick (boe.actions.cpp:976) — the square has to be next to
+      // you and has to be something with a lock on it; then who does it.
+      const isBash = what === 'bash';
+      if (dist(univ.party.townLoc, target) > 1) {
+        univ.addStringToBuf('  Must be adjacent.');
+        setStatus();
+        redraw();
+        return;
+      }
+      if (!session.isUnlockable(target)) {
+        univ.addStringToBuf('  Wrong terrain type.');
+        setStatus();
+        redraw();
+        return;
+      }
       void (async () => {
-        const who = await selectPc('living', 'Who will bash?', Skill.STRENGTH);
-        if (who >= 0) session.bashDoor(target, who);
+        const who = isBash
+          ? await selectPc('living', 'Who will bash?', Skill.STRENGTH)
+          : await selectPc('lockpick', 'Who will pick the lock?', Skill.LOCKPICKING);
+        if (who >= 0) {
+          if (isBash) session.bashDoor(target, who);
+          else session.pickLock(target, who);
+        }
         setStatus();
         redraw();
       })();
@@ -1008,13 +1094,24 @@ async function main(): Promise<void> {
       setStatus();
       redraw();
     },
+    onDrag: (x, y) => {
+      if (!screen.mapScreen.dragging) return;
+      screen.mapScreen.dragTo(x, y, BOE_WIDTH, BOE_HEIGHT);
+      redraw();
+    },
+    onRelease: () => {
+      screen.mapScreen.endDrag();
+    },
     onClick: (x, y) => {
       if (dialogs.handleClick(x, y)) return;
       // The map is a separate window in the original, so a click that lands on
       // it never reaches the game screen underneath.
-      if (screen.mapVisible
-        && x >= MAP_WINDOW.left && x < MAP_WINDOW.right
-        && y >= MAP_WINDOW.top && y < MAP_WINDOW.bottom) return;
+      if (screen.mapVisible && screen.mapScreen.contains(x, y)) {
+        // A click anywhere on the map window picks it up, as the WASM build
+        // allows ("Allow dragging from anywhere on the map window").
+        screen.mapScreen.startDrag(x, y);
+        return;
+      }
       // The party stats list: clicking a name makes that PC active, the HP and
       // SP columns read themselves out, and the two icons are Info and Trade
       // Places (handle_action's PC-area branch, boe.actions.cpp:1739).
@@ -1101,13 +1198,13 @@ async function main(): Promise<void> {
       if (btn) {
         sound.play(Snd.BUTTON); // the UI click
         if (btn.btn === ToolbarButton.TALK) {
-          pending = 'talk';
+          beginTalk();
         } else if (btn.btn === ToolbarButton.LOOK) {
           beginLook();
         } else if (btn.btn === ToolbarButton.CAMP) {
           session.rest();
         } else if (btn.btn === ToolbarButton.USE) {
-          pending = 'use';
+          selectSpace('use');
         } else if (btn.btn === ToolbarButton.MAP) {
           toggleMap();
         } else if (btn.btn === ToolbarButton.HAND) {
@@ -1283,21 +1380,19 @@ async function main(): Promise<void> {
           session.toggleActivePc();
           break;
         case 't':
-          if (session.inTown) pending = 'talk';
-          else univ.addStringToBuf('There is nobody to talk to out here.');
+          beginTalk();
           break;
         case 'l':
           beginLook();
           break;
         case 'u': case 'U':
-          if (inCombat) univ.addStringToBuf('Use: not in combat.');
-          else if (!session.inTown) univ.addStringToBuf('Use: not outdoors');
-          else pending = 'use';
+          selectSpace('use');
           break;
         case 'b': case 'B':
-          if (inCombat) univ.addStringToBuf('Bash Door: not in combat.');
-          else if (!session.inTown) univ.addStringToBuf('Bash Door: not outdoors');
-          else pending = 'bash';
+          selectSpace('bash');
+          break;
+        case 'L':
+          selectSpace('pick');
           break;
         case 'r':
           session.rest();
@@ -1334,9 +1429,6 @@ async function main(): Promise<void> {
           break;
         case 'i': case 'z': case 'Z':
           univ.addStringToBuf("(The inventory panel is always on screen; 1-6 switches whose)");
-          break;
-        case 'L':
-          univ.addStringToBuf('(Pick Lock has no standalone key yet — walk into a locked door)');
           break;
         case 'A':
           void doAlchemyFlow();

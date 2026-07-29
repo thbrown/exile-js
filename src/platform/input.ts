@@ -38,6 +38,15 @@ export interface InputHandlers {
    */
   onHover?(x: number, y: number): void;
   onHoverEnd?(): void;
+  /**
+   * Pointer movement and release anywhere on the page, not just over the
+   * canvas — what dragging the automap window needs. The exile-wasm build does
+   * the same thing, routing every mouse event to the map handler while a drag
+   * is in progress "so dragging stays smooth even when the cursor moves
+   * outside the map bounds" (boe.main.cpp:1524).
+   */
+  onDrag?(x: number, y: number): void;
+  onRelease?(x: number, y: number): void;
 }
 
 export class InputRouter {
@@ -54,6 +63,14 @@ export class InputRouter {
     this.canvas.addEventListener('mousedown', (ev) => this.onMouseDown(ev));
     this.canvas.addEventListener('mousemove', (ev) => this.onMouseMove(ev));
     this.canvas.addEventListener('mouseleave', () => this.handlers.onHoverEnd?.());
+    window.addEventListener('mousemove', (ev) => {
+      const at = this.toCanvas(ev);
+      this.handlers.onDrag?.(at.x, at.y);
+    });
+    window.addEventListener('mouseup', (ev) => {
+      const at = this.toCanvas(ev);
+      this.handlers.onRelease?.(at.x, at.y);
+    });
   }
 
   private get blocked(): boolean {

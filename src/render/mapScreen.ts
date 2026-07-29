@@ -25,8 +25,22 @@ import { tilePattern } from './tiling';
 /** Sheets the map needs on top of the main screen's set. */
 export const MAP_SHEETS = ['termap', 'dlogpics'];
 
-/** The map window, 296x277 at the WASM build's default draw offset. */
-export const MAP_WINDOW: UiRect = { top: 62, left: 52, bottom: 62 + 277, right: 52 + 296 };
+/** The map window's size, and the WASM build's default draw offset. */
+export const MAP_W = 296;
+export const MAP_H = 277;
+export const MAP_DEFAULT_POS = { x: 52, y: 62 };
+
+/**
+ * How much of the window has to stay on the canvas while it is being dragged
+ * (`MIN_VISIBLE`, boe.main.cpp:1680). The top edge is clamped to 0 outright,
+ * so the title bar can never go above the canvas.
+ */
+export const MAP_MIN_VISIBLE = 50;
+
+/** Where a window at `pos` sits on the canvas. */
+export function mapWindowRect(pos: { x: number; y: number }): UiRect {
+  return { top: pos.y, left: pos.x, bottom: pos.y + MAP_H, right: pos.x + MAP_W };
+}
 
 /** Rects inside the map window, verbatim from boe.town.cpp:68 and draw_map. */
 const MAP_PIC_RECT: UiRect = { top: 6, left: 6, bottom: 42, right: 42 };
@@ -79,10 +93,59 @@ export function mapViewRect(session: GameSession, outMode: boolean): MapView {
 }
 
 export class MapScreen {
+  /**
+   * Where the window's top-left corner sits. The original opens the automap as
+   * a second OS window, which the OS lets you drag; the exile-wasm build draws
+   * it over the main canvas and re-implements the dragging itself
+   * (boe.main.cpp:1615-1720), remembering the position between openings. This
+   * does the same.
+   */
+  pos = { ...MAP_DEFAULT_POS };
+
+  /** True while the pointer is dragging the window. */
+  dragging = false;
+
+  private dragFrom = { x: 0, y: 0 };
+
   constructor(
     private ctx: CanvasRenderingContext2D,
     private store: SheetStore,
   ) {}
+
+  get window(): UiRect {
+    return mapWindowRect(this.pos);
+  }
+
+  /** Is (x, y) inside the window? Anywhere on it starts a drag. */
+  contains(x: number, y: number): boolean {
+    const w = this.window;
+    return x >= w.left && x < w.right && y >= w.top && y < w.bottom;
+  }
+
+  startDrag(x: number, y: number): void {
+    this.dragging = true;
+    this.dragFrom = { x, y };
+  }
+
+  /**
+   * Move the window with the pointer. The clamp is the WASM build's: at least
+   * `MAP_MIN_VISIBLE` px stays on the canvas horizontally, and the top edge
+   * never goes above it, so the title is always reachable to drag it back.
+   */
+  dragTo(x: number, y: number, canvasW: number, canvasH: number): void {
+    if (!this.dragging) return;
+    this.pos.x += x - this.dragFrom.x;
+    this.pos.y += y - this.dragFrom.y;
+    this.dragFrom = { x, y };
+    if (this.pos.x < -MAP_W + MAP_MIN_VISIBLE) this.pos.x = -MAP_W + MAP_MIN_VISIBLE;
+    if (this.pos.y < 0) this.pos.y = 0;
+    if (this.pos.x > canvasW - MAP_MIN_VISIBLE) this.pos.x = canvasW - MAP_MIN_VISIBLE;
+    if (this.pos.y > canvasH - MAP_MIN_VISIBLE) this.pos.y = canvasH - MAP_MIN_VISIBLE;
+  }
+
+  endDrag(): void {
+    this.dragging = false;
+  }
 
   /**
    * draw_map. `outMode` and the title come straight from its opening
@@ -115,8 +178,8 @@ export class MapScreen {
     // undersized town (32x32) shows black where the 40-tile window overruns.
     ctx.fillStyle = Colours.BLACK;
     ctx.fillRect(
-      MAP_WINDOW.left + MAP_AREA.left,
-      MAP_WINDOW.top + MAP_AREA.top,
+      this.window.left + MAP_AREA.left,
+      this.window.top + MAP_AREA.top,
       MAP_TILE * MAP_TILES,
       MAP_TILE * MAP_TILES,
     );
@@ -144,14 +207,14 @@ export class MapScreen {
     const { ctx } = this;
     const pats = this.store.get('pixpats');
     // tileImage(mini_map(), the_rect, bg[4]) — bg[4], not the panel pattern.
-    if (pats) tilePattern(ctx, pats, 4, MAP_WINDOW);
+    if (pats) tilePattern(ctx, pats, 4, this.window);
     else {
       ctx.fillStyle = Colours.GREY;
       ctx.fillRect(
-        MAP_WINDOW.left,
-        MAP_WINDOW.top,
-        MAP_WINDOW.right - MAP_WINDOW.left,
-        MAP_WINDOW.bottom - MAP_WINDOW.top,
+        this.window.left,
+        this.window.top,
+        this.window.right - this.window.left,
+        this.window.bottom - this.window.top,
       );
     }
 
@@ -163,8 +226,8 @@ export class MapScreen {
         DLOG_PIC * Math.floor(MAP_DLOG_PIC / 4),
         DLOG_PIC,
         DLOG_PIC,
-        MAP_WINDOW.left + MAP_PIC_RECT.left,
-        MAP_WINDOW.top + MAP_PIC_RECT.top,
+        this.window.left + MAP_PIC_RECT.left,
+        this.window.top + MAP_PIC_RECT.top,
         DLOG_PIC,
         DLOG_PIC,
       );
@@ -177,10 +240,10 @@ export class MapScreen {
   /** Translate a window-local rect into canvas coordinates. */
   private offset(r: UiRect): UiRect {
     return {
-      top: r.top + MAP_WINDOW.top,
-      left: r.left + MAP_WINDOW.left,
-      bottom: r.bottom + MAP_WINDOW.top,
-      right: r.right + MAP_WINDOW.left,
+      top: r.top + this.window.top,
+      left: r.left + this.window.left,
+      bottom: r.bottom + this.window.top,
+      right: r.right + this.window.left,
     };
   }
 
@@ -212,8 +275,8 @@ export class MapScreen {
     }
     if (!explored) return;
 
-    const dx = MAP_WINDOW.left + MAP_AREA.left + MAP_TILE * (x - view.left);
-    const dy = MAP_WINDOW.top + MAP_AREA.top + MAP_TILE * (y - view.top);
+    const dx = this.window.left + MAP_AREA.left + MAP_TILE * (x - view.left);
+    const dy = this.window.top + MAP_AREA.top + MAP_TILE * (y - view.top);
     const spec = univ.terrainType(ter);
 
     let pic = spec.mapPic;
@@ -262,8 +325,8 @@ export class MapScreen {
   /** fill_rect + frame_circle over one map square. */
   private marker(view: MapView, x: number, y: number, fill: string, ring: string): void {
     const { ctx } = this;
-    const dx = MAP_WINDOW.left + MAP_AREA.left + MAP_TILE * (x - view.left);
-    const dy = MAP_WINDOW.top + MAP_AREA.top + MAP_TILE * (y - view.top);
+    const dx = this.window.left + MAP_AREA.left + MAP_TILE * (x - view.left);
+    const dy = this.window.top + MAP_AREA.top + MAP_TILE * (y - view.top);
     ctx.fillStyle = fill;
     ctx.fillRect(dx, dy, MAP_TILE, MAP_TILE);
     ctx.strokeStyle = ring;

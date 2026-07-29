@@ -1168,15 +1168,14 @@ export class GameSession {
       if (univ.out.isSpot(where.x, where.y)) univ.addStringToBuf('    Special Encounter');
     }
 
-    // adj_town_look (boe.specials.cpp:1292): looking at an adjacent special
-    // square triggers it. The chain runs after the description is printed.
-    if (dist(from, where) <= 1) {
+    // `adj_town_look` is the *caller's* job in the C++ (boe.actions.cpp:700),
+    // and only in town or combat. Outdoors it has a standing TODO saying an
+    // OUT_LOOK special ought to fire here; this port fires one, which is the
+    // one thing here the original doesn't do.
+    if (!town && dist(from, where) <= 1) {
       const special = this.specialAt(where);
       if (special >= 0)
-        void this.runSpecial(
-          town ? SpecCtx.TOWN_LOOK : SpecCtx.OUT_LOOK,
-          town ? SpecCtxType.TOWN : SpecCtxType.OUTDOOR,
-          special, where);
+        void this.runSpecial(SpecCtx.OUT_LOOK, SpecCtxType.OUTDOOR, special, where);
     }
 
     if (!isLit) {
@@ -1186,6 +1185,84 @@ export class GameSession {
     const ter = town ? town.record.terrain[where.x]![where.y]! : univ.out.at(where.x, where.y);
     univ.addStringToBuf(`    ${univ.terrainType(ter).name}`);
     return ter;
+  }
+
+  /**
+   * `is_container` (boe.locutils.cpp:220) — a crate or barrel sitting on the
+   * square, or terrain that is a container in its own right (a bookshelf, a
+   * chest of drawers).
+   */
+  isContainer(where: Location): boolean {
+    const town = this.univ.town;
+    if (!town || where.x < 0 || where.y < 0) return false;
+    if (town.hasField(where.x, where.y, FieldType.OBJECT_CRATE)) return true;
+    if (town.hasField(where.x, where.y, FieldType.OBJECT_BARREL)) return true;
+    if (!town.isOnMap(where.x, where.y)) return false;
+    const ter = town.record.terrain[where.x]![where.y]!;
+    return this.univ.terrainType(ter).special === TerSpec.IS_A_CONTAINER;
+  }
+
+  /**
+   * `adj_town_look` (boe.specials.cpp:1292) — the *search* half of looking at
+   * an adjacent square, which the caller runs after `do_look` has described it.
+   * Searching a square with a special on it runs the special; searching a
+   * container opens it.
+   *
+   * Returns the container's contents for the host to put in a get-items
+   * dialog, or null when there is nothing to open. That split is the same one
+   * training and the job board use: the rules here, the dialog in `main.ts`.
+   *
+   * Note the C++'s own return value is **always false** — the `need_redraw` it
+   * feeds is never set by this function.
+   */
+  async adjTownLook(where: Location): Promise<Item[] | null> {
+    const { univ } = this;
+    const town = univ.town;
+    if (!town) return null;
+
+    // What is *inside* the square, as opposed to lying on it. `do_look` has
+    // already listed everything that isn't contained.
+    const itemThere = town.items.some((item) => item.variety !== ItemType.NO_ITEM
+      && item.contained && item.itemLoc.x === where.x && item.itemLoc.y === where.y);
+
+    let canOpen = true;
+    let gotSpecial = false;
+    const ter = town.isOnMap(where.x, where.y) ? town.record.terrain[where.x]![where.y]! : 0;
+
+    if (this.specialAt(where) >= 0) {
+      // Adjacency is measured from the party's square even in combat, which is
+      // what the C++ passes. This branch is dead in play — `handle_look` only
+      // calls adj_town_look for an adjacent square — and note that it skips
+      // the *special* without touching `canOpen`, so a distant container would
+      // still open. Kept as written.
+      if (dist(univ.party.townLoc, where) > 1) {
+        univ.addStringToBuf('  Not close enough to search.');
+      } else {
+        for (const spot of town.record.specialLocs) {
+          if (spot.x !== where.x || spot.y !== where.y) continue;
+          // A square you can't step into announces the find, since there is no
+          // walking onto it to discover the same thing.
+          if (this.getBlockage(ter) > 0)
+            univ.addStringToBuf('  Search: You find something!');
+          const { blocked } = await this.runSpecial(
+            SpecCtx.TOWN_LOOK, SpecCtxType.TOWN, spot.spec, where);
+          if (blocked) canOpen = false;
+          gotSpecial = true;
+        }
+      }
+    }
+
+    if (this.isContainer(where) && itemThere && canOpen) {
+      // get_item(where, 6, true): everything contained *on that square*.
+      return town.items.filter((item) => item.variety !== ItemType.NO_ITEM
+        && item.contained && item.itemLoc.x === where.x && item.itemLoc.y === where.y);
+    }
+    const spec = univ.terrainType(ter).special;
+    if (spec === TerSpec.CHANGE_WHEN_USED || spec === TerSpec.CALL_SPECIAL_WHEN_USED)
+      univ.addStringToBuf('  (Use this space to do something with it.)');
+    else if (!gotSpecial)
+      univ.addStringToBuf("  Search: You don't find anything.");
+    return null;
   }
 
   /**
@@ -1930,6 +2007,14 @@ export class GameSession {
   }
 
   /** Try to pick a locked door's lock with a given PC. */
+  /** `is_unlockable` (boe.town.cpp:1147) — a lock is something to pick or bash. */
+  isUnlockable(where: Location): boolean {
+    const town = this.univ.town;
+    if (!town || !town.isOnMap(where.x, where.y)) return false;
+    const ter = town.record.terrain[where.x]![where.y]!;
+    return this.univ.terrainType(ter).special === TerSpec.UNLOCKABLE;
+  }
+
   pickLock(where: Location, pcNum: number): void {
     pickLockAt(this.univ, where, pcNum, this.sound);
   }

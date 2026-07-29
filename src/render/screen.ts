@@ -71,7 +71,7 @@ import { monsterDims, monsterGraphic } from './monsterPics';
 import { pcGraphic } from './pcPics';
 import { SheetStore, TILE_H, TILE_W, calcRect } from './sheets';
 import { terrainGraphic } from './terrainPics';
-import { DEFAULT_BG, PANEL_BG, tilePattern } from './tiling';
+import { DEFAULT_BG, PANEL_BG, tileBwPattern, tilePattern } from './tiling';
 import { MAP_SHEETS, MapScreen } from './mapScreen';
 import { TalkScreen } from './talkScreen';
 import { ShopScreen } from './shopScreen';
@@ -79,6 +79,12 @@ import { Trim, TrimMasks } from './trim';
 import {
   drawString, drawStringCentre, drawStringEllipsis, drawStringRight, measureString, wrapLines,
 } from './text';
+
+/**
+ * `bw_pats[3]` — the 50% dither `apply_unseen_mask` shades unexplored ground
+ * with (boe.newgraph.cpp:163).
+ */
+const UNSEEN_PATTERN = 3;
 
 /** Every image the main screen needs, beyond the terrain/monster sheets. */
 export const CHROME_SHEETS = [
@@ -101,6 +107,7 @@ export const CHROME_SHEETS = [
   'staticons',
   'vehicle',
   'dlogscrollwh',
+  'bwpats',
   ...MAP_SHEETS,
 ];
 
@@ -310,6 +317,9 @@ export class Screen {
     if (town) this.drawTownMonsters(session);
     if (!town) this.drawOutdoorGroups(session);
     this.drawPartySymbol(session);
+    // `apply_unseen_mask` comes after everything drawn into the terrain gworld
+    // (boe.graphics.cpp:1067), so it shades the monsters and the party too.
+    this.applyUnseenMask(session, maxDim, maxDimY);
     this.drawBooms(session);
     this.drawMissiles(session);
     // redraw_screen draws these over the finished terrain (boe.graphics.cpp:637
@@ -317,6 +327,64 @@ export class Screen {
     this.drawPointingArrows(session);
     this.drawTargets(session);
     this.drawTargetingLine(session);
+  }
+
+  /**
+   * `apply_unseen_mask` (boe.newgraph.cpp:138) — the shadow just past what the
+   * party can see. Every square of the view the party hasn't explored gets a
+   * 50% dither (`bw_pats[3]`) tiled over it, which is what softens the edge of
+   * the lit area instead of leaving a hard black wall.
+   *
+   * The rect it stamps is **8px wider and taller than a tile** and sits 4px up
+   * and left of it, so the shadow bleeds a little way over the ground you *can*
+   * see — that overlap is the whole visual effect, and it is why the mask is a
+   * separate pass rather than part of drawing the square.
+   *
+   * `unexplored_area` is 13x13 around the view centre (boe.graphics.cpp:887)
+   * and the mask reads indices 1..11 of it, so it covers one square more than
+   * the 9x9 view in each direction; the extra ring is clipped away against the
+   * view. Kept, because that ring is what makes the bleed reach the outermost
+   * visible squares.
+   */
+  private applyUnseenMask(session: GameSession, maxDim: number, maxDimY: number): void {
+    const { univ } = session;
+    const town = univ.town;
+    // An outdoor arena has no unexplored ground to speak of, and a dark town
+    // uses the light mask instead (TODO: apply_light_mask, :168).
+    if (isCombat(session.mode) && session.whichCombatType === 0) return;
+    if (town && town.record.lightingType > 0) return;
+    const pats = this.store.get('bwpats');
+    if (!pats) return;
+
+    const view = WIN_RECTS.terView;
+    const clip: UiRect = {
+      top: view.top + TER_INSET_Y,
+      left: view.left + TER_INSET_X,
+      bottom: view.top + TER_INSET_Y + TER_VIEW_TILES * TILE_H,
+      right: view.left + TER_INSET_X + TER_VIEW_TILES * TILE_W,
+    };
+    const centre = town ? session.center : univ.party.outLoc;
+
+    for (let q = -1; q <= TER_VIEW_TILES; q++)
+      for (let row = -1; row <= TER_VIEW_TILES; row++) {
+        const x = centre.x + q - TER_VIEW_CENTER;
+        const y = centre.y + row - TER_VIEW_CENTER;
+        if (x < 0 || y < 0 || x >= maxDim || y >= maxDimY) continue;
+        // A town square off the map is left alone rather than shaded.
+        if (town && !town.isOnMap(x, y)) continue;
+        const explored = town ? town.isExplored(x, y) : univ.out.explored[x]?.[y] !== 0;
+        if (explored) continue;
+
+        const pos = terrainSpotPos(q, row);
+        const dest: UiRect = {
+          top: Math.max(pos.y - 4, clip.top),
+          left: Math.max(pos.x - 4, clip.left),
+          bottom: Math.min(pos.y + TILE_H + 4, clip.bottom),
+          right: Math.min(pos.x + TILE_W + 4, clip.right),
+        };
+        if (dest.right <= dest.left || dest.bottom <= dest.top) continue;
+        tileBwPattern(this.ctx, pats, UNSEEN_PATTERN, dest);
+      }
   }
 
   /**

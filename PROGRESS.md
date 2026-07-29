@@ -10,8 +10,9 @@
   arrows/keypad move, **f** fight (and end a fight), **e** end combat,
   **w**/Space wait — stand ready in combat, **d** parry, **x** hold the turn on
   one PC, **t** talk, **l** look, **u** use, **b** bash, **g** get, **r** rest,
-  **1-6** whose pack shows, **9** the special items and **0** the quests,
-  **a** the automap, **A** alchemy (in town),
+  **L** pick a lock, **1-6** whose pack shows, **9** the special items and
+  **0** the quests,
+  **a** the automap (drag it by its window), **A** alchemy (in town),
   **m**/**p** spells, **s** shoot (in combat: arms the
   missile, then click a square; **s** or Escape cancels). Keys for things not
   built yet say which milestone they're
@@ -72,7 +73,7 @@ Notes for M2 implementer:
 - Town reader reference: readTownFromXml (fileio_scen.cpp:1839), loadTownMapData; town terrain templates are variable-size (min 24); talkN.xml via readDialogueFromXml.
 - scenarioXml.ts skips deferred sections by name (quests/shops/special-items/strings) — tighten as those land.
 
-- `npm test` → 812 tests green (49 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
+- `npm test` → 824 tests green (50 files); `npm run dev` → the game screen (arrow keys / keypad, Home/End/PgUp/PgDn for diagonals; `?scenario=stealth` to load another).
 - `node scripts/verify-screen.mjs` (needs `npx vite --port 5199` running) drives the real UI headless and screenshots it. Playwright + chromium installed as devDependency.
 - Parsers: `src/fileio/mapParse.ts` (.map), `specialParse.ts` (.spec + opcode table from strings resource, 'nop'=NONE special case), `terrainXml.ts`, `outdoorsXml.ts`, `scenarioXml.ts` (header+game block; quests/shops/etc. deferred by name), `loadScenario.ts` (out{x}~{y} assembly), `source.ts` (Fetch/Fs sources).
 - Data: `special.ts` (SpecType enum + 15-short node), `terrain.ts`, `fields.ts` (FieldType — note SPECIAL_SPOT=9, SPECIAL_ROAD=25), `outdoors.ts`, `enumTags.ts` (estreams.cpp lookup tables), `scenario.ts`.
@@ -2216,3 +2217,79 @@ playthrough will hit it:
     their keys, scrolls the special items with the real scrollbar arrow,
     checks the row under the pointer follows the scroll, and reads a quest
     through `quest-info.xml`.
+
+- **Five from the twelfth play-test round (2026-07-28).** Four were real gaps;
+  one turned out to be the original's own behaviour.
+  - **The shadow past your vision** — `apply_unseen_mask`
+    (boe.newgraph.cpp:138) had never been ported, so the edge of the lit area
+    was a hard black wall. Every square of the view the party hasn't explored
+    now gets `bw_pats[3]`, the 50% dither out of bwpats.png, tiled over it.
+    - *The detail that makes it work*: the rect stamped is **8px wider and
+      taller than a tile and sits 4px up and left of it**, so the shadow bleeds
+      over the ground you *can* see. That overlap is the whole effect, and it
+      is why the mask is a separate pass over the finished terrain rather than
+      part of drawing each square — it goes over the monsters and the party
+      symbol too.
+    - `unexplored_area` is 13x13 around the view centre and the mask reads
+      indices 1..11, so it covers one square *more* than the 9x9 view in each
+      direction and clips the overhang; that extra ring is what lets the bleed
+      reach the outermost visible squares.
+    - Skipped in an outdoor arena and in a dark town, which uses
+      `apply_light_mask` instead — an elliptical region around each light
+      source, still unported (TODO).
+  - **Bookshelves you couldn't search** — `adj_town_look` (boe.specials.cpp:
+    1292) was inlined into `lookAt` as "run the square's special", and its
+    other half was missing. A town item can be marked `contained`, which hides
+    it from `do_look` and from Get; a bookshelf, dresser, crate or barrel is a
+    **container**, and looking at one is what opens it. `session.isContainer`
+    and `session.adjTownLook` port the real function, and Look now puts the
+    contents in the same get-items dialog Get uses ("Looking in container:").
+    The three messages that go with it — the find, the "(Use this space…)"
+    hint and "Search: You don't find anything." — landed with it.
+    - *Gotcha*: the "Not close enough to search." branch only skips the
+      *special*; it leaves `can_open` alone, so a distant container would still
+      open. Dead in play, since `handle_look` only calls the function for an
+      adjacent square. Kept, and pinned.
+    - *Gotcha*: the C++'s return value is always `false` — the `need_redraw`
+      it feeds is never set.
+    - While here: the C++ has a standing TODO saying an **OUT_LOOK** special
+      ought to fire when you look at something outdoors, and never fires one.
+      This port does. Noted in place; it is the one thing here the original
+      doesn't do.
+  - **Bash worked anywhere** — `handle_keystroke`'s `b`, `u`, `L` and `t` all
+    require **MODE_TOWN exactly** (boe.actions.cpp:3019-3049, :3087), not
+    merely "in a town": mid-conversation, mid-shop, mid-look or mid-spell the
+    answer is "Finish what you're doing first." This port checked only
+    "not in combat, not outdoors", so B armed a bash while a shopkeeper was
+    waiting. All four now go through `selectSpace`/`beginTalk`, which also
+    ports the **toggle** — pressing the same key again cancels — and the
+    "Select a space." line each one prints.
+    - **Pick Lock (`L`) works now.** It was a stub saying it had no key;
+      `handle_bash_pick` is one function with an `isBash` flag, so the pick
+      side came with the fix, including `ONLY_CAN_LOCKPICK`'s "no picks" /
+      "picks not equipped" refusals, which `selectPcOptions` already had.
+    - Both now check `adjacent` and `is_unlockable` before asking who does it,
+      as `handle_bash_pick` does: "  Must be adjacent." / "  Wrong terrain
+      type."
+  - **The automap window drags now.** The original opens it as a second OS
+    window, which the OS lets you move; the exile-wasm build draws it over the
+    canvas and re-implements the dragging (boe.main.cpp:1615-1720). Ported:
+    press anywhere on the window to pick it up, at least 50px stays on the
+    canvas, and the top edge is clamped to 0 so the title is always reachable.
+    `MAP_WINDOW` is gone in favour of `MapScreen.pos` and `MapScreen.window`.
+    - `InputRouter` gained `onDrag`/`onRelease` on **window** rather than the
+      canvas, because a drag has to keep tracking once the pointer leaves —
+      the same reason the C++ routes every mouse event to the map handler while
+      `map_dragging` is set.
+    - The position is not persisted between reloads; the WASM build keeps it
+      in preferences, which this port has no equivalent of until M7's saves.
+  - **Webbed by a square you can't walk into: that is the original.**
+    `check_special_terrain` runs the fields, the webs and the pushables
+    *before* `town_move_party` ever tests `is_blocked` (boe.specials.cpp:274
+    vs boe.actions.cpp:4223), so walking into a blocked square with a web on
+    it webs the party and uses the web up. This port already had that order,
+    and `web_space` has no blocking test either. What *does* limit it is
+    placement: `place_spell_pattern` refuses any square with
+    `sight_obscurity >= 5`, so no spell puts a web on a solid wall — only on
+    blocked-but-see-through terrain (a fence, a counter) or wherever the
+    scenario preset one. Left alone.
