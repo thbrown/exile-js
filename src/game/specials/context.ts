@@ -10,6 +10,7 @@ import { Location } from '../../core/location';
 import { SpecType, SpecialNode } from '../../data/special';
 import type { GameSession } from '../session';
 import type { Skill } from '../../universe/skills';
+import type { EncNoteType } from '../../universe/party';
 
 /** eSpecCtx (special.hpp:135) — what caused this chain to run. */
 export enum SpecCtx {
@@ -55,12 +56,31 @@ export function categoryOf(type: SpecType): SpecCat {
 }
 
 /**
+ * `cStringRecorder` (boe.infodlg.hpp:32) — what the Record button writes into
+ * the party's encounter notes: the message's own strings, tagged with which
+ * list they belong to and where the party was standing.
+ */
+export interface MessageRecord {
+  type: EncNoteType;
+  strs: string[];
+  where: string;
+}
+
+/**
  * What the VM needs from the host to do anything visible. Everything here is
  * async because the C++ blocks on a dialog and we await one instead.
  */
 export interface SpecialHost {
-  /** cStrDlog — two paragraphs, a title and a picture. */
-  message(str1: string, str2: string, title: string, pic: number, picType: number): Promise<void>;
+  /**
+   * cStrDlog — two paragraphs, a title and a picture. `record` is the payload
+   * behind the Record button: the C++ attaches a `cStringRecorder` to every
+   * message a special node puts up, and the button only appears when there is
+   * one to attach (strdlog.cpp:64).
+   */
+  message(
+    str1: string, str2: string, title: string, pic: number, picType: number,
+    record?: MessageRecord,
+  ): Promise<void>;
   /** A dialog with up to three labelled buttons; resolves to the index picked. */
   choice(
     strs: string[], buttons: string[], title: string, pic: number, picType: number,

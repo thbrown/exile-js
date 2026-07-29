@@ -32,6 +32,21 @@ export function timerIsValid(t: PartyTimer): boolean {
   return t.time >= 0 && t.node >= 0;
 }
 
+/** `eEncNoteType` (party.hpp:59) — which list a recorded note belongs to. */
+export enum EncNoteType {
+  SCEN = 0,
+  OUT = 1,
+  TOWN = 2,
+}
+
+/** `cParty::cEncNote` — one line of the party's encounter notes. */
+export interface EncNote {
+  type: EncNoteType;
+  theStr: string;
+  /** The town or outdoor sector it was found in, for grouping. */
+  where: string;
+}
+
 export const SDF_ROWS = 350;
 export const SDF_COLUMNS = 50;
 export const MAX_GOLD = 30000;
@@ -155,6 +170,26 @@ export class Party {
    * numbering in a save file stays put.
    */
   partyEventTimers: PartyTimer[] = [];
+
+  /**
+   * `cParty::special_notes` — the encounter notes, which is what the Record
+   * button on a message box writes to. Each note remembers where it was found
+   * so the journal can group them.
+   */
+  specialNotes: EncNote[] = [];
+
+  /**
+   * `cParty::record` (party.cpp:412) — add a note, refusing an exact duplicate
+   * and returning whether anything was added. The C++ compares the whole
+   * record, so the same text found in two different places is two notes.
+   */
+  record(type: EncNoteType, what: string, where: string): boolean {
+    const already = this.specialNotes.some(
+      (n) => n.type === type && n.theStr === what && n.where === where);
+    if (already) return false;
+    this.specialNotes.push({ type, theStr: what, where });
+    return true;
+  }
 
   // --- cParty's iLiving half (party.cpp:426-570) ---------------------------
   //

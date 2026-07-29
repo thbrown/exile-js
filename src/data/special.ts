@@ -185,6 +185,8 @@ export enum SpecType {
 
 /** PIC_DLOG — the default pictype for nodes (pictypes.hpp). */
 export const PIC_DLOG = 4;
+/** PIC_SCEN — the scenario's own icon sheet, which `handle_message` falls back to. */
+export const PIC_SCEN = 6;
 
 /** The 15-short cSpecial record, kept raw for file-format fidelity. */
 export interface SpecialNode {

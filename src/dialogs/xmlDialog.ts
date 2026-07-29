@@ -14,7 +14,6 @@
 
 import { Colours } from '../render/colours';
 import { BOE_HEIGHT, BOE_WIDTH, UiRect, height, width } from '../render/layout';
-import { itemGraphic } from '../render/itemPics';
 import { monsterGraphic } from '../render/monsterPics';
 import { SheetStore, calcRect } from '../render/sheets';
 import { statIconRect } from '../data/statusIcons';
@@ -26,6 +25,7 @@ import {
   LedControl, LedState, PictControl, PictType, TextControl,
 } from './dialogXml';
 import { ModalScreen } from './dialog';
+import { drawPictAt } from './pict';
 
 /** cDialog::BG_DARK, and the white text that goes with it (dialog.cpp:49/405). */
 const BG_DARK = 5;
@@ -64,7 +64,13 @@ const DONE_LABEL = 'Done';
 const LED_W = 14;
 const LED_H = 10;
 const LED_TEXT_SPACE = 4;
-const LED_ORDER: LedState[] = ['red', 'green', 'off'];
+/**
+ * `eLedState` (led.hpp:19) is `{led_green = 0, led_red, led_off}` — **green
+ * first**, which reads backwards next to the "red means selected" convention
+ * the header itself describes. This port had the first two swapped, so every
+ * lit LED drew the green lamp: item-info's "ID?" is the visible one.
+ */
+const LED_ORDER: LedState[] = ['green', 'red', 'off'];
 
 /** The `colour_map` names the dialogs actually use. */
 const COLOURS: Record<string, string> = {
@@ -583,59 +589,7 @@ export class XmlDialog implements ModalScreen {
     const rect = this.screenRect(control);
     const num = this.picNum.get(control.name) ?? control.num;
     const type = this.picType.get(control.name) ?? control.type;
-    const { ctx } = this;
-    const blit = (sheetName: string, from: { left: number; top: number; width: number; height: number },
-      w = from.width, h = from.height): void => {
-      const sheet = this.store.get(sheetName);
-      if (!sheet) return;
-      ctx.drawImage(sheet, from.left, from.top, from.width, from.height, rect.left, rect.top, w, h);
-    };
-    switch (type) {
-      case 'dlog': {
-        // dlogpics.png is a 4-across grid of 36x36 portraits.
-        const size = control.size === 'large' ? 72 : 36;
-        blit('dlogpics', { left: 36 * (num % 4), top: 36 * Math.floor(num / 4), width: size, height: size });
-        break;
-      }
-      case 'talk':
-        blit('talkportraits', { left: 32 * (num % 10), top: 32 * Math.floor(num / 10), width: 32, height: 32 });
-        break;
-      case 'scen':
-        blit('scenpics', { left: 32 * (num % 5), top: 32 * Math.floor(num / 5), width: 32, height: 32 });
-        break;
-      case 'item': {
-        const g = itemGraphic(num);
-        if (g) blit(g.sheetName, g.rect);
-        break;
-      }
-      case 'pc': {
-        // calc_rect(2 * (num / 8), num % 8) — the same column pairing the
-        // party symbol uses, taking the left-facing frame.
-        const r = calcRect(2 * Math.floor(num / 8), num % 8);
-        blit('pcs', r);
-        break;
-      }
-      case 'monst': {
-        const g = monsterGraphic(num);
-        if (g) blit(g.sheetName, g.rect);
-        break;
-      }
-      case 'ter': {
-        const g = terrainGraphic(num);
-        if (g) blit(g.sheetName, g.rect);
-        break;
-      }
-      case 'status': {
-        const at = statIconRect(num);
-        blit('staticons', { ...at, width: 12, height: 12 });
-        break;
-      }
-      case 'blank':
-      default:
-        ctx.fillStyle = Colours.GREY;
-        ctx.fillRect(rect.left, rect.top, width(rect), height(rect));
-        break;
-    }
+    drawPictAt(this.ctx, this.store, type, num, rect.left, rect.top, control.size === 'large');
     if (control.framed) this.drawFrame(rect);
   }
 

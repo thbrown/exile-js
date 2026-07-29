@@ -21,8 +21,9 @@
  */
 
 import { Location, loc } from '../../core/location';
-import { SpecType, SpecialNode, emptySpecialNode } from '../../data/special';
+import { PIC_SCEN, SpecType, SpecialNode, emptySpecialNode } from '../../data/special';
 import { Universe } from '../../universe/universe';
+import { EncNoteType } from '../../universe/party';
 import {
   PendingSpecial, SpecCat, SpecCtx, SpecCtxType, SpecialCtx, SpecialHost, categoryOf,
 } from './context';
@@ -287,6 +288,11 @@ export async function handleMessage(
   picType = 0,
 ): Promise<void> {
   const node = ctx.curSpec;
+  // A node with no picture of its own borrows the scenario's title picture.
+  if (pic === -1) {
+    pic = univ.scenario.introPic;
+    picType = PIC_SCEN;
+  }
   if (node.m1 < 0 && node.m2 < 0) return;
   if (ctx.whichMode === SpecCtx.TALK) {
     ctx.retA = node.m1;
@@ -295,8 +301,24 @@ export async function handleMessage(
   }
   const [str1, str2] = univ.getStrs(ctx.curSpecType, node.m1, node.m2);
   if (str1.length === 0 && str2.length === 0) return;
-  await ctx.host.message(str1, str2, title, pic, picType);
+  // Every message a special node puts up carries a `cStringRecorder`, which is
+  // what makes the Record button appear on it. The note remembers where the
+  // party was standing, and which of the three lists it belongs to.
+  const where = univ.isInTown() ? univ.town?.record.name ?? '' : univ.out.sector.name;
+  const record = {
+    type: NOTE_TYPE[ctx.curSpecType],
+    strs: [str1, str2].filter((s) => s.length > 0),
+    where,
+  };
+  await ctx.host.message(str1, str2, title, pic, picType, record);
 }
+
+/** handle_message's eSpecCtxType → eEncNoteType mapping (:4629). */
+const NOTE_TYPE: Record<SpecCtxType, EncNoteType> = {
+  [SpecCtxType.SCEN]: EncNoteType.SCEN,
+  [SpecCtxType.OUTDOOR]: EncNoteType.OUT,
+  [SpecCtxType.TOWN]: EncNoteType.TOWN,
+};
 
 /** A location built from a node's two coordinate fields. */
 export function nodeLoc(x: number, y: number): Location {

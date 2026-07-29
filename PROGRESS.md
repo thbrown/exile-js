@@ -2467,3 +2467,68 @@ playthrough will hit it:
     bonuses and the spell-point maths, and pins that the constructor alone
     still leaves the pack empty. `verify-screen.mjs`'s start step now fails if
     the party is unarmed or the casters' pools are unbumped.
+
+- **Three dialogs that were only half there: item info, the message box, and
+  every picture on either (2026-07-28).** Reported from play-testing: the "I"
+  button on an inventory row gave a description and nothing else, and the
+  informational dialogs had neither an icon nor a Record button.
+  - **`item-info.xml` is the fourth real dialogxml call site.**
+    `dialogs/itemInfoDialog.ts` ports `put_item_info` (view_dialogs.cpp:21) and
+    `display_pc_item` (boe.infodlg.cpp:236): the item's picture, its type out of
+    `item-types-display`, value, damage, bonus, defence, encumbrance, uses,
+    level and weight, the two LEDs, the ability spelled out, and arrows that
+    step through the rest of that PC's pack without closing.
+    `data/itemAbilName.ts` ports `cItem::getAbilName` (item.cpp:978) in full —
+    the fifty fixed names plus the dozen built out of `abil_data`, which is a
+    union read as a damage type, a race, a status, a party status, a skill or a
+    spell depending on the ability.
+    - *Gotcha*: an **unidentified** item returns before the weight and the
+      description are written, so those keep whatever the previously shown item
+      left in them. Kept.
+    - *Gotcha*: armour folds `bonus + protection` into the **Bonus** field and
+      puts the item level under **Defend** — the other way round from a weapon.
+      The C++ has its own TODO asking why; kept.
+    - *Gotcha*: the C++ attaches a click handler to the `id` and `magic` LEDs
+      "to suppress normal LED behaviour", so they are read-only rather than
+      toggles. Ported as two no-op handlers.
+  - **`cStrDlog` is real now** (`dialogs/strDialog.ts`, strdlog.cpp:32). A
+    message is not one definition but eight: `getDefn` picks
+    `{1|2}str[-title][-lg]` from how many strings there are, whether a title was
+    given, and whether the picture is one of the large kinds. Every variant
+    carries a `pict` and a **Record** button, and `handle_message` attaches a
+    `cStringRecorder` to *every* message a special node raises — which is what
+    makes the button appear. `Party.record` + `EncNote`/`EncNoteType`
+    (party.cpp:412) are the list it writes to, refusing an exact duplicate.
+    - `handle_message`'s `pic == -1` arm was missing too: a node with no picture
+      of its own shows the **scenario's own icon**, which needed
+      `Scenario.introPic` (`<icon>`, fileio_scen.cpp:801) to be parsed at all.
+    - `DialogHost.runScreenQueued` is `runScreen` on the same queue `runQueued`
+      uses, since a chain can show several messages in a row and they are
+      dialogxml screens now rather than the plain modal.
+  - **The choice dialogs get their picture.** `cThreeChoice::init_pict`
+    (3choice.cpp:159) puts the node's picture on every choice a special raises,
+    and this port drew none. They still run on the plain modal — `cThreeChoice`
+    builds its controls at runtime rather than from a definition, so converting
+    it is its own job — but `DialogSpec.pic` now carries the node's `pic`/
+    `pictype` and draws it. The guest-quarters Rest prompt shows its bed again.
+  - `dialogs/pict.ts` is the shared `cPict::draw`: both the toolkit and the
+    plain modal have to answer "which sheet is `ePicType` 6?", and they were
+    answering it separately.
+    - **PIC_ITEM's tiny half was drawn in the corner.** The type is "28x36 from
+      the large item sheet, *or* 18x18 from the small sheet **centred in a
+      28x36 space**"; the centring inset was computed and then not applied, so
+      every item icon above 54 sat at the frame's top left.
+    - `scenpics` and `bigscenpics` were never loaded, so PIC_SCEN drew nothing.
+  - **`eLedState` is `{led_green = 0, led_red, led_off}`** (led.hpp:19) —
+    **green first**, which reads backwards next to the "red means selected"
+    convention the header itself describes. This port had the first two
+    swapped, so every lit LED drew the green lamp. item-info's "ID?" is where
+    it shows.
+  - Tests: `test/dialogXml.test.ts` gained 12 — the item sheet for a weapon,
+    armour, a charge stack, an unidentified item and a concealed ability, the
+    arrows walking the pack, the eight `cStrDlog` layouts, the `ePicType`
+    mapping, the Record button's appearance and its one-shot press, and
+    `cParty::record`'s duplicate rule. `verify-screen.mjs` gained two steps: it
+    clicks a real Info button and reads the sheet back, then fires a
+    `DISPLAY_MSG` node and presses Record, checking the scenario icon is on the
+    dialog and the note landed.

@@ -21,6 +21,8 @@ import { dispatcherMood, jobBoardOffers, openJobBank, takeJob } from './game/job
 import { alchemyChoices, makePotion } from './game/alchemy';
 import { loadDialogDefs } from './dialogs/dialogStore';
 import { pcInfoDialog } from './dialogs/pcInfoDialog';
+import { itemInfoDialog } from './dialogs/itemInfoDialog';
+import { STR_DIALOG_DEFS, pictTypeOf, strDialog } from './dialogs/strDialog';
 import { questInfoDialog } from './dialogs/questInfoDialog';
 import { ItemWinMode, QUEST_COMPLETED_OFFSET } from './game/itemWindow';
 import { BASIC_BUTTON_KEYS } from './game/specials/oneshot';
@@ -51,7 +53,6 @@ import { BOE_HEIGHT, BOE_WIDTH, ToolbarButton } from './render/layout';
 import { CHROME_SHEETS, Screen } from './render/screen';
 import { ShopHit, shopItemInfo } from './render/shopScreen';
 import { SheetStore } from './render/sheets';
-import { itemWeight } from './universe/inventory';
 import { PartyPreset, Player } from './universe/player';
 import { HP_PER_LEVEL, TrainingState, trainCost } from './game/training';
 import { doRest } from './game/rest';
@@ -96,7 +97,8 @@ async function main(): Promise<void> {
   await loadStringTables(fetchText);
   // The dialog definitions the player opens. The other ~150 belong to the
   // scenario and character editors, which this port doesn't run.
-  await loadDialogDefs(fetchText, ['pc-info', 'quest-info', 'get-items']);
+  await loadDialogDefs(fetchText,
+    ['pc-info', 'quest-info', 'get-items', 'item-info', ...STR_DIALOG_DEFS]);
   const scen = await loadScenario(new FetchSource(`/scenarios/${name}/`), opcodes);
 
   const store = new SheetStore();
@@ -105,6 +107,10 @@ async function main(): Promise<void> {
     'ter1', 'ter2', 'ter3', 'ter4', 'ter5', 'teranim',
     'dlogbtnlg', 'dlogbtnmed', 'dlogbtnsm', 'dlogbtnled', 'dlogbtnhelp',
     'dlogbtntall', 'dlgbtnred', 'dlogpics',
+    // `scenpics` is PIC_SCEN, which is what a message node with no picture of
+    // its own falls back to (the scenario's own icon); `bigscenpics` is the
+    // -lg variant, and `staticons` is PIC_STATUS.
+    'scenpics', 'bigscenpics',
   ];
   for (let i = 1; i <= 11; i++) sheets.push(`monst${i}`);
   await Promise.all(sheets.map((s) => store.load(s)));
@@ -278,18 +284,39 @@ async function main(): Promise<void> {
    */
   session.onRedraw = () => redraw();
   const specialHost: SpecialHost = {
-    message: async (str1, str2, title, pic, picType) => {
-      const text = [str1, str2].filter((s) => s.length > 0).join('\n\n');
-      await dialogs.runQueued({
-        text: title ? `${title}\n\n${text}` : text,
-        escapeButton: 'okay',
-        buttons: [{ name: 'okay', label: 'OK' }],
-      });
+    message: async (str1, str2, title, pic, picType, record) => {
+      // `cStrDlog` — the real message box: the node's picture at the top left,
+      // one of the eight {1|2}str[-title][-lg] layouts, and a Record button
+      // that puts the text in the party's encounter notes.
+      // `display_strings.setSound(57)` — every message a special node puts up
+      // announces itself. Only those carry a recorder, which is what tells the
+      // two apart here.
+      if (record) sound.play(57);
+      await dialogs.runScreenQueued(strDialog(ctx, store, {
+        str1,
+        str2,
+        title,
+        pic,
+        picType,
+        onRecord: record && (() => {
+          sound.play(0);
+          let added = false;
+          for (const str of record.strs) {
+            if (univ.party.record(record.type, str, record.where)) added = true;
+          }
+          // Only the first string's success is reported, as in the C++.
+          if (added) univ.addStringToBuf('Added to encounter notes.');
+          redraw();
+        }),
+      }));
     },
     choice: async (strs, buttons, title, pic, picType) => {
       const text = strs.filter((s) => s.length > 0).join('\n\n');
       const picked = await dialogs.runQueued({
         text: title ? `${title}\n\n${text}` : text,
+        // `cThreeChoice::init_pict` (3choice.cpp:159) — a choice dialog raised
+        // by a special node carries the node's picture too.
+        pic: pic >= 0 ? { type: pictTypeOf(picType), num: pic } : undefined,
         escapeButton: buttons[0] ?? 'okay',
         // basic_buttons attaches a letter to several of these — 'y'/'n' most
         // of all — and the choice dialogs are meant to answer to them.
@@ -693,14 +720,9 @@ async function main(): Promise<void> {
       const who = await selectPc('living', 'Give the item to whom?');
       if (who >= 0 && who !== screen.itemPage) session.giveItemTo(screen.itemPage, row, who);
     } else {
-      const lines = [item.ident ? item.fullName : item.name];
-      if (item.desc) lines.push('', item.desc);
-      lines.push('', `Weight: ${itemWeight(item)}   Value: ${item.value}`);
-      await dialogs.run({
-        text: lines.join('\n'),
-        escapeButton: 'okay',
-        buttons: [{ name: 'okay', label: 'OK' }],
-      });
+      // `display_pc_item` — the real item-info.xml sheet, with the arrows
+      // stepping through the rest of this PC's pack.
+      await dialogs.runScreen(itemInfoDialog(ctx, store, univ, screen.itemPage, row));
     }
     redraw();
   };

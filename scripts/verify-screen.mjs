@@ -546,6 +546,91 @@ if (useResult.charges !== 1) throw new Error('using the potion did not spend a c
 if (useResult.hp <= 1) throw new Error('using the potion did not heal');
 await shot('01e2-item-use');
 
+// 2e2a. The "I" button on an inventory row — `display_pc_item` on the real
+//       item-info.xml, with the arrows stepping through the rest of the pack.
+const infoClick = await page.evaluate(() => {
+  const sc = window.__screen;
+  for (let y = 120; y < 280; y++)
+    for (let x = 300; x < 610; x++) {
+      const h = sc.inventoryHit(x, y, false);
+      if (h && h.row === 0 && h.part === 'info') return { x, y };
+    }
+  return null;
+});
+if (!infoClick) throw new Error('the Info button was not drawn on an inventory row');
+const itemInfoAt = await page.evaluate(({ x, y }) => {
+  const canvas = document.querySelector('canvas');
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: r.left + (x + 0.5) * (r.width / canvas.width),
+    y: r.top + (y + 0.5) * (r.height / canvas.height),
+  };
+}, infoClick);
+await page.mouse.click(itemInfoAt.x, itemInfoAt.y);
+await page.waitForTimeout(300);
+const itemInfo = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  if (!d || !d.def) return null;
+  const g = (n) => { try { return d.getText(n); } catch (e) { return null; } };
+  const read = () => ({ name: g('name'), type: g('type'), dmg: g('dmg'), bonus: g('bonus'),
+    weight: g('weight'), val: g('val'), use: g('use'), abil: g('abil'), id: d.getLed('id') });
+  const first = read();
+  // Step to the next item this PC is carrying.
+  const right = d.def.controls.find((c) => c.name === 'right');
+  const r = d.screenRect(right);
+  d.onClick((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+  return { first, next: read().name };
+});
+console.log('ITEM INFO:', JSON.stringify(itemInfo));
+if (!itemInfo) throw new Error('the Info button did not open item-info.xml');
+// Slot 0 of PC 3 is the potion the Use step left with one dose. `abil` is
+// `getAbilName`, and `use` is the charge count the hand-written notice never
+// showed at all.
+if (itemInfo.first.name !== 'test potion' || itemInfo.first.type !== 'Potion/Magic Item')
+  throw new Error(`item-info showed ${JSON.stringify(itemInfo.first)}`);
+if (itemInfo.first.abil !== 'Heal') throw new Error(`the ability read ${itemInfo.first.abil}`);
+if (itemInfo.first.use !== '1') throw new Error(`the charge count read ${itemInfo.first.use}`);
+if (itemInfo.first.id !== 'red') throw new Error('the ID? LED was not lit for an identified item');
+if (itemInfo.next !== 'Crude Buckler')
+  throw new Error(`the arrow stepped to ${itemInfo.next}`);
+await shot('01e2a-item-info');
+await press('Escape');
+await page.waitForTimeout(200);
+
+// 2e2b. A message a special node puts up is a real cStrDlog now: the picture
+//       at the top left, and a Record button that fills the encounter notes.
+const message = await page.evaluate(() => {
+  const s = window.__session;
+  // The scenario's own node 1 is a one-string DISPLAY_MSG that stops there.
+  // (Fort Talrus's node 9 is one too, but it jumps straight into END_SCENARIO.)
+  void s.runSpecialRaw(1 /* TOWN_MOVE */, 0 /* SCEN */, 1, { x: 7, y: 8 });
+});
+await page.waitForTimeout(400);
+const msgDlg = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  if (!d || !d.def) return null;
+  const g = (n) => { try { return d.getText(n); } catch (e) { return null; } };
+  const record = d.def.controls.find((c) => c.name === 'record');
+  const r = d.screenRect(record);
+  const before = { str1: (g('str1') || '').slice(0, 40), str2: (g('str2') || '').slice(0, 40),
+    pic: d.picNum.get('pict'), picType: d.picType.get('pict'),
+    recordShown: d.isVisible('record') };
+  d.onClick((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+  return { ...before, notes: window.__univ.party.specialNotes.length,
+    recordGone: !d.isVisible('record'), tail: window.__univ.transcript.slice(-1) };
+});
+console.log('MESSAGE:', JSON.stringify(msgDlg));
+if (!msgDlg) throw new Error('a DISPLAY_MSG node did not open a cStrDlog');
+if (!msgDlg.recordShown) throw new Error('the message had no Record button');
+// A node with no picture of its own borrows the scenario icon (PIC_SCEN).
+if (msgDlg.picType !== 'scen') throw new Error(`the message picture was ${msgDlg.picType}`);
+if (msgDlg.notes !== 1) throw new Error(`Record wrote ${msgDlg.notes} notes, wanted 1`);
+if (msgDlg.tail[0] !== 'Added to encounter notes.')
+  throw new Error('Record said nothing in the transcript');
+await shot('01e2b-message');
+await press('Escape');
+await page.waitForTimeout(200);
+
 // 2e3. Alchemy (A): give the party a recipe and PC 1 the plant it needs, then
 //      mix it through the two dialogs. Skill 13 against difficulty 1 is nine
 //      clear of the fail table, so the roll can't fail.

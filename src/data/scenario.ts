@@ -19,6 +19,12 @@ export interface Scenario {
   title: string;
   teasers: string[];
   introMsgs: string[];
+  /**
+   * `intro_pic` — the scenario's own icon (`<icon>`), which doubles as
+   * `intro_mess_pic`: the picture a message node without one of its own shows
+   * (fileio_scen.cpp:801, handle_message's `pic == -1` arm).
+   */
+  introPic: number;
   numTowns: number;
   outWidth: number;
   outHeight: number;

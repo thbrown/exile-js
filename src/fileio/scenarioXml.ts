@@ -118,6 +118,7 @@ export interface ScenarioHeader {
   title: string;
   teasers: string[];
   introMsgs: string[];
+  introPic: number;
   numTowns: number;
   outWidth: number;
   outHeight: number;
@@ -209,6 +210,7 @@ export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): Scen
     title: '',
     teasers: [],
     introMsgs: [],
+    introPic: 0,
     numTowns: 0,
     outWidth: 0,
     outHeight: 0,
@@ -229,6 +231,7 @@ export function readScenarioFromXml(root: Element, fname = 'scenario.xml'): Scen
   for (const elem of children(root)) {
     const type = tag(elem);
     if (type === 'title') hdr.title = text(elem);
+    else if (type === 'icon') hdr.introPic = intText(elem);
     else if (type === 'text') {
       for (const t of children(elem)) {
         if (tag(t) === 'teaser') hdr.teasers.push(text(t));

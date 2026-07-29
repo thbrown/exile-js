@@ -15,9 +15,10 @@ import { Colours } from '../render/colours';
 import { BOE_HEIGHT, BOE_WIDTH, UiRect, height, width } from '../render/layout';
 import { itemGraphic } from '../render/itemPics';
 import { SheetStore } from '../render/sheets';
-import { terrainGraphic } from '../render/terrainPics';
 import { drawString, wrapLines } from '../render/text';
 import { tilePattern } from '../render/tiling';
+import { PictType } from './dialogXml';
+import { drawPictAt } from './pict';
 
 /**
  * cDialog::BG_DARK (dialog.cpp:49) is the game's default dialog background, and
@@ -69,6 +70,12 @@ export interface DialogSpec {
   buttons: DialogButton[];
   /** Terrain picture number shown at the left, if any. */
   terPic?: number;
+  /**
+   * A node's own picture, shown at the left — `cThreeChoice::init_pict`
+   * (3choice.cpp:159) puts one on every choice dialog a special node raises.
+   * `type` is the `ePicType` the node carries, resolved to a sheet.
+   */
+  pic?: { type: PictType; num: number; large?: boolean };
   /** Selectable rows shown between the text and the buttons. */
   rows?: DialogRow[];
   /** Button returned when the player presses Escape. */
@@ -114,13 +121,21 @@ export class Dialog {
     this.layout();
   }
 
+  /** How wide the left-hand picture is, or 0 when there isn't one. */
+  private picSize(): number {
+    if (this.spec.terPic !== undefined) return 28;
+    if (!this.spec.pic) return 0;
+    return this.spec.pic.large ? 72 : 36;
+  }
+
   /**
    * Size the panel to its content and centre it, then place the buttons in a
    * row along the bottom.
    */
   private layout(): void {
     const maxTextWidth = 300;
-    const picWidth = this.spec.terPic === undefined ? 0 : 28 + PADDING;
+    const picSize = this.picSize();
+    const picWidth = picSize === 0 ? 0 : picSize + PADDING;
     this.lines = [];
     // The game's text uses '|' as a hard line break (see showError and the
     // dialog XML), so honour both that and real newlines.
@@ -177,7 +192,7 @@ export class Dialog {
       ? rowsPerColumn * rowH
       : rowHeights.reduce((a, b) => a + b, 0);
     const innerHeight =
-      Math.max(this.lines.length * LINE_HEIGHT, this.spec.terPic === undefined ? 0 : 36) +
+      Math.max(this.lines.length * LINE_HEIGHT, picSize === 0 ? 0 : (this.spec.pic?.large ? 72 : 36)) +
       (rows.length > 0 ? PADDING + rowsHeight : 0) +
       PADDING +
       BUTTON_H;
@@ -192,7 +207,7 @@ export class Dialog {
     this.placedRows = [];
     const rowsTop = this.frame.top + PADDING + Math.max(
       this.lines.length * LINE_HEIGHT,
-      this.spec.terPic === undefined ? 0 : 36,
+      this.picSize() === 0 ? 0 : (this.spec.pic?.large ? 72 : 36),
     ) + (rows.length > 0 ? PADDING : 0);
     const colWidth = dense
       ? rowWidth
@@ -248,15 +263,12 @@ export class Dialog {
 
     let textLeft = frame.left + PADDING;
     if (this.spec.terPic !== undefined) {
-      const g = terrainGraphic(this.spec.terPic);
-      const sheet = g ? this.store.get(g.sheetName) : undefined;
-      if (g && sheet) {
-        ctx.drawImage(
-          sheet, g.rect.left, g.rect.top, g.rect.width, g.rect.height,
-          textLeft, frame.top + PADDING, 28, 36,
-        );
-      }
+      drawPictAt(ctx, this.store, 'ter', this.spec.terPic, textLeft, frame.top + PADDING);
       textLeft += 28 + PADDING;
+    } else if (this.spec.pic) {
+      drawPictAt(ctx, this.store, this.spec.pic.type, this.spec.pic.num,
+        textLeft, frame.top + PADDING, this.spec.pic.large);
+      textLeft += this.picSize() + PADDING;
     }
 
     let y = frame.top + PADDING;
@@ -449,6 +461,19 @@ export class DialogHost {
   runQueued(spec: DialogSpec): Promise<string> {
     const next = this.tail.then(() => this.run(spec));
     // Keep the chain alive even if one link rejects.
+    this.tail = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  /**
+   * `runScreen` on the same queue — which is what a specials chain needs, since
+   * its messages now run on real dialogxml definitions rather than the plain
+   * modal. The screen is built lazily so a chain of them doesn't lay them all
+   * out at once against stale state.
+   */
+  runScreenQueued(build: ModalScreen | (() => ModalScreen)): Promise<string> {
+    const next = this.tail.then(
+      () => this.runScreen(typeof build === 'function' ? build() : build));
     this.tail = next.then(() => undefined, () => undefined);
     return next;
   }

@@ -15,6 +15,12 @@ import { readDialogDef } from '../src/dialogs/dialogXml';
 import { addDialogDef, getDialogDef, hasDialogDef } from '../src/dialogs/dialogStore';
 import { XmlDialog } from '../src/dialogs/xmlDialog';
 import { displayPcInfo, pcInfoDialog } from '../src/dialogs/pcInfoDialog';
+import { itemInfoDialog, putItemInfo } from '../src/dialogs/itemInfoDialog';
+import {
+  STR_DIALOG_DEFS, pictTypeOf, strDialog, strDialogDefName,
+} from '../src/dialogs/strDialog';
+import { Item, ItemAbil, ItemPreset, ItemUse, presetItem } from '../src/data/item';
+import { EncNoteType } from '../src/universe/party';
 import { GameSession } from '../src/game/session';
 import { SheetStore } from '../src/render/sheets';
 import { PartyPreset } from '../src/universe/player';
@@ -64,6 +70,13 @@ function fakeCtx(): CanvasRenderingContext2D {
     createPattern: () => null, translate: () => {}, scale: () => {},
   };
   return ctx as unknown as CanvasRenderingContext2D;
+}
+
+/** The middle of a named control, for driving a click at it. */
+function centreOf(dlg: XmlDialog, name: string): [number, number] {
+  const control = dlg.def.controls.find((c) => c.name === name)!;
+  const r = dlg.screenRect(control);
+  return [(r.left + r.right) / 2, (r.top + r.bottom) / 2];
 }
 
 describe('parsing the shipped definitions', () => {
@@ -318,5 +331,170 @@ describe('pc-info, the first converted call site', () => {
     const s = inTown();
     const dlg = pcInfoDialog(fakeCtx(), new SheetStore(), s.univ, 0);
     expect(dlg.onKey('Escape')).toBe('done');
+  });
+});
+
+describe('item-info, `display_pc_item` on the toolkit', () => {
+  function inTown(): GameSession {
+    const s = new GameSession(new Universe(scen, new GameRng(), PartyPreset.DEFAULT));
+    s.startNewGame();
+    return s;
+  }
+
+  beforeAll(async () => {
+    if (!hasDialogDef('item-info')) await addDialogDef('item-info', readDialog('item-info'));
+  });
+
+  function sheetFor(item: Item): XmlDialog {
+    const dlg = new XmlDialog(fakeCtx(), new SheetStore(), getDialogDef('item-info'));
+    putItemInfo(dlg, item, scen);
+    return dlg;
+  }
+
+  it('fills a weapon: damage, bonus, weight, value and the key skill', () => {
+    const dlg = sheetFor(presetItem(ItemPreset.KNIFE));
+    expect(dlg.getText('name')).toBe('Bronze Knife');
+    expect(dlg.getText('type')).toBe('1-Handed weapon');
+    expect(dlg.getText('dmg')).toBe('4');
+    expect(dlg.getText('bonus')).toBe('1');
+    expect(dlg.getText('weight')).toBe('7');
+    expect(dlg.getText('val')).toBe('2');
+    // A weapon with no ability of its own advertises its skill instead.
+    expect(dlg.getText('abil')).toBe('Key skill: Edged Weapons');
+    expect(dlg.getLed('id')).toBe('red');
+    expect(dlg.getLed('magic')).toBe('off');
+  });
+
+  it('folds bonus and protection together for armour, as the C++ does', () => {
+    const buckler = presetItem(ItemPreset.BUCKLER);
+    buckler.protection = 2;
+    buckler.bonus = 1;
+    const dlg = sheetFor(buckler);
+    // "Bonus" is bonus + protection and "Defend" is the item level — the other
+    // way round from a weapon, and the C++ has its own TODO about it.
+    expect(dlg.getText('bonus')).toBe('3');
+    expect(dlg.getText('def')).toBe('1');
+    expect(dlg.getText('enc')).toBe('1');
+    expect(dlg.getText('dmg')).toBe('');
+  });
+
+  it('prices a stack of charges at value times count', () => {
+    const arrows = presetItem(ItemPreset.ARROW);
+    const dlg = sheetFor(arrows);
+    expect(dlg.getText('use')).toBe('12');
+    expect(dlg.getText('val')).toBe('12'); // value 1 x 12 charges
+  });
+
+  it('gives an unidentified item only its short name and no numbers', () => {
+    const knife = presetItem(ItemPreset.KNIFE);
+    knife.ident = false;
+    knife.magic = true;
+    const dlg = sheetFor(knife);
+    expect(dlg.getText('name')).toBe('Knife');
+    expect(dlg.getText('dmg')).toBe('');
+    expect(dlg.getText('val')).toBe('');
+    expect(dlg.getLed('id')).toBe('off');
+    // Magic is only ever shown once identified, so nothing is given away.
+    expect(dlg.getLed('magic')).toBe('off');
+  });
+
+  it('names the ability in words, and hides a concealed one', () => {
+    const potion = presetItem(ItemPreset.POTION);
+    potion.ident = true;
+    potion.ability = ItemAbil.AFFECT_HEALTH;
+    potion.magicUseType = ItemUse.HELP_ONE;
+    expect(sheetFor(potion).getText('abil')).toBe('Heal');
+    potion.magicUseType = ItemUse.HARM_ONE;
+    expect(sheetFor(potion).getText('abil')).toBe('Drain Health');
+    potion.concealed = true;
+    expect(sheetFor(potion).getText('abil')).toBe('???');
+  });
+
+  it('steps through the pack with the arrows, skipping empty slots', () => {
+    const s = inTown();
+    const dlg = itemInfoDialog(fakeCtx(), new SheetStore(), s.univ, 0, 0);
+    expect(dlg.getText('name')).toBe('Bronze Knife');
+    dlg.onClick(...centreOf(dlg, 'right'));
+    expect(dlg.getText('name')).toBe('Crude Buckler');
+    // Slots 2..23 are empty, so the next step wraps back to slot 0.
+    dlg.onClick(...centreOf(dlg, 'right'));
+    expect(dlg.getText('name')).toBe('Bronze Knife');
+    dlg.onClick(...centreOf(dlg, 'left'));
+    expect(dlg.getText('name')).toBe('Crude Buckler');
+  });
+
+  it('hides the arrows for an item nobody owns', () => {
+    const s = inTown();
+    const loose = presetItem(ItemPreset.ROBE);
+    const dlg = itemInfoDialog(fakeCtx(), new SheetStore(), s.univ, 6, 0, loose);
+    expect(dlg.getText('name')).toBe('Vahnatai Robes');
+    expect(dlg.isVisible('left')).toBe(false);
+    expect(dlg.isVisible('right')).toBe(false);
+  });
+});
+
+describe('cStrDlog, the message box', () => {
+  it('picks its layout from the strings, the title and the picture size', () => {
+    const base = { str1: 'a', pic: 0, picType: 4 };
+    expect(strDialogDefName(base)).toBe('1str');
+    expect(strDialogDefName({ ...base, str2: 'b' })).toBe('2str');
+    expect(strDialogDefName({ ...base, title: 'T' })).toBe('1str-title');
+    expect(strDialogDefName({ ...base, str2: 'b', title: 'T' })).toBe('2str-title');
+    // PIC_DLOG_LG / PIC_SCEN_LG / PIC_CUSTOM_DLOG_LG take the wide layout.
+    expect(strDialogDefName({ ...base, picType: 13 })).toBe('1str-lg');
+    expect(strDialogDefName({ ...base, picType: 14 })).toBe('1str-lg');
+    expect(strDialogDefName({ ...base, picType: 113 })).toBe('1str-lg');
+    // An empty first string still needs one text control.
+    expect(strDialogDefName({ ...base, str1: '', str2: 'b' })).toBe('1str');
+  });
+
+  it('maps the ePicType numbers to their sheets', () => {
+    expect(pictTypeOf(4)).toBe('dlog');
+    expect(pictTypeOf(6)).toBe('scen');
+    expect(pictTypeOf(7)).toBe('item');
+    expect(pictTypeOf(1)).toBe('ter');
+    expect(pictTypeOf(3)).toBe('monst');
+    // Anything unmapped falls back to the dialog sheet.
+    expect(pictTypeOf(99)).toBe('dlog');
+  });
+
+  describe('running it', () => {
+    beforeAll(async () => {
+      for (const name of STR_DIALOG_DEFS) {
+        if (!hasDialogDef(name)) await addDialogDef(name, readDialog(name));
+      }
+    });
+
+    it('draws the Record button only when there is something to record', () => {
+      const plain = strDialog(fakeCtx(), new SheetStore(),
+        { str1: 'hello', pic: 5, picType: 6 });
+      expect(plain.isVisible('record')).toBe(false);
+
+      let recorded = 0;
+      const withRecord = strDialog(fakeCtx(), new SheetStore(),
+        { str1: 'hello', pic: 5, picType: 6, onRecord: () => { recorded++; } });
+      expect(withRecord.isVisible('record')).toBe(true);
+      withRecord.onClick(...centreOf(withRecord, 'record'));
+      expect(recorded).toBe(1);
+      // Once pressed it goes away, so it can't be pressed twice.
+      expect(withRecord.isVisible('record')).toBe(false);
+    });
+
+    it('moves a lone second string up into the first slot', () => {
+      const dlg = strDialog(fakeCtx(), new SheetStore(),
+        { str1: '', str2: 'only this', pic: 0, picType: 4 });
+      expect(dlg.getText('str1')).toBe('only this');
+    });
+  });
+});
+
+describe('cParty::record', () => {
+  it('adds a note and refuses an exact duplicate', () => {
+    const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
+    expect(univ.party.record(EncNoteType.TOWN, 'a secret', 'Fort Talrus')).toBe(true);
+    expect(univ.party.record(EncNoteType.TOWN, 'a secret', 'Fort Talrus')).toBe(false);
+    // The same text found somewhere else is a different note.
+    expect(univ.party.record(EncNoteType.TOWN, 'a secret', 'Marralis')).toBe(true);
+    expect(univ.party.specialNotes).toHaveLength(2);
   });
 });
