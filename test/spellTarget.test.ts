@@ -172,9 +172,14 @@ describe('cast_town_spell', () => {
 
     const monst = s.univ.town!.monsters.find((m) => m.isAlive)!;
     monst.curLoc = { ...at };
+    // `adjust_monst_menu()` then `display_monst(0, monst, 0)` — the sheet opens
+    // on what was scried, which is the host's job here.
+    const shown: string[] = [];
+    s.onShowMonster = (m) => { shown.push(m.mon.name); };
     startTownTargeting(s, Spell.SCRY_MONSTER, 0);
     await castTownSpell(s, at);
     expect(s.univ.party.mNoted.has(monst.number)).toBe(true);
+    expect(shown).toEqual([monst.mon.name]);
   });
 
   it('Unlock refuses terrain that is not a lock', async () => {

@@ -125,12 +125,12 @@ export async function generalSpec(
       break;
 
     case SpecType.STORY_DIALOG:
-      // TODO(M6): story_dialog paginates a run of strings with Back/Next; for
-      // now the first page is shown, which is what a one-string story is.
-      await ctx.host.message(
+      // m1 is the *title*; m2..m3 is the range of strings to page through
+      // (boe.specials.cpp:2458). The port used to show m1 and m2 as two
+      // paragraphs of one message, which was wrong on both counts.
+      await ctx.host.story(
         univ.getStr(ctx.curSpecType, spec.m1) ?? '',
-        univ.getStr(ctx.curSpecType, spec.m2) ?? '',
-        '', spec.pic, spec.pictype);
+        spec.m2, spec.m3, ctx.curSpecType, spec.pic, spec.pictype);
       break;
 
     case SpecType.CANT_ENTER:

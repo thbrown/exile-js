@@ -722,6 +722,7 @@ async function resolveOne(
       livingSound(52);
       univ.party.mNoted.add(monst.number);
       univ.addStringToBuf(`  ${monst.mon.name} noted.`);
+      session.onShowMonster?.(monst);
       break;
     case Spell.CAPTURE_SOUL:
       if (!monst) { univ.addStringToBuf('  Nobody there.'); break; }

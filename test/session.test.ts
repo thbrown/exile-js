@@ -381,6 +381,7 @@ describe('outdoor terrain specials', () => {
     const host: SpecialHost = {
       async message() {},
       async choice(_strs, buttons) { return buttons.length - 1; },
+      async story() {},
       async askText() { return ''; },
       async selectPc() { return 0; },
       startShop() { return true; },

@@ -64,6 +64,7 @@ class TestHost implements SpecialHost {
   messages: string[] = [];
   async message(str1: string): Promise<void> { this.messages.push(str1); }
   async choice(_s: string[], buttons: string[]): Promise<number> { return buttons.length - 1; }
+  async story(): Promise<void> {}
   async askText(): Promise<string> { return ''; }
   async selectPc(): Promise<number> { return 0; }
   startShop(): boolean { return true; }

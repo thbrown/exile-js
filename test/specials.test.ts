@@ -50,6 +50,10 @@ class TestHost implements SpecialHost {
     return this.answers.shift() ?? buttons.length - 1;
   }
 
+  stories: { title: string; first: number; last: number }[] = [];
+  async story(title: string, first: number, last: number): Promise<void> {
+    this.stories.push({ title, first, last });
+  }
   async askText(): Promise<string> {
     return this.textAnswers.shift() ?? '';
   }
@@ -195,6 +199,19 @@ describe('general nodes', () => {
     expect(univ.party.getSdf(1, 1)).toBe(26);
     expect(univ.party.getSdf(1, 2)).toBe(3);
     expect(univ.party.getSdf(1, 3)).toBe(2);
+  });
+
+  it('STORY_DIALOG passes a title and a *range*, not two paragraphs', async () => {
+    // m1 is the title; m2..m3 is the run of strings the dialog pages through
+    // (boe.specials.cpp:2458). The port used to send m1 and m2 to the plain
+    // message box as if they were one message in two parts.
+    const { host, run } = withNodes({
+      0: { type: SpecType.STORY_DIALOG, m1: 0, m2: 1, m3: 2, pic: 3, pictype: 4 },
+    });
+    await run();
+    expect(host.stories).toEqual([{ title: 'first string', first: 1, last: 2 }]);
+    // And nothing went to the plain message box.
+    expect(host.messages).toHaveLength(0);
   });
 
   it('flips and increments flags', async () => {

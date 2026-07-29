@@ -631,6 +631,72 @@ await shot('01e2b-message');
 await press('Escape');
 await page.waitForTimeout(200);
 
+// 2e2c. `display_monst` on monster-info.xml, and `story_dialog` paging a range
+//       of strings on many-str.xml.
+const monstInfo = await page.evaluate(() => {
+  const s = window.__session;
+  const monst = s.univ.town.monsters.find((c) => c.isAlive);
+  if (!monst) return { skipped: 'no monster' };
+  s.onShowMonster(monst);
+  return { of: monst.mon.name };
+});
+await page.waitForTimeout(300);
+const monstSheet = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  if (!d || !d.def) return null;
+  const g = (n) => { try { return d.getText(n); } catch (e) { return null; } };
+  return { name: g('name'), lvl: g('lvl'), hp: g('hp'), morale: g('morale'),
+    attack1: g('attack1'), abil1: g('abil1'), fire: g('fire-res'),
+    guard: d.getLed('guard'), arrowsHidden: !d.isVisible('left') };
+});
+console.log('MONSTER INFO:', JSON.stringify({ ...monstInfo, sheet: monstSheet }));
+if (!monstSheet) throw new Error('display_monst did not open monster-info.xml');
+if (monstSheet.name !== monstInfo.of) throw new Error('the sheet named the wrong monster');
+// Morale is ten per level, doubling again past 20 — a level 30 guard is 400.
+if (monstSheet.lvl === '30' && monstSheet.morale !== '400')
+  throw new Error(`morale read ${monstSheet.morale}`);
+if (!/^\d+d\d+$/.test(monstSheet.attack1)) throw new Error(`attack 1 read ${monstSheet.attack1}`);
+if (!monstSheet.arrowsHidden) throw new Error('the roster arrows were shown for one creature');
+await shot('01e2c-monster-info');
+await press('Escape');
+await page.waitForTimeout(200);
+
+const story = await page.evaluate(async () => {
+  const s = window.__session;
+  // A STORY_DIALOG node: m1 is the title, m2..m3 the pages.
+  s.univ.town.record.specials.set(900, {
+    type: 10 /* STORY_DIALOG */, sd1: -1, sd2: -1, m1: 0, m2: 0, m3: 1,
+    pic: 0, pictype: 4, ex1a: -1, ex1b: -1, ex1c: -1,
+    ex2a: -1, ex2b: -1, ex2c: -1, jumpto: -1,
+  });
+  void s.runSpecialRaw(1 /* TOWN_MOVE */, 2 /* TOWN */, 900, { x: 7, y: 8 });
+});
+await page.waitForTimeout(400);
+const storyPages = await page.evaluate(() => {
+  const d = window.__dialogs.active;
+  if (!d || !d.def) return null;
+  const g = (n) => { try { return (d.getText(n) || '').slice(0, 30); } catch (e) { return null; } };
+  const click = (name) => {
+    const c = d.def.controls.find((x) => x.name === name);
+    const r = d.screenRect(c);
+    return d.onClick((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+  };
+  const page1 = g('str');
+  click('right');
+  const page2 = g('str');
+  click('left');
+  return { title: g('title'), page1, page2, back: g('str'), controls: !!d.def };
+});
+console.log('STORY:', JSON.stringify(storyPages));
+if (!storyPages) throw new Error('STORY_DIALOG did not open many-str.xml');
+if (storyPages.page1 === storyPages.page2)
+  throw new Error('Next did not turn the page');
+if (storyPages.back !== storyPages.page1)
+  throw new Error('Back did not return to the first page');
+await shot('01e2d-story');
+await press('Escape');
+await page.waitForTimeout(200);
+
 // 2e3. Alchemy (A): give the party a recipe and PC 1 the plant it needs, then
 //      mix it through the two dialogs. Skill 13 against difficulty 1 is nine
 //      clear of the fail table, so the roll can't fail.

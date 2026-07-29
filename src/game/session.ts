@@ -1927,6 +1927,13 @@ export class GameSession {
    * host's only real option today is to freeze input and say what happened.
    */
   onPartyDeath: (() => void) | null = null;
+
+  /**
+   * Set by the host: `display_monst` (boe.infodlg.cpp:288), the monster sheet
+   * Scry Monster opens on whatever it identified. Fire-and-forget — nothing in
+   * the spell waits for it, and the *note* is the part that lasts.
+   */
+  onShowMonster: ((monst: Creature) => void) | null = null;
   private partyDead = false;
 
   /**

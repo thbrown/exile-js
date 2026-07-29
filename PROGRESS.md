@@ -1596,9 +1596,11 @@ playthrough will hit it:
    system). ~~Hunger~~ landed 2026-07-28 — see the entry below.
 5. **The dialogxml toolkit** — the parser, the widget renderer and the first
    converted call site (`pc-info.xml`) landed 2026-07-28; see the entry below.
-   What's left is converting more call sites: `story_dialog`'s pagination,
-   `display_monst`, `display_pc`'s spell lists, and the two dialogs the job
-   board and alchemy are still approximating with lists.
+   Since then: `quest-info`, `get-items`, `item-info`, the eight `cStrDlog`
+   layouts, `monster-info` and `many-str`. What's left is `display_pc`'s spell
+   lists, `cThreeChoice` (which builds its controls at runtime rather than
+   from a definition), and the two dialogs the job board and alchemy are still
+   approximating with lists.
 6. ~~Odds and ends left over from M5~~ — **done** (2026-07-28), see the entry
    below. The one thing left in that area is `AFFECT_SOUL_CRYSTAL`, which needs
    the creature-context plumbing described there.
@@ -2532,3 +2534,43 @@ playthrough will hit it:
     clicks a real Info button and reads the sheet back, then fires a
     `DISPLAY_MSG` node and presses Record, checking the scenario icon is on the
     dialog and the note landed.
+
+- **Two more dialogxml call sites: the monster sheet and the story pages
+  (2026-07-28).**
+  - **`story_dialog` was reading the node wrong**, not just showing one page.
+    STORY_DIALOG's `m1` is the **title** and `m2`..`m3` is the range of strings
+    to page through (boe.specials.cpp:2458); the port was sending `m1` and `m2`
+    to the plain message box as if they were one message in two paragraphs. So
+    a scenario's opening story showed its title as the text and stopped.
+    `dialogs/storyDialog.ts` runs it on `many-str.xml`, and the VM gained a
+    `story` host method for it.
+    - *Gotcha*: the C++ writes one handler for all three buttons, and its
+      `else if(clicked == "done" || cur == last)` arm is reached by anything
+      that isn't Back — so **Next on the last page dismisses the dialog**.
+      Back never closes it; it just stops at the first page. Both kept.
+  - **`display_monst` runs on `monster-info.xml`** (`dialogs/monsterInfoDialog
+    .ts`, boe.infodlg.cpp:288 + `put_monst_info`, view_dialogs.cpp:120): the
+    picture, level, health, magic, armour, skill, morale, speed, the three
+    attacks as dice, mage and priest levels, four ability lines, the four
+    resistances and the three LEDs. Scry Monster opens it on whatever it
+    identified — `session.onShowMonster`, wired from both the town and combat
+    arms — and the roster version pages through `m_noted`, which is what the
+    dialog's own footnote is telling the player.
+    - `data/monsterAbilName.ts` ports `uAbility::to_string` (monster.cpp:483).
+      The general arm builds its phrase in three parts: an adjective from the
+      ability's `extra` field, a delivery word from `gen.type`, and a strength
+      suffix chosen by the key — which is why "Steals gold touch (50-100)"
+      reads the way it does.
+    - *Gotcha*: `resist` is the percentage of damage **taken**, so the sheet
+      shows `100 - resist`. Morale is ten per level and doubles again past
+      level 20, so Fort Talrus's level-30 guards show 400.
+    - *Gotcha*: RADIATE's dispel and smash arms call `sout.str(...)`, which
+      throws away the "Radiates " already written — they read "Dispels
+      surrounding fields" and "Wall-smashing aura" with no prefix. Kept.
+    - Not ported: the custom monster graphic sheets, so a `picture_num >= 1000`
+      falls back to the preset frame at `num % 1000`.
+  - Tests: `test/dialogXml.test.ts` gained 9 covering both sheets, the ability
+    names in all four categories and the pagination's two quirks;
+    `test/specials.test.ts` pins that STORY_DIALOG passes a title and a range;
+    `test/spellTarget.test.ts` pins that Scry Monster reaches the host.
+    `verify-screen.mjs` opens both dialogs for real and turns a page.

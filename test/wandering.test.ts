@@ -329,6 +329,7 @@ function attachStubHost(s: GameSession): void {
   s.attachSpecials({
     message: async () => {},
     choice: async () => 0,
+    story: async () => {},
     askText: async () => '',
     selectPc: async () => 0,
     startShop: () => false,

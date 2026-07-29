@@ -23,6 +23,8 @@ import { loadDialogDefs } from './dialogs/dialogStore';
 import { pcInfoDialog } from './dialogs/pcInfoDialog';
 import { itemInfoDialog } from './dialogs/itemInfoDialog';
 import { STR_DIALOG_DEFS, pictTypeOf, strDialog } from './dialogs/strDialog';
+import { storyDialog } from './dialogs/storyDialog';
+import { monsterInfoDialog } from './dialogs/monsterInfoDialog';
 import { questInfoDialog } from './dialogs/questInfoDialog';
 import { ItemWinMode, QUEST_COMPLETED_OFFSET } from './game/itemWindow';
 import { BASIC_BUTTON_KEYS } from './game/specials/oneshot';
@@ -98,7 +100,7 @@ async function main(): Promise<void> {
   // The dialog definitions the player opens. The other ~150 belong to the
   // scenario and character editors, which this port doesn't run.
   await loadDialogDefs(fetchText,
-    ['pc-info', 'quest-info', 'get-items', 'item-info', ...STR_DIALOG_DEFS]);
+    ['pc-info', 'quest-info', 'get-items', 'item-info', 'many-str', 'monster-info', ...STR_DIALOG_DEFS]);
   const scen = await loadScenario(new FetchSource(`/scenarios/${name}/`), opcodes);
 
   const store = new SheetStore();
@@ -250,6 +252,16 @@ async function main(): Promise<void> {
   };
 
   /**
+   * Scry Monster's `display_monst` — the monster sheet, on this one creature,
+   * with the roster arrows hidden. Queued behind whatever the cast already put
+   * on screen (the projectile's own dialogs, in combat).
+   */
+  session.onShowMonster = (monst) => {
+    void dialogs.runScreenQueued(() => monsterInfoDialog(ctx, store, univ, monst))
+      .then(() => redraw());
+  };
+
+  /**
    * A locked door: ask what to do and who does it, then act. This is the async
    * replacement for the C++ blocking cChoiceDlog + select_pc pair.
    */
@@ -325,6 +337,10 @@ async function main(): Promise<void> {
         })),
       });
       return Math.max(0, buttons.indexOf(picked));
+    },
+    story: async (title, first, last, strType, pic, picType) => {
+      await dialogs.runScreenQueued(
+        () => storyDialog(ctx, store, univ, title, first, last, strType, pic, picType));
     },
     askText: (prompt) => askForText(prompt),
     selectPc: (prompt, highlight) => selectPc('living', prompt, highlight),

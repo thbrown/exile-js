@@ -20,6 +20,17 @@ import {
   STR_DIALOG_DEFS, pictTypeOf, strDialog, strDialogDefName,
 } from '../src/dialogs/strDialog';
 import { Item, ItemAbil, ItemPreset, ItemUse, presetItem } from '../src/data/item';
+import { monsterInfoDialog, putMonstInfo } from '../src/dialogs/monsterInfoDialog';
+import { storyDialog } from '../src/dialogs/storyDialog';
+import { DamageType, Monster, defaultMonster } from '../src/data/monster';
+import { FieldType } from '../src/data/fields';
+import {
+  Ability, MonstAbil, MonstGen, MonstMissile, MonstSummon, defaultAbility,
+} from '../src/data/monsterAbility';
+import { abilityName } from '../src/data/monsterAbilName';
+import { SpecCtxType } from '../src/game/specials/context';
+import { Creature } from '../src/universe/creature';
+import { Race, Status } from '../src/universe/skills';
 import { EncNoteType } from '../src/universe/party';
 import { GameSession } from '../src/game/session';
 import { SheetStore } from '../src/render/sheets';
@@ -496,5 +507,156 @@ describe('cParty::record', () => {
     // The same text found somewhere else is a different note.
     expect(univ.party.record(EncNoteType.TOWN, 'a secret', 'Marralis')).toBe(true);
     expect(univ.party.specialNotes).toHaveLength(2);
+  });
+});
+
+describe('monster-info, `display_monst` on the toolkit', () => {
+  beforeAll(async () => {
+    if (!hasDialogDef('monster-info')) await addDialogDef('monster-info', readDialog('monster-info'));
+  });
+
+  function sheetFor(mon: Monster, live?: Creature): XmlDialog {
+    const dlg = new XmlDialog(fakeCtx(), new SheetStore(), getDialogDef('monster-info'));
+    putMonstInfo(dlg, mon, scen, live);
+    return dlg;
+  }
+
+  it('fills the sheet from a monster type', () => {
+    const guard = scen.scenMonsters.find((m) => m.name === 'Guard')!;
+    const dlg = sheetFor(guard);
+    expect(dlg.getText('name')).toBe('Guard');
+    expect(dlg.getText('lvl')).toBe(String(guard.level));
+    expect(dlg.getText('hp')).toBe(String(guard.health));
+    expect(dlg.getText('attack1')).toBe(`${guard.attacks[0]!.dice}d${guard.attacks[0]!.sides}`);
+    // Morale is ten per level, and doubles again past 20.
+    expect(dlg.getText('morale')).toBe(String(10 * guard.level + 10 * (guard.level - 20)));
+    // `resist` is the damage *taken*; the sheet shows the part resisted.
+    expect(dlg.getText('fire-res')).toBe(`${100 - guard.resist[DamageType.FIRE]!}%`);
+    expect(dlg.getLed('guard')).toBe(guard.guard ? 'red' : 'off');
+  });
+
+  it('shows a non-caster no magic points, and a caster twelve per level', () => {
+    const mon = { ...defaultMonster(), level: 5, mu: 0, cl: 0 };
+    expect(sheetFor(mon).getText('sp')).toBe('0');
+    expect(sheetFor({ ...mon, mu: 3 }).getText('sp')).toBe('60');
+  });
+
+  it('takes health, magic and morale from the creature when there is one', () => {
+    const guard = scen.scenMonsters.find((m) => m.name === 'Guard')!;
+    const live = new Creature();
+    live.mon = { ...guard };
+    live.health = 7;
+    live.mp = 3;
+    live.morale = 11;
+    const dlg = sheetFor(guard, live);
+    expect(dlg.getText('hp')).toBe('7');
+    expect(dlg.getText('sp')).toBe('3');
+    expect(dlg.getText('morale')).toBe('11');
+  });
+
+  it('lists the first four active abilities and leaves the rest blank', () => {
+    const mon = defaultMonster();
+    mon.abil[MonstAbil.MISSILE] = {
+      ...mon.abil[MonstAbil.MISSILE]!, active: true,
+    };
+    mon.abil[MonstAbil.MISSILE]!.missile = {
+      ...mon.abil[MonstAbil.MISSILE]!.missile, type: MonstMissile.SPEAR, dice: 3, sides: 7,
+    };
+    const dlg = sheetFor(mon);
+    expect(dlg.getText('abil1')).toBe('Throws spears (3d7)');
+    expect(dlg.getText('abil2')).toBe('');
+  });
+
+  it('pages through the scried roster, and hides the arrows for one creature', () => {
+    const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
+    univ.party.mNoted.add(2);
+    univ.party.mNoted.add(5);
+    const roster = monsterInfoDialog(fakeCtx(), new SheetStore(), univ);
+    expect(roster.isVisible('left')).toBe(true);
+    expect(roster.getText('name')).toBe(scen.scenMonsters[2]!.name);
+    roster.onClick(...centreOf(roster, 'right'));
+    expect(roster.getText('name')).toBe(scen.scenMonsters[5]!.name);
+    // Two entries, so Next wraps straight back round.
+    roster.onClick(...centreOf(roster, 'right'));
+    expect(roster.getText('name')).toBe(scen.scenMonsters[2]!.name);
+
+    const live = new Creature();
+    live.mon = { ...scen.scenMonsters[2]! };
+    const one = monsterInfoDialog(fakeCtx(), new SheetStore(), univ, live);
+    expect(one.isVisible('left')).toBe(false);
+    expect(one.isVisible('right')).toBe(false);
+  });
+});
+
+describe('uAbility::to_string', () => {
+  function gen(key: MonstAbil, over: Partial<Ability['gen']>): string {
+    const abil = defaultAbility();
+    abil.gen = { ...abil.gen, ...over };
+    return abilityName(key, abil);
+  }
+
+  it('builds a general ability from adjective, delivery and strength', () => {
+    expect(gen(MonstAbil.DAMAGE, { type: MonstGen.BREATH, extra: DamageType.FIRE, strength: 4 }))
+      .toBe('Fiery breath (4)');
+    // A status ability's die depends on how it is delivered.
+    expect(gen(MonstAbil.STATUS, { type: MonstGen.TOUCH, extra: Status.POISON, strength: 3 }))
+      .toBe('Poison touch (3d10)');
+    expect(gen(MonstAbil.STATUS, { type: MonstGen.RAY, extra: Status.ASLEEP, strength: 2 }))
+      .toBe('Sleep ray (2d6)');
+    // KILL multiplies its strength by twenty; the thieves show a range.
+    expect(gen(MonstAbil.KILL, { type: MonstGen.GAZE, strength: 2 })).toBe('Death gaze (40d10)');
+    expect(gen(MonstAbil.STEAL_GOLD, { type: MonstGen.TOUCH, strength: 50 }))
+      .toBe('Steals gold touch (50-100)');
+  });
+
+  it('names the special, summon and radiate arms', () => {
+    const splits = defaultAbility();
+    splits.special.extra1 = 255;
+    expect(abilityName(MonstAbil.SPLITS, splits)).toBe('Splits when hit (25.5% chance)');
+
+    const summon = defaultAbility();
+    summon.summon = {
+      ...summon.summon, type: MonstSummon.SPECIES, what: Race.UNDEAD, min: 1, max: 3, chance: 100,
+    };
+    expect(abilityName(MonstAbil.SUMMON, summon)).toBe('Summons 1-3 undead (10.0% chance)');
+
+    const radiate = defaultAbility();
+    radiate.radiate = { ...radiate.radiate, type: FieldType.WALL_FIRE };
+    expect(abilityName(MonstAbil.RADIATE, radiate)).toBe('Radiates fire fields');
+    // Two field kinds replace the whole string rather than adding to it.
+    radiate.radiate.type = FieldType.FIELD_DISPEL;
+    expect(abilityName(MonstAbil.RADIATE, radiate)).toBe('Dispels surrounding fields');
+  });
+});
+
+describe('story_dialog, the paginated node', () => {
+  beforeAll(async () => {
+    if (!hasDialogDef('many-str')) await addDialogDef('many-str', readDialog('many-str'));
+  });
+
+  it('walks the string range, stopping at the first page', () => {
+    const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
+    const strs = univ.scenario.specStrs;
+    const dlg = storyDialog(fakeCtx(), new SheetStore(), univ, 'A Story', 1, 3,
+      SpecCtxType.SCEN, 0, 4);
+    expect(dlg.getText('title')).toBe('A Story');
+    expect(dlg.getText('str')).toBe(strs[1]);
+    dlg.onClick(...centreOf(dlg, 'right'));
+    expect(dlg.getText('str')).toBe(strs[2]);
+    dlg.onClick(...centreOf(dlg, 'left'));
+    expect(dlg.getText('str')).toBe(strs[1]);
+    // Back on the first page goes nowhere rather than closing.
+    dlg.onClick(...centreOf(dlg, 'left'));
+    expect(dlg.getText('str')).toBe(strs[1]);
+  });
+
+  it('closes when Next is pressed on the last page', () => {
+    const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
+    const dlg = storyDialog(fakeCtx(), new SheetStore(), univ, 'A Story', 1, 2,
+      SpecCtxType.SCEN, 0, 4);
+    // The C++'s `else if(clicked == "done" || cur == last)` is reached by
+    // anything that isn't Back, so Next on the last page dismisses it.
+    expect(dlg.onClick(...centreOf(dlg, 'right'))).toBe(null);
+    expect(dlg.onClick(...centreOf(dlg, 'right'))).toBe('right');
   });
 });

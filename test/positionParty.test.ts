@@ -37,6 +37,7 @@ beforeAll(async () => {
 class TestHost implements SpecialHost {
   async message(): Promise<void> {}
   async choice(_strs: string[], buttons: string[]): Promise<number> { return buttons.length - 1; }
+  async story(): Promise<void> {}
   async askText(): Promise<string> { return ''; }
   async selectPc(): Promise<number> { return 0; }
   startShop(): boolean { return true; }

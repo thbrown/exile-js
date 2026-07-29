@@ -50,6 +50,7 @@ class TrapHost implements SpecialHost {
     this.strs.push(strs);
     return this.answer;
   }
+  async story(): Promise<void> {}
   async askText(): Promise<string> { return ''; }
   async selectPc(prompt: string): Promise<number> {
     this.prompts.push(prompt);

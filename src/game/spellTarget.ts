@@ -158,10 +158,11 @@ export async function castTownSpell(session: GameSession, where: Location): Prom
         break;
       }
       if (spell === Spell.SCRY_MONSTER) {
-        // TODO(M6): display_monst's info dialog. The note itself is the part
-        // that lasts, so it is what's kept.
         univ.party.mNoted.add(monst.number);
         univ.addStringToBuf(`  ${monst.mon.name} noted.`);
+        // `adjust_monst_menu()` then `display_monst(0, monst, 0)`: the sheet
+        // opens on this one creature, with the roster arrows hidden.
+        session.onShowMonster?.(monst);
       } else recordMonst(univ, monst);
       break;
     }

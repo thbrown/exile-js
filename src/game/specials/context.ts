@@ -85,6 +85,14 @@ export interface SpecialHost {
   choice(
     strs: string[], buttons: string[], title: string, pic: number, picType: number,
   ): Promise<number>;
+  /**
+   * `story_dialog` (boe.items.cpp:611) — a title and a *range* of strings to
+   * page through with Back and Next, on `many-str.xml`.
+   */
+  story(
+    title: string, first: number, last: number,
+    strType: SpecCtxType, pic: number, picType: number,
+  ): Promise<void>;
   /** get_text_response — a typed answer, for IF_TEXT_RESPONSE. */
   askText(prompt: string): Promise<string>;
   /** select_pc, for the nodes that need a specific party member. */
