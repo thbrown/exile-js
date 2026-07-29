@@ -41,11 +41,13 @@ beforeEach(() => {
 /** A host that answers the trap's two questions however the test says. */
 class TrapHost implements SpecialHost {
   buttons: string[][] = [];
+  strs: string[][] = [];
   prompts: string[] = [];
   constructor(private answer: number, private pc = 0) {}
   async message(): Promise<void> {}
-  async choice(_s: string[], buttons: string[]): Promise<number> {
+  async choice(strs: string[], buttons: string[]): Promise<number> {
     this.buttons.push(buttons);
+    this.strs.push(strs);
     return this.answer;
   }
   async askText(): Promise<string> { return ''; }
@@ -146,6 +148,30 @@ describe('the ONCE_TRAP node', () => {
     await session.runSpecial(SpecCtx.TOWN_LOOK, SpecCtxType.TOWN, 90, { x: 5, y: 5 });
     expect(host.prompts).toEqual(['Trap! Who will disarm?']);
     expect(session.univ.party.getSdf(0, 7)).toBe(ONCE_DONE);
+  });
+
+  it('asks with m1 and m2 alone, not with the five strings after m1', async () => {
+    // ONCE_TRAP takes the *pair* overload of get_strs (boe.specials.cpp:2685).
+    // Reading a six-string run instead pulled in whatever followed m1 in the
+    // town's list — for Fort Talrus, strings 12 and 13, which are the front
+    // gate's "Do you wish to leave the scenario?".
+    trapNode();
+    const host = new TrapHost(0);
+    session.attachSpecials(host);
+    await session.runSpecial(SpecCtx.TOWN_LOOK, SpecCtxType.TOWN, 90, { x: 5, y: 5 });
+    expect(host.strs[0]).toHaveLength(1);
+    expect(host.strs[0]![0]).toContain("commander clearly doesn't want anyone");
+    expect(host.strs[0]!.join(' ')).not.toContain('leave the scenario');
+  });
+
+  it('shows m2 as well when the node carries a continuation', async () => {
+    trapNode();
+    session.univ.town!.record.specials.get(90)!.m2 = 13;
+    const host = new TrapHost(0);
+    session.attachSpecials(host);
+    await session.runSpecial(SpecCtx.TOWN_LOOK, SpecCtxType.TOWN, 90, { x: 5, y: 5 });
+    expect(host.strs[0]).toHaveLength(2);
+    expect(host.strs[0]![1]).toContain('leave the scenario');
   });
 
   it('a node with no message of its own asks the stock question', async () => {

@@ -212,8 +212,12 @@ export async function oneshotSpec(
       // not a notice, and note the buttons are No first, Yes second.
       let refused: boolean;
       if (spec.m1 >= 0 || spec.m2 >= 0) {
-        const strs = messageRun(univ, ctx, spec.m1);
-        if (spec.m2 >= 0) strs.push(...messageRun(univ, ctx, spec.m2));
+        // The *pair* overload of get_strs, not the six-string run
+        // (boe.specials.cpp:2685): exactly m1 and m2. Reading a run here pulled
+        // in whatever five strings happened to follow m1 in the town's list,
+        // so the commander's chest asked about leaving the scenario.
+        const strs = univ.getStrs(ctx.curSpecType, spec.m1, spec.m2)
+          .filter((s) => s !== '');
         refused = await ctx.host.choice(
           strs, [buttonLabel(3), buttonLabel(2)], '', spec.pic, spec.pictype) === 0;
       } else {

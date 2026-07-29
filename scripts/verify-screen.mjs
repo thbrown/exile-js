@@ -888,7 +888,14 @@ await press('ArrowUp');
 await page.waitForTimeout(300);
 const trapAsked = await page.evaluate(() => {
   const d = window.__dialogs.active;
-  return d ? { buttons: d.spec.buttons.map((b) => b.label), text: d.spec.text.slice(0, 45) } : null;
+  // `fullText` is checked below: ONCE_TRAP takes only m1 and m2, and reading a
+  // six-string run instead dragged the front gate's "leave the scenario"
+  // question in behind the commander's belongings.
+  return d ? {
+    buttons: d.spec.buttons.map((b) => b.label),
+    text: d.spec.text.slice(0, 45),
+    bled: d.spec.text.includes('leave the scenario'),
+  } : null;
 });
 // Say No: the one-shot flag stays unset so the trap is still there.
 await press('n');
@@ -930,6 +937,8 @@ await press('Escape');
 await page.waitForTimeout(200);
 console.log('TRAP:', JSON.stringify({ trapSetup, trapAsked, trapRefused, trapAgain, trapWho, trapRan }));
 if (!trapAsked) throw new Error('the trap node put up no dialog');
+if (trapAsked.bled)
+  throw new Error('the trap dialog ran past m1 into the strings after it');
 if (trapAsked.buttons.join(',') !== 'No,Yes')
   throw new Error(`trap buttons were ${trapAsked.buttons.join(',')}`);
 if (trapRefused.sd === 250) throw new Error('refusing the trap still marked it done');

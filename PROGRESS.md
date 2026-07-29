@@ -2411,3 +2411,23 @@ playthrough will hit it:
     window shift, TOWN_RELOCATE's real meaning and both halves of Word of
     Recall. `verify-screen.mjs` gained a step that casts it for real at the end
     of the outdoor run and checks all four coordinates and the spell points.
+
+- **The trap dialog that asked about leaving the scenario (2026-07-28).**
+  Reported from play-testing: looking at Commander Terrance's chest put up the
+  right Yes/No prompt, but the commander's belongings were mixed in with a
+  question about leaving the scenario. `ONCE_TRAP` was reading its message with
+  the **six-string run** overload of `get_strs` — the one that walks
+  `m1, m1+1, … m1+5` and stops only at the end of the list. Its C++ arm takes
+  the *pair* overload instead (boe.specials.cpp:2685): exactly `m1` and `m2`.
+  Fort Talrus's trap is `msg 11`, and town 0's strings 12 and 13 belong to the
+  front gate — "Do you wish to leave the scenario?" — so they came along.
+  - Which of the two overloads a node uses is per-node and not guessable from
+    the opcode group. The run form is right for `ONCE_DIALOG` (via
+    `once_dialog`, 3choice.cpp:205), `ONCE_GIVE_ITEM_DIALOG`, `TOWN_LEVER`,
+    `TOWN_PORTAL` and `TOWN_STAIR`; the pair form for `ONCE_TRAP`,
+    `DISPLAY_SM_MSG`, `PRINT_NUMS`, `IF_TEXT_RESPONSE`, the text label and
+    `handle_message` itself. All the others in this port were already right —
+    `ONCE_TRAP` was the only one on the wrong side.
+  - Tests: `test/trap.test.ts` gained two — that the prompt is m1 alone, and
+    that setting m2 adds exactly one more string. `verify-screen.mjs`'s trap
+    step now fails if the dialog text reaches "leave the scenario".
