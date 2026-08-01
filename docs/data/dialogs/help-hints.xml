@@ -1,0 +1,24 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<?xml-stylesheet href="dialog.xsl" type="text/xsl"?>
+<dialog defbtn='okay' escbtn='okay'>
+	<pict type='dlog' num='24' top='6' left='6'/>
+	<text size='large' top='6' left='50' width='84' height='13'>Need a Hint?</text>
+	<text relative='pos-in pos' rel-anchor='prev' top='10' left='0' width='474' height='25'>
+		Can't get into the School of Magery?
+		The Valley plague getting you down?
+		Can't get to the end of the Za-Khazi Run in time?
+		Help is available!
+	</text>
+	<text name='hints' relative='pos-in pos' rel-anchor='prev' top='6' left='16' colour='link' underline='true'>
+		https://openboe.com/docs/game/Hints.html
+	</text>
+	<text size='large' relative='neg pos' rel-anchor='prev' top='5' left='16' width='131' height='18'>Bugs and Stuff:</text>
+	<text relative='pos-in pos' rel-anchor='prev' top='10' left='0' width='475' height='25'>
+		Alas, though we're trying, we haven't gotten all the bugs and typos out of Open Blades of Exile.
+		Should you find one, open a ticket here:
+	</text>
+	<text name=	'issues' relative='pos-in pos' rel-anchor='prev' top='6' left='16' colour='link' underline='true'>
+		https://github.com/calref/cboe/issues
+	</text>
+	<button name='okay' type='regular' top='142' left='471'>OK</button>
+</dialog>

@@ -94,7 +94,10 @@ async function main(): Promise<void> {
   applyPaceFromQuery();
   const name = scenarioFromQuery();
   status.textContent = `Loading ${name}…`;
-  const fetchText = async (url: string): Promise<string> => (await fetch(url)).text();
+  // Root-relative URLs (`/data/...`) get GH Pages' repo-subpath base prefixed
+  // in production builds; import.meta.env.BASE_URL is '/' in dev.
+  const fetchText = async (url: string): Promise<string> =>
+    (await fetch(import.meta.env.BASE_URL + url.replace(/^\//, ''))).text();
   const opcodes = await loadOpcodes(fetchText);
   // Shops name their stock out of the string resources while parsing, so these
   // have to be in place before the scenario loads.
@@ -104,7 +107,7 @@ async function main(): Promise<void> {
   await loadDialogDefs(fetchText,
     ['pc-info', 'quest-info', 'get-items', 'item-info', 'many-str', 'monster-info', 'job-board', 'pick-potion',
      ...STR_DIALOG_DEFS]);
-  const scen = await loadScenario(new FetchSource(`/scenarios/${name}/`), opcodes);
+  const scen = await loadScenario(new FetchSource(`${import.meta.env.BASE_URL}scenarios/${name}/`), opcodes);
 
   const store = new SheetStore();
   const sheets = [

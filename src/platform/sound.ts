@@ -38,7 +38,7 @@ export class SoundPlayer {
   private pending = new Set<number>();
   enabled = true;
 
-  constructor(private baseUrl = '/data/sounds/') {}
+  constructor(private baseUrl = `${import.meta.env.BASE_URL}data/sounds/`) {}
 
   /** Call from a user-gesture handler; safe to call repeatedly. */
   async resume(): Promise<void> {

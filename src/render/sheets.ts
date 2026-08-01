@@ -35,7 +35,7 @@ export function findGraphic(pic: number): SheetPos {
 export class SheetStore {
   private images = new Map<string, ImageBitmap>();
 
-  async load(name: string, baseUrl = '/data/graphics/'): Promise<ImageBitmap> {
+  async load(name: string, baseUrl = `${import.meta.env.BASE_URL}data/graphics/`): Promise<ImageBitmap> {
     const existing = this.images.get(name);
     if (existing) return existing;
     const resp = await fetch(`${baseUrl}${name}.png`);

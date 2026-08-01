@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<!-- NOTE: This file should be updated to use relative positioning the next time it changes. -->
+<?xml-stylesheet href="dialog.xsl" type="text/xsl"?>
+<dialog defbtn='okay' escbtn='cancel'>
+	<pict type='dlog' num='16' top='8' left='8'/>
+	<tilemap name='map' framed='true' top='12' left='60' rows='4' cols='4'>
+		<pict framed='false' type='ter' num='0' top='0' left='0'/>
+	</tilemap>
+	<text top='166' left='130' width='10' height='16'>X</text>
+	<text top='166' left='180' width='10' height='16'>Y</text>
+	<text top='186' left='10' width='100' height='16'>Object Size:</text>
+	<field name='w' type='uint' top='184' left='120' width='40' height='16'/>
+	<field name='h' type='uint' top='184' left='170' width='40' height='16'/>
+	<text top='208' left='10' width='100' height='28'>Position of this tile in object:</text>
+	<field name='x' type='uint' top='212' left='120' width='40' height='16'/>
+	<field name='y' type='uint' top='212' left='170' width='40' height='16'/>
+	<text top='242' left='10' width='100' height='16'>Object unique ID:</text>
+	<field name='id' type='uint' top='240' left='120' width='50' height='16'/>
+	<button name='cancel' type='regular' top='264' left='85'>Cancel</button>
+	<button name='okay' type='regular' top='264' left='150'>OK</button>
+</dialog>

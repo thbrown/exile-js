@@ -1,0 +1,49 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<!-- NOTE: This file should be updated to use relative positioning the next time it changes. -->
+<?xml-stylesheet href="dialog.xsl" type="text/xsl"?>
+<dialog defbtn='okay' escbtn='cancel'>
+	<field name='group1-monst1' type='uint' top='137' left='174' width='39' height='16'/><button name='pick1-monst1' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group1-monst2' type='uint' top='165' left='174' width='39' height='16'/><button name='pick1-monst2' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group1-monst3' type='uint' top='193' left='174' width='39' height='16'/><button name='pick1-monst3' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group1-monst4' type='uint' top='221' left='174' width='39' height='16'/><button name='pick1-monst4' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group2-monst1' type='uint' top='137' left='239' width='39' height='16'/><button name='pick2-monst1' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group2-monst2' type='uint' top='165' left='239' width='39' height='16'/><button name='pick2-monst2' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group2-monst3' type='uint' top='193' left='239' width='39' height='16'/><button name='pick2-monst3' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group2-monst4' type='uint' top='221' left='239' width='39' height='16'/><button name='pick2-monst4' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group3-monst1' type='uint' top='137' left='304' width='39' height='16'/><button name='pick3-monst1' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group3-monst2' type='uint' top='165' left='304' width='39' height='16'/><button name='pick3-monst2' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group3-monst3' type='uint' top='193' left='304' width='39' height='16'/><button name='pick3-monst3' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group3-monst4' type='uint' top='221' left='304' width='39' height='16'/><button name='pick3-monst4' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group4-monst1' type='uint' top='137' left='369' width='39' height='16'/><button name='pick4-monst1' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group4-monst2' type='uint' top='165' left='369' width='39' height='16'/><button name='pick4-monst2' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group4-monst3' type='uint' top='193' left='369' width='39' height='16'/><button name='pick4-monst3' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<field name='group4-monst4' type='uint' top='221' left='369' width='39' height='16'/><button name='pick4-monst4' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<button name='okay' type='regular' top='283' left='436'>OK</button>
+	<button name='cancel' type='regular' relative='neg pos-in' rel-anchor='prev' top='0' left='71'>Cancel</button>
+	<text top='6' left='50' width='256' height='17'>Town wandering monsters</text>
+	<text top='25' left='50' width='439' height='40'>
+		Wandering monsters in towns appear in groups of up to 5.
+		Enter the numbers of the wandering monsters in each group type,
+		or press the small button next to each field to choose the appearing
+		monsters from a list.
+	</text>
+	<text top='68' left='50' width='437' height='40'>
+		A group of wandering monsters contains one each of the first three monsters, and 1 or 2 of the fourth.
+		Leave a field at 0 for no monster to appear.
+	</text>
+	<text top='115' left='166' width='58' height='14'>Group 1</text>
+	<pict type='dlog' num='16' top='8' left='8'/>
+	<text top='115' left='231' width='58' height='14'>Group 2</text>
+	<text top='115' left='294' width='58' height='14'>Group 3</text>
+	<text top='115' left='357' width='58' height='14'>Group 4</text>
+	<text top='138' left='8' width='150' height='14'>Monster 1 (1 appears)</text>
+	<text top='166' left='8' width='150' height='14'>Monster 2 (1 appears)</text>
+	<text top='194' left='8' width='150' height='14'>Monster 3 (1 appears)</text>
+	<text top='222' left='8' width='150' height='14'>Monster 4 (1-2 appears)</text>
+
+	<text top='250' left='8' width='150' height='30'>Locations<br/>(Any group can appear at any location)</text>
+	<text name='loc1' top='258' left='174' width='39' height='16'/><button name='pick-loc1' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<text name='loc2' top='258' left='239' width='39' height='16'/><button name='pick-loc2' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<text name='loc3' top='258' left='304' width='39' height='16'/><button name='pick-loc3' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+	<text name='loc4' top='258' left='369' width='39' height='16'/><button name='pick-loc4' type='tiny' relative='neg pos-in' rel-anchor='prev' top='2' left='20'></button>
+</dialog>
