@@ -43,7 +43,7 @@ import { Missile, setMissileSink } from './game/missileAnim';
 import { pickNextPc } from './game/combat';
 import { GameRng } from './core/rng';
 import { DialogHost } from './dialogs/dialog';
-import { getStr, loadStringTables } from './data/strings';
+import { STRING_TABLES, getStr, loadStringTables } from './data/strings';
 import { TerSpec } from './data/terrain';
 import { GameSession } from './game/session';
 import { TalkAction } from './game/talk';
@@ -84,6 +84,10 @@ function applyPaceFromQuery(): void {
   if (Number.isFinite(n) && n > 0) setCombatPace(n);
 }
 
+function hideLoadingUi(): void {
+  for (const id of ['spinner', 'loading-file', 'progress-wrap']) document.getElementById(id)?.classList.add('hidden');
+}
+
 async function main(): Promise<void> {
   const canvas = document.getElementById('canvas') as HTMLCanvasElement;
   const status = document.getElementById('status')!;
@@ -93,22 +97,33 @@ async function main(): Promise<void> {
 
   applyPaceFromQuery();
   const name = scenarioFromQuery();
+
+  // Progress UI: total starts at the fixed-size loads (opcodes, string
+  // tables, dialog defs, sheets, fonts, scenario.xml itself) and grows once
+  // the scenario header reveals how many town/sector files are still coming.
+  const progressBar = document.getElementById('progress-bar');
+  const loadingFile = document.getElementById('loading-file');
+  let total = 0;
+  let done = 0;
+  const addTotal = (n: number): void => { total += n; };
+  const tick = (label: string): void => {
+    done++;
+    if (progressBar) progressBar.style.width = `${Math.min(100, (done / Math.max(1, total)) * 100)}%`;
+    if (loadingFile) loadingFile.textContent = label;
+    status.textContent = `Loading ${name}… (${done}/${total})`;
+  };
   status.textContent = `Loading ${name}…`;
+
   // Root-relative URLs (`/data/...`) get GH Pages' repo-subpath base prefixed
   // in production builds; import.meta.env.BASE_URL is '/' in dev.
-  const fetchText = async (url: string): Promise<string> =>
-    (await fetch(import.meta.env.BASE_URL + url.replace(/^\//, ''))).text();
-  const opcodes = await loadOpcodes(fetchText);
-  // Shops name their stock out of the string resources while parsing, so these
-  // have to be in place before the scenario loads.
-  await loadStringTables(fetchText);
-  // The dialog definitions the player opens. The other ~150 belong to the
-  // scenario and character editors, which this port doesn't run.
-  await loadDialogDefs(fetchText,
-    ['pc-info', 'quest-info', 'get-items', 'item-info', 'many-str', 'monster-info', 'job-board', 'pick-potion',
-     ...STR_DIALOG_DEFS]);
-  const scen = await loadScenario(new FetchSource(`${import.meta.env.BASE_URL}scenarios/${name}/`), opcodes);
-
+  const fetchText = async (url: string): Promise<string> => {
+    const path = url.replace(/^\//, '');
+    const text = await (await fetch(import.meta.env.BASE_URL + path)).text();
+    tick(path);
+    return text;
+  };
+  // Sheets and fonts don't depend on the scenario data, so kick them off
+  // right away instead of waiting behind opcodes/strings/dialogs/scenario.
   const store = new SheetStore();
   const sheets = [
     ...CHROME_SHEETS,
@@ -121,18 +136,39 @@ async function main(): Promise<void> {
     'scenpics', 'bigscenpics',
   ];
   for (let i = 1; i <= 11; i++) sheets.push(`monst${i}`);
-  await Promise.all(sheets.map((s) => store.load(s)));
+  const dialogNames = ['pc-info', 'quest-info', 'get-items', 'item-info', 'many-str', 'monster-info', 'job-board',
+    'pick-potion', ...STR_DIALOG_DEFS];
+  addTotal(1 /* opcodes */ + STRING_TABLES.length + dialogNames.length + sheets.length
+    + (document.fonts ? 4 : 0) + 1 /* scenario.xml */);
+
+  const sheetsReady = Promise.all(sheets.map((s) => store.load(s).then((r) => { tick(`data/graphics/${s}.png`); return r; })));
   // Fonts load lazily on first use, so `fonts.ready` alone isn't enough — ask
   // for each face explicitly or the first paint lays out with fallback metrics.
-  if (document.fonts) {
-    await Promise.all([
-      document.fonts.load('12px BoEPlain'),
-      document.fonts.load('bold 10px BoEBold'),
-      document.fonts.load('18px BoEDungeon'),
-      document.fonts.load('12px BoEMaidenword'),
-    ]);
-    await document.fonts.ready;
-  }
+  const fontsReady = document.fonts
+    ? Promise.all([
+      document.fonts.load('12px BoEPlain').then((r) => { tick('fonts/plain.ttf'); return r; }),
+      document.fonts.load('bold 10px BoEBold').then((r) => { tick('fonts/bold.ttf'); return r; }),
+      document.fonts.load('18px BoEDungeon').then((r) => { tick('fonts/dungeon.ttf'); return r; }),
+      document.fonts.load('12px BoEMaidenword').then((r) => { tick('fonts/maidenword.ttf'); return r; }),
+    ]).then(() => document.fonts.ready)
+    : Promise.resolve();
+
+  // Shops name their stock out of the string resources while parsing, so
+  // strings have to be in place before the scenario loads; opcodes and the
+  // dialog defs (the ~60 of 211 the player needs) have no such ordering
+  // requirement, so all three load concurrently.
+  const [opcodes] = await Promise.all([
+    loadOpcodes(fetchText),
+    loadStringTables(fetchText),
+    loadDialogDefs(fetchText, dialogNames),
+  ]);
+  const scen = await loadScenario(
+    new FetchSource(`${import.meta.env.BASE_URL}scenarios/${name}/`, tick),
+    opcodes,
+    addTotal,
+  );
+
+  await Promise.all([sheetsReady, fontsReady]);
 
   const univ = new Universe(scen, new GameRng(), PartyPreset.DEFAULT);
   const session = new GameSession(univ);
@@ -1573,6 +1609,7 @@ async function main(): Promise<void> {
     return new Promise<void>((resolve) => { setTimeout(resolve, ms); });
   });
 
+  hideLoadingUi();
   setStatus();
   redraw();
   setInterval(() => {
@@ -1610,6 +1647,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
+  hideLoadingUi();
   document.getElementById('status')!.textContent = `Error: ${err}`;
   console.error(err);
 });

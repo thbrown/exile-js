@@ -12,13 +12,15 @@ export interface ScenarioSource {
 }
 
 export class FetchSource implements ScenarioSource {
-  constructor(private baseUrl: string) {
+  /** Called after each file finishes fetching, so a caller can drive a progress bar. */
+  constructor(private baseUrl: string, private onLoad?: (path: string) => void) {
     if (!this.baseUrl.endsWith('/')) this.baseUrl += '/';
   }
 
   private async get(path: string): Promise<Response> {
     const resp = await fetch(this.baseUrl + path);
     if (!resp.ok) throw new Error(`failed to fetch ${this.baseUrl}${path}: ${resp.status}`);
+    this.onLoad?.(path);
     return resp;
   }
 

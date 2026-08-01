@@ -21,11 +21,15 @@ import { parseXmlDoc } from './xml';
 export async function loadScenario(
   src: ScenarioSource,
   opcodes: Map<string, SpecType>,
+  // Fired once the header is parsed and the remaining file count is known,
+  // so a caller can size a progress bar before the town/sector fetches start.
+  onExtraFilesKnown?: (count: number) => void,
 ): Promise<Scenario> {
   const hdr = readScenarioFromXml(
     await parseXmlDoc(await src.getText('scenario.xml'), 'scenario.xml'),
   );
   const scen = emptyScenario(hdr);
+  onExtraFilesKnown?.(4 + scen.numTowns * 4 + scen.outWidth * scen.outHeight * 3);
 
   scen.terTypes = readTerrainFromXml(
     await parseXmlDoc(await src.getText('terrain.xml'), 'terrain.xml'),
@@ -41,40 +45,48 @@ export async function loadScenario(
   for (const shop of scen.shops) shop.refreshItems(scen.scenItems);
   scen.scenSpecials = parseSpecials(await src.getText('scenario.spec'), opcodes, 'scenario.spec');
 
+  // Each town/sector's own files are fetched up front (promises started
+  // immediately, not awaited yet) so the network runs them concurrently;
+  // they're still awaited and parsed in original order below, so
+  // scen.boats/horses and the push order stay exactly as sequential as
+  // before — only the I/O overlaps, not the parsing.
+  const townFetches = Array.from({ length: scen.numTowns }, (_, t) => {
+    const base = `towns/town${t}`;
+    return {
+      xml: src.getText(`${base}.xml`),
+      map: src.getText(`${base}.map`),
+      spec: src.getText(`${base}.spec`),
+      talk: src.getText(`towns/talk${t}.xml`),
+    };
+  });
   for (let t = 0; t < scen.numTowns; t++) {
     const base = `towns/town${t}`;
-    const town = readTownFromXml(
-      await parseXmlDoc(await src.getText(`${base}.xml`), `${base}.xml`),
-      `${base}.xml`,
-    );
+    const f = townFetches[t]!;
+    const town = readTownFromXml(await parseXmlDoc(await f.xml, `${base}.xml`), `${base}.xml`);
     loadTownMapData(
-      loadMap(await src.getText(`${base}.map`), true, `${base}.map`),
+      loadMap(await f.map, true, `${base}.map`),
       town, t, scen.boats, scen.horses, base,
     );
-    town.specials = parseSpecials(await src.getText(`${base}.spec`), opcodes, `${base}.spec`);
+    town.specials = parseSpecials(await f.spec, opcodes, `${base}.spec`);
     scen.towns.push(town);
-    scen.townTalk.push(
-      readDialogueFromXml(
-        await parseXmlDoc(await src.getText(`towns/talk${t}.xml`), `talk${t}.xml`),
-        t,
-        `talk${t}.xml`,
-      ),
-    );
+    scen.townTalk.push(readDialogueFromXml(await parseXmlDoc(await f.talk, `talk${t}.xml`), t, `talk${t}.xml`));
   }
 
+  const sectorFetches = Array.from({ length: scen.outWidth }, (_, x) => Array.from({ length: scen.outHeight }, (_, y) => {
+    const base = `out/out${x}~${y}`;
+    return { xml: src.getText(`${base}.xml`), map: src.getText(`${base}.map`), spec: src.getText(`${base}.spec`) };
+  }));
   for (let x = 0; x < scen.outWidth; x++) {
     scen.outdoors.push([]);
     for (let y = 0; y < scen.outHeight; y++) {
       const base = `out/out${x}~${y}`;
-      const sector = readOutdoorsFromXml(
-        await parseXmlDoc(await src.getText(`${base}.xml`), `${base}.xml`),
-        `${base}.xml`,
-      );
+      const f = sectorFetches[x]![y]!;
+      const sector = readOutdoorsFromXml(await parseXmlDoc(await f.xml, `${base}.xml`), `${base}.xml`);
       loadOutMapData(
-        loadMap(await src.getText(`${base}.map`), false, `${base}.map`),
+        loadMap(await f.map, false, `${base}.map`),
         sector, { x, y }, scen.boats, scen.horses, base,
       );
-      sector.specials = parseSpecials(await src.getText(`${base}.spec`), opcodes, `${base}.spec`);
+      sector.specials = parseSpecials(await f.spec, opcodes, `${base}.spec`);
       scen.outdoors[x]!.push(sector);
     }
   }
